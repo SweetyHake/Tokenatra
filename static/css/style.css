@@ -910,7 +910,6 @@ input[type="file"] { display: none; }
     width: 100%; height: 100%;
     max-width: 480px; max-height: 480px;
     cursor: grab; display: block;
-    image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;
 }
 #portraitCanvas:active { cursor: grabbing; }
 .portrait-controls { display: flex; flex-direction: column; gap: 5px; }
@@ -1959,3 +1958,6 @@ input[type="file"] { display: none; }
 
 /* Keep the left panel controls in document order instead of pinning the last row. */
 .context-panel-left .ctx-scroll > :last-child { margin-top: 0; }
+
+/* Keep the right panel flow in document order — export follows Портрет, not pinned to the bottom. */
+.context-panel-right .ctx-scroll > :last-child { margin-top: 0; }

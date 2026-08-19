@@ -25,6 +25,7 @@ const PortraitGenerator = {
         });
     },
 
+    quickSaveEnabled: false,
     saveFolder: null,
 
     init() {
@@ -35,6 +36,13 @@ const PortraitGenerator = {
         this.canvas.width = this.SIZE;
         this.canvas.height = this.SIZE;
 
+        this.quickSaveEnabled = !!(AppConfig.portraitQuickSaveEnabled);
+
+        const qsCheck = $('portraitQuickSaveCheck');
+        if (qsCheck) qsCheck.checked = this.quickSaveEnabled;
+        const qsRow = $('portraitQuickSaveFolderRow');
+        if (qsRow) qsRow.style.display = this.quickSaveEnabled ? 'flex' : 'none';
+
         const lastFolder = AppConfig.lastFolders.portrait;
         if (lastFolder) {
             this.saveFolder = lastFolder;
@@ -43,18 +51,42 @@ const PortraitGenerator = {
         }
 
         this._applyDisplaySize();
+        this._setupDisplaySizeObserver();
         this.setupEvents();
         this.setupControls();
         this.render();
     },
 
     _applyDisplaySize() {
-        const wrap = this.canvas.parentElement;
+        const wrap = this.canvas ? this.canvas.parentElement : null;
         if (!wrap) return;
         const availW = wrap.clientWidth || this.DISPLAY_SIZE;
         const side = Math.min(availW, this.DISPLAY_SIZE);
         this.canvas.style.width = side + 'px';
         this.canvas.style.height = side + 'px';
+    },
+
+    _setupDisplaySizeObserver() {
+        if (this._ro) { this._ro.disconnect(); this._ro = null; }
+        if (this._resizeHandler) {
+            window.removeEventListener('resize', this._resizeHandler);
+            this._resizeHandler = null;
+        }
+        const wrap = this.canvas ? this.canvas.parentElement : null;
+        if (!wrap) return;
+        if (typeof ResizeObserver !== 'undefined') {
+            this._ro = new ResizeObserver(() => {
+                this._applyDisplaySize();
+                this.requestRender();
+            });
+            this._ro.observe(wrap);
+        } else {
+            this._resizeHandler = () => {
+                this._applyDisplaySize();
+                this.requestRender();
+            };
+            window.addEventListener('resize', this._resizeHandler);
+        }
     },
 
     setupControls() {
@@ -64,8 +96,20 @@ const PortraitGenerator = {
         const saveBtn = $('portraitSaveBtn');
         if (saveBtn) saveBtn.onclick = () => this.save();
 
+        const qsCheck = $('portraitQuickSaveCheck');
+        if (qsCheck) {
+            qsCheck.checked = !!this.quickSaveEnabled;
+            qsCheck.onchange = e => {
+                this.quickSaveEnabled = e.target.checked;
+                AppConfig.setPortraitQuickSaveEnabled(this.quickSaveEnabled);
+                const qsRow = $('portraitQuickSaveFolderRow');
+                if (qsRow) qsRow.style.display = this.quickSaveEnabled ? 'flex' : 'none';
+                if (this.quickSaveEnabled && !this.saveFolder) this.pickFolder();
+            };
+        }
+
         const resetBtn = $('portraitResetBtn');
-        if (resetBtn) resetBtn.onclick = () => this.resetTransform();
+        if (resetBtn) resetBtn.onclick = e => { e.stopPropagation(); this.resetTransform(); };
 
         const scaleSlider = $('portraitScaleSlider');
         const scaleInput = $('portraitScaleInput');
@@ -262,7 +306,7 @@ const PortraitGenerator = {
         const fileName = (state.tokenFileName || 'token').trim() + '.webp';
         const blob = await new Promise(resolve => out.toBlob(resolve, 'image/webp', 0.95));
 
-        if (this.saveFolder) {
+        if (this.quickSaveEnabled && this.saveFolder) {
             await saveToFolder(blob, fileName, this.saveFolder);
         } else {
             await saveFileWithPicker(blob, fileName);

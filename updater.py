@@ -270,7 +270,7 @@ def download_update():
                     f.write(chunk)
                     downloaded += len(chunk)
                     if total:
-                        _state.set_download_progress(int(downloaded * 100 / total))
+                        _state.set_download_progress(min(100, int(downloaded * 100 / total)))
 
         if dest.stat().st_size < 1024 * 1024:
             dest.unlink(missing_ok=True)
@@ -284,8 +284,12 @@ def download_update():
         _state.complete_download(error=str(exc))
 
 
-def start_background_tasks(force=False):
-    Thread(target=lambda: check_for_updates(force=force), daemon=True).start()
+def start_background_tasks(force=False, delay=0):
+    def _run():
+        if delay > 0:
+            time.sleep(delay)
+        check_for_updates(force=force)
+    Thread(target=_run, daemon=True).start()
 
 
 def reset_check_state():

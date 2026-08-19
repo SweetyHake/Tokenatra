@@ -729,6 +729,20 @@ var TokenCanvas = {
                 // Инкрементальный кадр: только область кисти
                 var dr = this._strokeDirtyRect;
                 this._strokeDirtyRect = null;
+                // Кольцо не должно маскироваться: как в полном кадре, это базовая
+                // подложка под изображением (destination-in патча стирало бы его так же,
+                // как картинку — кольцо исчезало на время штриха и возвращалось на отпускании)
+                var cctx = this.ctx;
+                cctx.save();
+                cctx.beginPath();
+                cctx.rect(dr.x, dr.y, dr.w, dr.h);
+                cctx.clip();
+                cctx.clearRect(dr.x, dr.y, dr.w, dr.h);
+                if (ringImage) {
+                    cctx.drawImage(ringImage, ringOffset, ringOffset, ringSize, ringSize);
+                }
+                cctx.restore();
+
                 if (perf) {
                     // Превью: перерисовываем грязный регион в пониженном
                     // разрешении и растягиваем обратно (быстрее, но мягче)
@@ -740,9 +754,6 @@ var TokenCanvas = {
                     pctx.rect(sx, sy, sw, sh);
                     pctx.clip();
                     pctx.clearRect(sx, sy, sw, sh);
-                    if (ringImage) {
-                        pctx.drawImage(ringImage, ringOffset * k, ringOffset * k, ringSize * k, ringSize * k);
-                    }
                     pctx.translate(cx * k, cy * k);
                     pctx.rotate(state.imageRotation * Math.PI / 180);
                     pctx.drawImage(this._compositedImageCache, -w * k / 2, -h * k / 2, w * k, h * k);
@@ -759,36 +770,37 @@ var TokenCanvas = {
                     this.ctx.imageSmoothingQuality = 'high';
                     this.ctx.drawImage(pc, sx, sy, sw, sh, dr.x, dr.y, dr.w, dr.h);
                 } else {
-                    // Полное разрешение: кольцо рисуется ПОД изображением —
-                    // clearRect в патче стирает его в прозрачных (стёртых) областях,
-                    // поэтому подложку нужно восстановить до рисования композита
-                    var cctx = this.ctx;
-                    cctx.save();
-                    cctx.beginPath();
-                    cctx.rect(dr.x, dr.y, dr.w, dr.h);
-                    cctx.clip();
-                    cctx.clearRect(dr.x, dr.y, dr.w, dr.h);
-                    if (ringImage) {
-                        cctx.drawImage(ringImage, ringOffset, ringOffset, ringSize, ringSize);
-                    }
-                    cctx.restore();
+                    // Полное разрешение: изображение с маской собираем в offscreen-
+                    // канвасе и кладём поверх базового слоя кольца, чтобы
+                    // destination-in маски не стирал кольцо в грязном регионе
+                    var tctx = this._tempCtx;
+                    tctx.imageSmoothingEnabled = true;
+                    tctx.imageSmoothingQuality = 'high';
+                    tctx.save();
+                    tctx.beginPath();
+                    tctx.rect(dr.x, dr.y, dr.w, dr.h);
+                    tctx.clip();
+                    tctx.clearRect(dr.x, dr.y, dr.w, dr.h);
+                    tctx.translate(cx, cy);
+                    tctx.rotate(state.imageRotation * Math.PI / 180);
+                    tctx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
+                    tctx.restore();
+                    tctx.save();
+                    tctx.beginPath();
+                    tctx.rect(dr.x, dr.y, dr.w, dr.h);
+                    tctx.clip();
+                    tctx.globalCompositeOperation = 'destination-in';
+                    tctx.drawImage(state.maskCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
+                    tctx.globalCompositeOperation = 'source-over';
+                    tctx.restore();
+
                     cctx.save();
                     cctx.beginPath();
                     cctx.rect(dr.x, dr.y, dr.w, dr.h);
                     cctx.clip();
                     cctx.imageSmoothingEnabled = true;
                     cctx.imageSmoothingQuality = 'high';
-                    cctx.translate(cx, cy);
-                    cctx.rotate(state.imageRotation * Math.PI / 180);
-                    cctx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
-                    cctx.restore();
-                    cctx.save();
-                    cctx.beginPath();
-                    cctx.rect(dr.x, dr.y, dr.w, dr.h);
-                    cctx.clip();
-                    cctx.globalCompositeOperation = 'destination-in';
-                    cctx.drawImage(state.maskCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
-                    cctx.globalCompositeOperation = 'source-over';
+                    cctx.drawImage(this._tempCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
                     cctx.restore();
                 }
 

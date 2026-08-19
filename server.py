@@ -70,9 +70,47 @@ if getattr(sys, 'frozen', False):
     BASE_DIR = Path(os.environ.get('TOKENMAKER_DIR', Path(sys.executable).parent))
 else:
     BASE_DIR = Path(os.environ.get('TOKENMAKER_DIR', Path(__file__).parent))
-MODELS_DIR = BASE_DIR / "models"
+
+
+def _resolve_user_data_dir():
+    """Каталог для пользовательских данных (models/, config.json).
+    Установленные сборки лежат в Program Files и недоступны для записи
+    обычному пользователю — переходим в LOCALAPPDATA (как в updater.py)."""
+    candidates = [
+        BASE_DIR,
+        Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir()) / "Tokenatra",
+    ]
+    for cand in candidates:
+        try:
+            cand.mkdir(parents=True, exist_ok=True)
+            probe = cand / '.tokenatra_write_probe'
+            probe.write_text('x', encoding='utf-8')
+            probe.unlink()
+            return cand
+        except OSError:
+            continue
+    fallback = Path(tempfile.gettempdir()) / "Tokenatra"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+def config_file():
+    return USER_DATA_DIR / 'config.json'
+
+
+USER_DATA_DIR = _resolve_user_data_dir()
+MODELS_DIR = USER_DATA_DIR / "models"
 RING_DIR = BASE_DIR / "token_rings"
 MASK_PATH = BASE_DIR / "mask.png"
+
+# Встроенные кольца: имя файла (casefold) → отображаемое имя.
+# Имя — исходный русский текст; в UI переводится через I18n.t().
+BUILTIN_RINGS = {
+    'steel.webp': 'Сталь',
+    'ag-obsidian-red.webp': 'Красный обсидиан',
+    'ag-stormsteel.webp': 'Штормовая сталь',
+    'ag-wood-runic.png': 'Руническое дерево',
+}
 PRESET_DIR = BASE_DIR
 MODEL_DOWNLOAD_URL = os.environ.get('TOKENATRA_MODEL_URL', MODEL_DOWNLOAD_URL).strip()
 
@@ -97,7 +135,7 @@ def _migrate_legacy_model():
 def get_selected_model_path():
     """Путь к выбранной модели: config selected_model -> первая .onnx в models/."""
     try:
-        cfg_path = BASE_DIR / 'config.json'
+        cfg_path = config_file()
         if cfg_path.exists():
             cfg = json.loads(cfg_path.read_text(encoding='utf-8'))
             sel = cfg.get('selected_model')
@@ -113,6 +151,15 @@ def get_selected_model_path():
             return onnx_files[0]
     except Exception:
         pass
+    # Ручные модели рядом с exe (недоступны для записи, но читаются)
+    legacy = BASE_DIR / "models"
+    if legacy.resolve() != MODELS_DIR.resolve():
+        try:
+            onnx_files = sorted(legacy.glob('*.onnx'))
+            if onnx_files:
+                return onnx_files[0]
+        except Exception:
+            pass
     return MODELS_DIR / "model.onnx"
 
 
@@ -150,7 +197,7 @@ _PROVIDER_OPTIONS = None
 
 def _load_config():
     try:
-        cfg_path = BASE_DIR / 'config.json'
+        cfg_path = config_file()
         return json.loads(cfg_path.read_text(encoding='utf-8')) if cfg_path.exists() else {}
     except Exception:
         return {}
@@ -158,7 +205,7 @@ def _load_config():
 
 def _save_config(cfg):
     with CONFIG_LOCK:
-        (BASE_DIR / 'config.json').write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+        config_file().write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 def _read_device_cache():
@@ -503,7 +550,7 @@ def get_providers():
         """device_id для выбора дискретной карты на ноутбуках (гибридная графика).
         Задаётся в config.json ключом gpu_device_id (0, 1, ...)."""
         try:
-            cfg_path = BASE_DIR / 'config.json'
+            cfg_path = config_file()
             if cfg_path.exists():
                 import json
                 cfg = json.loads(cfg_path.read_text(encoding='utf-8'))
@@ -660,7 +707,7 @@ def _spawn_tune_child():
     try:
         if 'DmlExecutionProvider' not in _PROVIDERS or _PROVIDER_OPTIONS:
             return
-        cfg_path = BASE_DIR / 'config.json'
+        cfg_path = config_file()
         cfg = json.loads(cfg_path.read_text(encoding='utf-8')) if cfg_path.exists() else {}
         if isinstance(cfg.get('gpu_device_id'), int):
             return
@@ -946,7 +993,7 @@ def create_default_ring(size, color=(100, 100, 100), width=40):
 @app.route('/')
 def index():
     theme = 'indigo'
-    config_path = BASE_DIR / 'config.json'
+    config_path = config_file()
     if config_path.exists():
         try:
             import json
@@ -981,18 +1028,29 @@ def models_list():
         pass
     selected = get_selected_model_path()
     models = []
-    for f in sorted(MODELS_DIR.glob('*.onnx')):
-        if not f.is_file():
+    seen = set()
+    dirs = [MODELS_DIR]
+    legacy = BASE_DIR / "models"
+    if legacy.resolve() != MODELS_DIR.resolve():
+        dirs.append(legacy)
+    for d in dirs:
+        if not d.is_dir():
             continue
-        try:
-            size = f.stat().st_size
-        except OSError:
-            size = 0
-        models.append({
-            'name': f.name,
-            'size': size,
-            'selected': f.resolve() == selected.resolve(),
-        })
+        for f in sorted(d.glob('*.onnx')):
+            if not f.is_file():
+                continue
+            if f.name in seen:
+                continue
+            seen.add(f.name)
+            try:
+                size = f.stat().st_size
+            except OSError:
+                size = 0
+            models.append({
+                'name': f.name,
+                'size': size,
+                'selected': f.resolve() == selected.resolve(),
+            })
     return jsonify({
         'models': models,
         'models_dir': str(MODELS_DIR),
@@ -1006,7 +1064,12 @@ def select_model():
     filename = str(data.get('name', ''))
     p = MODELS_DIR / Path(filename).name
     if p.suffix.lower() != '.onnx' or not p.exists() or not p.is_file():
-        return jsonify({'error': 'Модель не найдена'}), 404
+        # Модель, положенная вручную рядом с exe (Program Files) — только чтение
+        legacy = BASE_DIR / "models" / Path(filename).name
+        if legacy.suffix.lower() == '.onnx' and legacy.is_file():
+            p = legacy
+        else:
+            return jsonify({'error': 'Модель не найдена'}), 404
 
     try:
         _activate_model(p)
@@ -1585,13 +1648,13 @@ def rings_list():
                 added_at = f.stat().st_ctime_ns
             except OSError:
                 added_at = 0
-            ring_files.append((f.name == 'Steel.webp', added_at, f.name.casefold(), f))
+            ring_files.append((f.name.casefold() in BUILTIN_RINGS, added_at, f.name.casefold(), f))
 
     rings = []
     mime_map = {'.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}
     for is_builtin, added_at, _, f in sorted(ring_files, key=lambda item: (not item[0], item[1], item[2])):
         rings.append({
-            'name': f.stem,
+            'name': BUILTIN_RINGS.get(f.name.casefold(), f.stem),
             'file': f.name,
             'mime': mime_map.get(f.suffix.lower(), 'image/png'),
             'builtin': is_builtin,
@@ -1607,7 +1670,7 @@ def delete_ring():
     safe = Path(filename).name
     if not safe or '/' in filename or '\\' in filename:
         return jsonify({'error': 'Некорректное имя файла'}), 400
-    if safe == 'Steel.webp':
+    if safe.casefold() in BUILTIN_RINGS:
         return jsonify({'error': 'Встроенное кольцо нельзя удалить'}), 403
 
     path = RING_DIR / safe
@@ -1854,7 +1917,7 @@ def get_image_by_path():
 
 @app.route('/config', methods=['GET'])
 def get_config():
-    config_path = BASE_DIR / 'config.json'
+    config_path = config_file()
     if not config_path.exists():
         return jsonify({})
     try:
@@ -1865,7 +1928,7 @@ def get_config():
 
 @app.route('/config', methods=['POST'])
 def save_config():
-    config_path = BASE_DIR / 'config.json'
+    config_path = config_file()
     try:
         data = request.get_json(force=True, silent=True)
         if not isinstance(data, dict):

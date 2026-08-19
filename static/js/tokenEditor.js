@@ -431,36 +431,31 @@ const TokenEditor = {
     },
 
     setupAccordions() {
-        function toggle(headerId, bodyId, arrowId) {
+        function toggle(headerId, bodyId, arrowId, onOpen) {
             var header = $(headerId);
             var body = $(bodyId);
             var arrow = $(arrowId);
             if (!header || !body) return;
             header.onclick = function(e) {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') return;
+                if (e.target.closest('.accordion-reset-btn')) return;
                 var isOpen = body.classList.toggle('open');
                 if (arrow) arrow.classList.toggle('open', isOpen);
                 if (isOpen) {
+                    if (onOpen) onOpen();
                     setTimeout(function() { body.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
                 }
             };
         }
         toggle('shadowAccordion', 'dropShadowSettings', 'shadowArrow');
         toggle('ccAccordion', 'colorCorrectionSettings', 'ccArrow');
-
-        document.querySelectorAll('.tab-btn').forEach(function(btn) {
-            btn.onclick = function() {
-                document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
-                document.querySelectorAll('.tab-content').forEach(function(c) { c.style.display = 'none'; });
-                btn.classList.add('active');
-                var tab = $(btn.dataset.tab);
-                if (tab) tab.style.display = 'flex';
-                if (btn.dataset.tab === 'portraitTab' && typeof PortraitGenerator !== 'undefined') {
-                    PortraitGenerator._applyDisplaySize();
-                    PortraitGenerator.render();
-                }
-            };
+        toggle('portraitAccordion', 'portraitSettings', 'portraitArrow', function() {
+            if (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) {
+                PortraitGenerator._applyDisplaySize();
+                PortraitGenerator.render();
+            }
         });
+        toggle('exampleAccordion', 'exampleSettings', 'exampleArrow');
     },
 
     setupCheckboxes() {
@@ -863,7 +858,6 @@ const TokenEditor = {
         const cfg = AppConfig.example;
 
         const check = $('exampleCheck');
-        const settings = $('exampleSettings');
         const opacitySlider = $('exampleOpacitySlider');
         const opacityVal = $('exampleOpacityVal');
         const scaleSelect = $('exampleScaleSelect');
@@ -876,7 +870,6 @@ const TokenEditor = {
         state.exampleScaleMode = cfg.scaleMode;
 
         if (check) check.checked = cfg.enabled;
-        if (settings) settings.style.display = cfg.enabled ? 'flex' : 'none';
         if (opacitySlider) opacitySlider.value = cfg.opacity;
         if (opacityVal) opacityVal.textContent = cfg.opacity;
         if (scaleSelect) scaleSelect.value = cfg.scaleMode;
@@ -897,7 +890,6 @@ const TokenEditor = {
         if (check) {
             check.onchange = e => {
                 state.exampleEnabled = e.target.checked;
-                if (settings) settings.style.display = state.exampleEnabled ? 'flex' : 'none';
                 if (state.exampleEnabled && !state.exampleImage) {
                     this._loadDefaultExample(fileName);
                 }
@@ -945,12 +937,23 @@ const TokenEditor = {
 
         const resetBtn = $('exampleResetBtn');
         if (resetBtn) {
-            resetBtn.onclick = () => {
+            resetBtn.onclick = e => {
+                e.stopPropagation();
+                const def = AppConfig._defaults().example;
                 urlManager.revoke('example-custom');
                 state._exampleCustomUrl = null;
                 state.exampleImage = null;
+                state.exampleOpacity = def.opacity / 100;
+                state.exampleScaleMode = def.scaleMode;
                 if (fileName) fileName.textContent = 'example.png';
+                if (opacitySlider) opacitySlider.value = def.opacity;
+                if (opacityVal) opacityVal.textContent = def.opacity;
+                if (scaleSelect) scaleSelect.value = def.scaleMode;
+                AppConfig.setExample('opacity', def.opacity);
+                AppConfig.setExample('scaleMode', def.scaleMode);
                 this._loadDefaultExample(fileName);
+                TokenCanvas.render();
+                toast('Пример сброшен');
             };
         }
     },

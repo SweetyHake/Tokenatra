@@ -2,7 +2,7 @@
 ; Install Inno Setup from https://jrsoftware.org/isdl.php first
 
 #define MyAppName "Tokenatra"
-#define MyAppVersion "26.1.0"
+#define MyAppVersion "26.1.1"
 #define MyAppPublisher "SweetyHake"
 #define MyAppURL "https://github.com/SweetyHake/Tokenatra"
 #define MyAppExeName "Tokenatra.exe"

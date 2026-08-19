@@ -613,6 +613,7 @@ function initUpdateNotify() {
                     badge.hidden = false;
                     badge.dataset.tooltip = 'Доступно обновление v' + d.update_tag;
                 }
+                toast('Доступно обновление v' + d.update_tag);
                 return;
             }
             if (tries++ < 20) setTimeout(poll, 2000);
@@ -719,6 +720,7 @@ function pollAboutUpdate(retries) {
             return;
         }
         if (d.download_done) {
+            aboutUpdateShowProgress(100);
             aboutUpdateSetStatus('Обновление <b>' + (d.update_tag || '') + '</b> скачано. Установить сейчас?');
             if (actions) actions.innerHTML =
                 '<button class="accent-btn accent-btn-compact" onclick="applyAboutUpdate()">Установить</button>' +
@@ -757,10 +759,8 @@ function pollAboutUpdate(retries) {
             return;
         }
         if (d.update_checked) {
-            aboutUpdateSetStatus('Обновлений нет — у вас последняя версия');
-            if (actions) actions.innerHTML = '<button class="about-link" onclick="hideAboutUpdate()">Закрыть</button>';
-            aboutUpdating = false;
-            if ($('checkUpdatesBtn')) $('checkUpdatesBtn').disabled = false;
+            hideAboutUpdate();
+            toast('Обновлений нет — у вас последняя версия');
             return;
         }
         if (retries > 0) setTimeout(() => pollAboutUpdate(retries - 1), 500);

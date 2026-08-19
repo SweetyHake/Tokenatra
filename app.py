@@ -314,7 +314,7 @@ def main():
         pass
 
     _register_context_menu()
-    start_background_tasks()
+    start_background_tasks(delay=15)
 
     flask_thread = threading.Thread(
         target=lambda: app.run(host='127.0.0.1', port=PORT, debug=False, threaded=True, use_reloader=False),

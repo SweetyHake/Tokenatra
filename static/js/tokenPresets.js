@@ -291,7 +291,8 @@ const TokenPresets = {
                     item.dataset.ringName = ring.name;
                     const img = document.createElement('img');
                     img.src = `/ring_file/${encodeURIComponent(ring.file)}`;
-                    img.alt = ring.name;
+                    const localizedName = I18n.t(ring.name);
+                    img.alt = localizedName;
                     img.dataset.tooltip = ring.name;
                     item.appendChild(img);
                     if (!ring.builtin) {
@@ -299,7 +300,7 @@ const TokenPresets = {
                         delBtn.type = 'button';
                         delBtn.className = 'ring-del-btn';
                         delBtn.dataset.tooltip = 'Удалить кольцо';
-                        delBtn.setAttribute('aria-label', 'Удалить кольцо ' + ring.name);
+                        delBtn.setAttribute('aria-label', I18n.t('Удалить кольцо') + ' ' + localizedName);
                         delBtn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
                         delBtn.onclick = async event => {
                             event.stopPropagation();

@@ -89,6 +89,7 @@ const AppConfig = {
             selected_model: null,
             protectionEnabled: true,
             quickSaveEnabled: false,
+            portraitQuickSaveEnabled: false,
             panelWidths: {
                 left: 320,
                 right: 320
@@ -137,6 +138,7 @@ const AppConfig = {
                     ? def.protectionEnabled
                     : !!saved.protectionEnabled,
                 quickSaveEnabled: !!saved.quickSaveEnabled,
+                portraitQuickSaveEnabled: !!saved.portraitQuickSaveEnabled,
                 panelWidths: { ...def.panelWidths, ...(saved.panelWidths || {}) }
             };
         } catch {
@@ -170,6 +172,7 @@ const AppConfig = {
 get colorCorrectionEnabled() { return this._data.colorCorrectionEnabled; },
     get protectionEnabled() { return this._data.protectionEnabled; },
     get quickSaveEnabled() { return this._data.quickSaveEnabled; },
+    get portraitQuickSaveEnabled() { return this._data.portraitQuickSaveEnabled; },
 
     setTheme(val) { this._data.theme = val; this.save(); },
     setLanguage(val) { this._data.language = ['system', 'ru', 'en'].includes(val) ? val : 'system'; this.save(); },
@@ -181,6 +184,7 @@ get colorCorrectionEnabled() { return this._data.colorCorrectionEnabled; },
     setDropShadowEnabled(val) { this._data.dropShadowEnabled = !!val; this.save(); },
     setColorCorrectionEnabled(val) { this._data.colorCorrectionEnabled = !!val; this.save(); },
     setQuickSaveEnabled(val) { this._data.quickSaveEnabled = !!val; this.save(); },
+    setPortraitQuickSaveEnabled(val) { this._data.portraitQuickSaveEnabled = !!val; this.save(); },
     setHotkey(action, code) { this._data.hotkeys[action] = code; this.save(); },
     setDropShadow(key, val) { this._data.dropShadow[key] = val; this.save(); },
     setColorCorrection(key, val) { this._data.colorCorrection[key] = val; this.save(); },

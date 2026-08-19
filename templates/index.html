@@ -26,8 +26,8 @@
         <div class="tb-nav">
             <button class="nav-btn active" data-mode="token">Создание токена</button>
             <button class="nav-btn" data-mode="fileTools">Работа с файлами</button>
-            <button class="nav-btn nav-btn-utility" data-mode="settings" data-tooltip="Открыть настройки приложения">Настройки</button>
-            <button class="nav-btn nav-btn-utility" data-mode="about" data-tooltip="Открыть информацию о приложении">О программе</button>
+<button class="nav-btn nav-btn-utility" data-mode="settings">Настройки</button>
+            <button class="nav-btn nav-btn-utility" data-mode="about">О программе</button>
         </div>
         <div class="tb-spacer"></div>
         <div class="window-controls" id="windowControls">
@@ -119,6 +119,28 @@
                         <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="scaleSlider" min="10" max="300" step="1" value="100"><input type="number" id="scaleInput" class="slider-number" value="100" min="10" max="300"><span class="slider-unit">%</span></div>
                         <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="rotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="rotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
                     </div>
+                    <div class="ctx-divider"></div>
+                    <div class="accordion-header" id="exampleAccordion">
+                        <div class="accordion-header-left">
+                            <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            Пример
+                        </div>
+                        <div class="accordion-header-right">
+                            <button class="accordion-reset-btn" id="exampleResetBtn" data-tooltip="Сбросить настройки примера" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                            <label class="effect-check" onclick="event.stopPropagation()"><input type="checkbox" id="exampleCheck"><span class="check-box"></span></label>
+                            <span class="accordion-arrow" id="exampleArrow">▶</span>
+                        </div>
+                    </div>
+                    <div class="accordion-body example-settings" id="exampleSettings">
+                        <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="exampleOpacitySlider" min="0" max="100" step="1" value="50"><span class="slider-value" id="exampleOpacityVal">50</span><span class="slider-unit">%</span></div>
+                        <div class="field-row field-row-compact"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="exampleScaleSelect"><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option></select></div>
+                        <div class="field-row field-row-compact">
+                            <span class="field-row-label field-row-label-tiny">Файл:</span>
+                            <span id="exampleFileName" class="example-file-name">example.png</span>
+                            <button class="link-btn link-btn-tiny" id="exampleFileBtn">Файл</button>
+                        </div>
+                        <input type="file" id="exampleFileInput" accept="image/*">
+                    </div>
                 </div>
             </div>
             <div class="resize-handle" id="leftPanelHandle"></div>
@@ -195,35 +217,29 @@
 
                         <div class="ctx-divider"></div>
 
-                        <div class="ctx-subtitle"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Превью</div>
-                        <div class="tab-bar">
-                            <button class="tab-btn active" data-tab="exampleTab">Пример</button>
-                            <button class="tab-btn" data-tab="portraitTab">Портрет</button>
-                        </div>
-                        <div class="tab-content" id="exampleTab">
-                            <div class="toggle-row toggle-row-compact">
-                                <label class="toggle-label"><input type="checkbox" id="exampleCheck"><span class="toggle-track"></span></label>
-                                <span>Показывать</span>
+                        <div class="accordion-header" id="portraitAccordion">
+                            <div class="accordion-header-left">
+                                <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                Портрет
                             </div>
-                            <div id="exampleSettings" class="example-settings" style="display:none;">
-                                <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="exampleOpacitySlider" min="0" max="100" step="1" value="50"><span class="slider-value" id="exampleOpacityVal">50</span><span class="slider-unit">%</span></div>
-                                <div class="field-row field-row-compact"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="exampleScaleSelect"><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option></select></div>
-                                <div class="field-row field-row-compact">
-                                    <span class="field-row-label field-row-label-tiny">Файл:</span>
-                                    <span id="exampleFileName" class="example-file-name">example.png</span>
-                                    <button class="link-btn link-btn-tiny" id="exampleFileBtn">Файл</button>
-                                </div>
-                                <input type="file" id="exampleFileInput" accept="image/*">
-                                <button class="link-btn link-btn-tiny" id="exampleResetBtn"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Сбросить</button>
+                            <div class="accordion-header-right">
+                                <button class="accordion-reset-btn" id="portraitResetBtn" data-tooltip="Сбросить настройки портрета" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                                <span class="accordion-arrow" id="portraitArrow">▶</span>
                             </div>
                         </div>
-                        <div class="tab-content" id="portraitTab" style="display:none;">
+                        <div class="accordion-body" id="portraitSettings">
                             <div class="portrait-canvas-wrap"><canvas id="portraitCanvas"></canvas></div>
                             <div class="portrait-controls">
                                 <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="portraitScaleSlider" min="10" max="500" step="1" value="100"><input type="number" id="portraitScaleInput" class="slider-number" value="100" min="10" max="500"><span class="slider-unit">%</span></div>
                                 <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="portraitRotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="portraitRotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
-                                <button class="link-btn" id="portraitResetBtn"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Сбросить</button>
-                                <div class="portrait-folder-row"><span class="portrait-folder-name" id="portraitFolderName">Папка не выбрана</span><button class="ghost-btn ghost-btn-compact-sm" id="portraitFolderBtn"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Папка</button></div>
+                                <div class="toggle-row toggle-row-mt">
+                                    <label class="toggle-label"><input type="checkbox" id="portraitQuickSaveCheck"><span class="toggle-track"></span></label>
+                                    <span>Быстрое сохранение</span>
+                                </div>
+                                <div class="quick-save-folder-row" id="portraitQuickSaveFolderRow">
+                                    <span class="quick-save-folder-name" id="portraitFolderName">Папка не выбрана</span>
+                                    <button class="ghost-btn ghost-btn-compact-md" id="portraitFolderBtn"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Папка</button>
+                                </div>
                                 <button class="save-action primary save-action-block" id="portraitSaveBtn"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>Сохранить</button>
                             </div>
                         </div>
@@ -444,14 +460,14 @@
                                     <span id="modelStatusText">Проверка модели…</span>
                                     <span id="modelSizeLabel" class="model-size-label"></span>
                                 </div>
-                                    <div class="field-row"><span class="field-row-label">Модель:</span><select class="compact-select" id="modelSelect" data-tooltip="Выберите модель удаления фона" disabled><option>Загрузка…</option></select></div>
+                                    <div class="field-row"><span class="field-row-label">Модель:</span><select class="compact-select" id="modelSelect" disabled><option>Загрузка…</option></select></div>
                                 <div class="settings-model-path"><span class="field-row-label">Папка models</span><span id="modelsDirLabel" class="models-dir-label"></span></div>
                                 <div class="model-actions">
-                                    <button class="ghost-btn model-action-btn" id="downloadModelBtn" type="button" data-tooltip="Загрузить модель удаления фона с сервера">
+                                    <button class="ghost-btn model-action-btn" id="downloadModelBtn" type="button">
                                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
                                         Загрузить модель с сервера
                                     </button>
-                                    <button class="accent-btn model-action-btn" id="loadModelDiskBtn" type="button" data-tooltip="Загрузить модель удаления фона с диска">
+                                    <button class="accent-btn model-action-btn" id="loadModelDiskBtn" type="button">
                                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg>
                                         Загрузить модель с диска
                                     </button>
@@ -470,8 +486,8 @@
                                 </div>
                             </div>
                             <div class="settings-group">
-                                 <div class="field-row"><span class="field-row-label">Размер холста:</span><select class="compact-select" id="canvasScaleSelect" data-tooltip="Размер рабочего канваса"><option value="1">Производительность</option><option value="2" selected>Баланс</option><option value="3">Качество</option></select></div>
-                                 <div class="field-row"><span class="field-row-label">История отмен:</span><select class="compact-select" id="historyLimitSelect" data-tooltip="Количество шагов отмены"><option value="10">10 шагов</option><option value="20">20 шагов</option><option value="30" selected>30 шагов</option><option value="50">50 шагов</option><option value="100">100 шагов</option></select></div>
+                                 <div class="field-row"><span class="field-row-label">Размер холста:</span><select class="compact-select" id="canvasScaleSelect"><option value="1">Производительность</option><option value="2" selected>Баланс</option><option value="3">Качество</option></select></div>
+                                 <div class="field-row"><span class="field-row-label">История отмен:</span><select class="compact-select" id="historyLimitSelect"><option value="10">10 шагов</option><option value="20">20 шагов</option><option value="30" selected>30 шагов</option><option value="50">50 шагов</option><option value="100">100 шагов</option></select></div>
                                 <p class="settings-card-hint">Больший размер даёт больше деталей при работе, но требует больше памяти. На экспортируемое изображение это не влияет — экспорт всегда выполняется в полном разрешении.</p>
                                 <p class="settings-card-hint">Больше шагов отмены — больше расход памяти. Применяется к новым записям истории.</p>
                             </div>
@@ -489,7 +505,7 @@
                                 </div>
                             </div>
                             <div class="settings-group">
-                                 <div class="field-row"><span class="field-row-label">Язык:</span><select class="compact-select" id="languageSelect" data-tooltip="Выберите язык интерфейса"><option value="system">Как в системе</option><option value="ru">Русский</option><option value="en">English</option></select></div>
+                                 <div class="field-row"><span class="field-row-label">Язык:</span><select class="compact-select" id="languageSelect"><option value="system">Как в системе</option><option value="ru">Русский</option><option value="en">English</option></select></div>
                                 <p class="settings-card-hint">Выберите язык интерфейса приложения.</p>
                             </div>
                         </section>
@@ -506,13 +522,13 @@
                             </div>
                             <div class="settings-save-right">
                                 <div class="settings-save-fields">
-                                     <div class="field-row"><span class="field-row-label">Размер токена:</span><select class="compact-select" id="defQualitySelect" data-tooltip="Размер сохраняемого изображения"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select></div>
-                                     <div class="field-row"><span class="field-row-label">Формат пакетной обработки:</span><select class="compact-select" id="defRemoverFormat" data-tooltip="Формат пакетной обработки"><option value="webp">WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option><option value="avif">AVIF</option></select></div>
-                                     <div class="field-row"><span class="field-row-label">Формат токена:</span><select class="compact-select" id="tokenFormatSelect" data-tooltip="Формат сохраняемого токена"><option value="webp" selected>WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option></select></div>
+                                     <div class="field-row"><span class="field-row-label">Размер токена:</span><select class="compact-select" id="defQualitySelect"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select></div>
+                                     <div class="field-row"><span class="field-row-label">Формат пакетной обработки:</span><select class="compact-select" id="defRemoverFormat"><option value="webp">WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option><option value="avif">AVIF</option></select></div>
+                                     <div class="field-row"><span class="field-row-label">Формат токена:</span><select class="compact-select" id="tokenFormatSelect"><option value="webp" selected>WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option></select></div>
                                 </div>
                                 <div class="settings-quality-row">
                                      <span class="field-row-label">Качество токена (WebP/JPG):</span>
-                                     <input type="range" id="tokenCompressionSlider" data-tooltip="Качество токена для WebP/JPG" min="1" max="100" step="1" value="95" class="toolbar-slider">
+                                     <input type="range" id="tokenCompressionSlider" min="1" max="100" step="1" value="95" class="toolbar-slider">
                                     <span id="tokenCompressionValue" class="toolbar-value">95%</span>
                                 </div>
 </div>
@@ -538,7 +554,7 @@
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                                 <input type="text" id="hotkeysSearch" class="settings-search-input" placeholder="Поиск по клавишам…" aria-label="Поиск по горячим клавишам">
                             </label>
-                             <button class="ghost-btn settings-reset-btn" id="hotkeysResetAllBtn" type="button" data-tooltip="Сбросить все горячие клавиши">
+                             <button class="ghost-btn settings-reset-btn" id="hotkeysResetAllBtn" type="button">
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                                 Сбросить по умолчанию
                             </button>
@@ -577,13 +593,12 @@
                     </div>
                 </aside>
 
-                <main class="about-content" aria-labelledby="aboutHeading">
+<main class="about-content" aria-labelledby="aboutHeading">
                     <header class="about-intro">
                         <span class="about-eyebrow">О ПРОГРАММЕ</span>
-                        <h1 id="aboutHeading">Подготовьте изображение для игры</h1>
+                        <h1 id="aboutHeading">Подготовьте изображения для игры</h1>
                         <p class="about-desc">
-                            Откройте портрет из файла, перетащите его в окно или вставьте из буфера. Затем удалите фон,
-                            настройте композицию и сохраните круглый токен для Foundry VTT. Исходные изображения не отправляются в интернет.
+                            Tokenatra позволяет вам удобно удалять фон у изображений, создавать красивые объемные токены с поддержкой динамических рамок FoundryVTT, а также конвертировать файлы в оптимальные форматы для уменьшения их веса.
                         </p>
                     </header>
 
@@ -593,41 +608,30 @@
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M21 3v6h-6"/><path d="M12 7v5l3 2"/></svg>
                             </span>
                             <strong>Удаление фона</strong>
-                            <span>Модель отделяет персонажа от фона. Результат можно уточнить ластиком и маской.</span>
-                        </div>
-                        <div class="about-feature-card">
-                            <span class="about-feature-icon">
-                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
-                            </span>
-                            <strong>Настройка композиции</strong>
-                            <span>Масштабируйте, перемещайте и поворачивайте изображение на круглом холсте.</span>
+                            <span>Установите модель нейросети, чтобы получить возможность удалять фон с любого изображения.</span>
                         </div>
                         <div class="about-feature-card">
                             <span class="about-feature-icon">
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 22h8M12 18v4M7 8h.01M11 8h6M7 12h.01M11 12h6"/></svg>
                             </span>
                             <strong>Оформление токена</strong>
-                            <span>Добавьте кольцо, тень и цветокоррекцию или подготовьте портретный вариант.</span>
+                            <span>Выберите кольцо, настройте тени и цветокоррекцию, а также сохраните портрет персонажа.</span>
                         </div>
                         <div class="about-feature-card">
                             <span class="about-feature-icon">
-                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 17h6M17 14v6"/></svg>
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
                             </span>
-                            <strong>Пакетная обработка</strong>
-                            <span>Обрабатывайте несколько изображений и сохраняйте их в WEBP, PNG, JPG или AVIF.</span>
+                            <strong>Настройка композиции</strong>
+                            <span>Масштабируйте, перемещайте и поворачивайте изображение, а также включайте пример, чтобы создание токенов было еще удобнее.</span>
+                        </div>
+                        <div class="about-feature-card">
+                            <span class="about-feature-icon">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                            </span>
+                            <strong>Интеграция с операционной системой</strong>
+                            <span>Удаляйте фон и конвертируйте файлы даже не запуская приложения! Эти функции доступны в контекстном меню Windows.</span>
                         </div>
                     </section>
-
-                    <div class="about-device-info">
-                        <span class="about-device-icon">
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 9-12h-7l1-8Z"/></svg>
-                        </span>
-                        <span class="about-device-copy">
-                            <span class="about-device-label">Модель удаления фона</span>
-                            <span class="about-device-caption">Модель и устройство выбираются в настройках</span>
-                        </span>
-                        <span class="about-device-value"><span class="about-device-badge"></span><span id="aboutDeviceValue">Загрузка…</span></span>
-                    </div>
 
                     <div class="about-update-area">
                         <div class="about-update" id="aboutUpdateBox" hidden>
