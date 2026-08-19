@@ -314,7 +314,9 @@ def main():
         pass
 
     _register_context_menu()
-    start_background_tasks(delay=15)
+    # The on-disk throttle has no cached result to restore in a new process.
+    # Always perform one real check for each application session.
+    start_background_tasks(force=True, delay=15)
 
     flask_thread = threading.Thread(
         target=lambda: app.run(host='127.0.0.1', port=PORT, debug=False, threaded=True, use_reloader=False),

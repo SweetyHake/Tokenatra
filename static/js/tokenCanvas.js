@@ -924,17 +924,6 @@ var TokenCanvas = {
             this.ctx.strokeStyle = activeScale === 3 ? 'rgba(100,255,140,1)' : 'rgba(100,255,140,0.25)';
             this.ctx.strokeRect(3, 3, size - 6, size - 6);
             this.ctx.restore();
-        } else {
-            this.ctx.save();
-            this.ctx.setLineDash([dashLen * 0.6, gapLen * 0.6]);
-            this.ctx.lineWidth = 3 * (size / s3);
-            var activeSize = Math.round(size * activeScale / 3);
-            var activeOff = (size - activeSize) / 2;
-            var accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ff9800';
-            this.ctx.strokeStyle = accentColor;
-            this.ctx.globalAlpha = 0.5;
-            this.ctx.strokeRect(activeOff, activeOff, activeSize, activeSize);
-            this.ctx.restore();
         }
 
         var overlay = $('canvasOverlay');

@@ -2,12 +2,12 @@ const TokenPresets = {
     _presetOverlayTimer: null,
 
     buildProtectionCanvasFromImg(img, internalSize) {
-        // Маска — полноразмерный дизайн всего канваса (mask.png, напр. 6144×6144):
-        // растягиваем на весь рабочий канвас. Раньше маска центрировалась как
-        // кольцо (internalSize/3) и не совпадала с реальной областью изображения
-        // при экспорте 2×/3×.
+        // Защитная маска соответствует области кольца 1× (internalSize / 3),
+        // например 2048×2048 на рабочем холсте 6144×6144.
         const srcW = img.naturalWidth || img.width;
         const srcH = img.naturalHeight || img.height;
+        const maskSize = Math.round(internalSize / 3);
+        const maskOffset = (internalSize - maskSize) / 2;
 
         const scaledMask = document.createElement('canvas');
         scaledMask.width = internalSize;
@@ -15,7 +15,7 @@ const TokenPresets = {
         const sCtx = scaledMask.getContext('2d');
         sCtx.imageSmoothingEnabled = true;
         sCtx.imageSmoothingQuality = 'high';
-        sCtx.drawImage(img, 0, 0, srcW, srcH, 0, 0, internalSize, internalSize);
+        sCtx.drawImage(img, 0, 0, srcW, srcH, maskOffset, maskOffset, maskSize, maskSize);
         const srcData = sCtx.getImageData(0, 0, internalSize, internalSize);
         const sd = srcData.data;
 
@@ -30,8 +30,7 @@ const TokenPresets = {
         for (let i = 0; i < n; i++) {
             const oi = i * 4;
             const a = sd[oi + 3];
-            const brightness = (sd[oi] + sd[oi+1] + sd[oi+2]) / 3;
-            const isProtected = a > 16 && brightness < 220;
+            const isProtected = a > 0;
             pd[oi] = 255; pd[oi+1] = 255; pd[oi+2] = 255;
             pd[oi+3] = isProtected ? 255 : 0;
         }
@@ -62,7 +61,7 @@ const TokenPresets = {
         return canvas;
     },
 
-    loadProtectionMask() {
+    loadProtectionMask(maskFile = state.activeRingMaskFile) {
         if (!state.protectionEnabled) {
             state.erasableCanvas = null;
             state.protectionMask = null;
@@ -70,16 +69,30 @@ const TokenPresets = {
             TokenCanvas.syncProtectionToWorker();
             return;
         }
+        const loadId = (this._protectionLoadId || 0) + 1;
+        this._protectionLoadId = loadId;
         urlManager.revoke('protection-mask');
-        fetch('/mask').then(r => r.blob()).then(blob => {
+        const source = maskFile
+            ? `/ring_file/${encodeURIComponent(maskFile)}`
+            : '/mask';
+        return fetch(source).then(r => {
+            if (!r.ok) throw new Error('Mask unavailable');
+            return r.blob();
+        }).then(blob => {
             const img = new Image();
             const maskUrl = urlManager.create(blob, 'protection-mask');
             img.onload = () => {
+                if (loadId !== this._protectionLoadId) return;
                 state._rawProtectionMaskImg = img;
                 this._rebuildErasableCanvas();
             };
             img.src = maskUrl;
         }).catch(() => {
+            if (loadId !== this._protectionLoadId) return;
+            if (maskFile) {
+                state.activeRingMaskFile = null;
+                return this.loadProtectionMask(null);
+            }
             state._rawProtectionMaskImg = null;
             this._rebuildErasableCanvas();
         });
@@ -316,6 +329,8 @@ const TokenPresets = {
                             }
                             if (item.classList.contains('active')) {
                                 state.ringImages = {};
+                                state.activeRingMaskFile = null;
+                                this.loadProtectionMask(null);
                                 TokenCanvas.render();
                             }
                             this.loadRings();
@@ -326,10 +341,10 @@ const TokenPresets = {
                     item.onclick = () => {
                         document.querySelectorAll('.ring-thumb').forEach(i => i.classList.remove('active'));
                         item.classList.add('active');
-                        this.loadSingleRing(ring.file);
+                        this.loadSingleRing(ring.file, ring.mask_file);
                     };
                     container.appendChild(item);
-                    if (index === 0) this.loadSingleRing(ring.file);
+                    if (index === 0) this.loadSingleRing(ring.file, ring.mask_file);
                 });
             })
             .catch(() => {});
@@ -388,20 +403,46 @@ const TokenPresets = {
         });
     },
 
-    loadSingleRing(filename) {
+    loadSingleRing(filename, maskFile = null) {
+        const loadId = (this._ringLoadId || 0) + 1;
+        this._ringLoadId = loadId;
+        this._protectionLoadId = (this._protectionLoadId || 0) + 1;
         urlManager.revoke('ring');
-        fetch(`/ring_file/${encodeURIComponent(filename)}`)
-            .then(r => r.blob())
-            .then(blob => {
-                const img = new Image();
-                const url = urlManager.create(blob, 'ring');
-                img.onload = () => {
-                    state.ringImages = { 2048: img, 1024: img, 512: img };
-                    TokenCanvas.render();
-                };
-                img.src = url;
+        urlManager.revoke('protection-mask');
+        const loadImage = (blob, urlId) => new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = urlManager.create(blob, urlId);
+        });
+        const ringRequest = fetch(`/ring_file/${encodeURIComponent(filename)}`)
+            .then(r => r.ok ? r.blob() : Promise.reject(new Error('Ring unavailable')));
+        const maskRequest = maskFile
+            ? fetch(`/ring_file/${encodeURIComponent(maskFile)}`)
+                .then(r => r.ok ? r.blob() : Promise.reject(new Error('Mask unavailable')))
+            : fetch('/mask').then(r => r.ok ? r.blob() : Promise.reject(new Error('Mask unavailable')));
+
+        Promise.all([ringRequest, maskRequest])
+            .then(([ringBlob, maskBlob]) => Promise.all([
+                loadImage(ringBlob, 'ring'),
+                loadImage(maskBlob, 'protection-mask')
+            ]))
+            .then(([ringImage, maskImage]) => {
+                if (loadId !== this._ringLoadId) return;
+                state.ringImages = { 2048: ringImage, 1024: ringImage, 512: ringImage };
+                state.activeRingMaskFile = maskFile;
+                state._rawProtectionMaskImg = maskImage;
+                if (state.protectionEnabled) {
+                    this._rebuildErasableCanvas();
+                } else {
+                    state.erasableCanvas = null;
+                    state.protectionMask = null;
+                }
+                TokenCanvas.render();
             })
-            .catch(() => {});
+            .catch(() => {
+                if (loadId === this._ringLoadId) toast('Не удалось загрузить кольцо или маску', true);
+            });
     },
 
     loadRingForSize(size) {

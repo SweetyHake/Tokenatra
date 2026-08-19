@@ -12,6 +12,7 @@ var state = {
     imageFileList: [],
     imageFileIndex: -1,
     ringImages: {},
+    activeRingMaskFile: null,
     userImage: null,
     userImageUrl: null,
     userImageOriginal: null,

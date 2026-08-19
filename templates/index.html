@@ -680,6 +680,8 @@
         <form class="ring-form" id="addRingForm">
             <label class="ring-form-label" for="ringFileInput">Изображение кольца</label>
             <input class="ring-file-input" id="ringFileInput" name="ring" type="file" accept=".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg" required>
+            <label class="ring-form-label" for="ringMaskInput">Защитная маска <span>(необязательно, иначе используется стандартная mask.png)</span></label>
+            <input class="ring-file-input" id="ringMaskInput" name="mask" type="file" accept=".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg">
             <label class="ring-form-label" for="ringNameInput">Название <span>(необязательно)</span></label>
             <input class="ring-text-input" id="ringNameInput" name="name" type="text" maxlength="80" placeholder="Например, Серебряная окантовка">
             <div class="ring-form-actions">

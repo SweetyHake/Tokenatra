@@ -100,7 +100,10 @@ def config_file():
 
 USER_DATA_DIR = _resolve_user_data_dir()
 MODELS_DIR = USER_DATA_DIR / "models"
-RING_DIR = BASE_DIR / "token_rings"
+# Встроенные кольца живут рядом с приложением (read-only в Program Files),
+# пользовательские — в LOCALAPPDATA (куда разрешена запись).
+BUILTIN_RING_DIR = BASE_DIR / "token_rings"
+RING_DIR = USER_DATA_DIR / "token_rings"
 MASK_PATH = BASE_DIR / "mask.png"
 
 # Встроенные кольца: имя файла (casefold) → отображаемое имя.
@@ -1472,9 +1475,9 @@ def ring():
     if size not in ('512', '1024', '2048'):
         size = '1024'
     ring_files = {
-        '512': RING_DIR / 'token512.webp',
-        '1024': RING_DIR / 'token1024.webp',
-        '2048': RING_DIR / 'token2048.webp'
+        '512': BUILTIN_RING_DIR / 'token512.webp',
+        '1024': BUILTIN_RING_DIR / 'token1024.webp',
+        '2048': BUILTIN_RING_DIR / 'token2048.webp'
     }
     ring_path = ring_files.get(size)
     if ring_path and ring_path.exists():
@@ -1636,28 +1639,74 @@ def convert_file():
         return jsonify({'error': 'Ошибка конвертации файла'}), 500
 
 
+def _migrate_legacy_rings():
+    """Пользовательские кольца из старого каталога (BASE_DIR/token_rings)
+    переносим в RING_DIR — в установленной сборке BASE_DIR в Program Files
+    недоступен для записи."""
+    if BUILTIN_RING_DIR == RING_DIR:
+        return
+    if not BUILTIN_RING_DIR.exists():
+        return
+    RING_DIR.mkdir(parents=True, exist_ok=True)
+    for f in BUILTIN_RING_DIR.iterdir():
+        if (not f.is_file() or f.suffix.lower() not in {'.webp', '.png', '.jpg', '.jpeg'}
+                or f.stem.casefold().endswith('.mask')):
+            continue
+        if f.name.casefold() in BUILTIN_RINGS:
+            continue
+        try:
+            dest = RING_DIR / f.name
+            if dest.exists():
+                continue
+            os.replace(str(f), str(dest))
+            for extension in {f.suffix.lower(), '.png', '.webp', '.jpg', '.jpeg'}:
+                legacy_mask = f.with_name(f'{f.stem}.mask{extension}')
+                migrated_mask = dest.with_name(legacy_mask.name)
+                if legacy_mask.is_file() and not migrated_mask.exists():
+                    os.replace(str(legacy_mask), str(migrated_mask))
+        except OSError:
+            continue
+
+
 @app.route('/rings_list')
 def rings_list():
     extensions = {'.webp', '.png', '.jpg', '.jpeg'}
-    if not RING_DIR.exists():
-        RING_DIR.mkdir(exist_ok=True)
+    _migrate_legacy_rings()
     ring_files = []
-    for f in RING_DIR.iterdir():
-        if f.is_file() and f.suffix.lower() in extensions:
-            try:
-                added_at = f.stat().st_ctime_ns
-            except OSError:
-                added_at = 0
-            ring_files.append((f.name.casefold() in BUILTIN_RINGS, added_at, f.name.casefold(), f))
+    seen_names = set()
+
+    def collect(source_dir, builtin):
+        if not source_dir.exists():
+            return
+        for f in source_dir.iterdir():
+            if f.is_file() and f.suffix.lower() in extensions and not f.stem.casefold().endswith('.mask'):
+                key = f.name.casefold()
+                if key in seen_names:
+                    continue
+                seen_names.add(key)
+                try:
+                    added_at = f.stat().st_ctime_ns
+                except OSError:
+                    added_at = 0
+                ring_files.append((builtin, added_at, key, f))
+
+    collect(BUILTIN_RING_DIR, True)
+    collect(RING_DIR, False)
 
     rings = []
     mime_map = {'.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}
     for is_builtin, added_at, _, f in sorted(ring_files, key=lambda item: (not item[0], item[1], item[2])):
+        mask_path = next((
+            f.with_name(f'{f.stem}.mask{extension}')
+            for extension in (f.suffix.lower(), '.png', '.webp', '.jpg', '.jpeg')
+            if f.with_name(f'{f.stem}.mask{extension}').is_file()
+        ), None)
         rings.append({
             'name': BUILTIN_RINGS.get(f.name.casefold(), f.stem),
             'file': f.name,
             'mime': mime_map.get(f.suffix.lower(), 'image/png'),
-            'builtin': is_builtin,
+            'builtin': f.name.casefold() in BUILTIN_RINGS,
+            'mask_file': mask_path.name if mask_path else None,
             'added_at': added_at,
         })
     return jsonify(rings)
@@ -1679,6 +1728,10 @@ def delete_ring():
 
     try:
         path.unlink()
+        for extension in {path.suffix.lower(), '.png', '.webp', '.jpg', '.jpeg'}:
+            mask_path = path.with_name(f'{path.stem}.mask{extension}')
+            if mask_path.exists() and mask_path.is_file():
+                mask_path.unlink()
     except Exception:
         app.logger.error('ring delete error', exc_info=True)
         return jsonify({'error': 'Не удалось удалить кольцо'}), 500
@@ -1689,6 +1742,7 @@ def delete_ring():
 def add_ring():
     """Сохранить пользовательское изображение кольца в папку приложения."""
     ring = request.files.get('ring')
+    mask = request.files.get('mask')
     if not ring or not ring.filename:
         return jsonify({'error': 'Выберите изображение кольца'}), 400
 
@@ -1703,6 +1757,19 @@ def add_ring():
         ring.stream.seek(0)
     except Exception:
         return jsonify({'error': 'Файл не является корректным изображением'}), 400
+
+    mask_extension = None
+    if mask and mask.filename:
+        mask_extension = Path(mask.filename).suffix.lower()
+        if mask_extension not in {'.webp', '.png', '.jpg', '.jpeg'}:
+            return jsonify({'error': 'Маска должна быть в формате WebP, PNG или JPG'}), 400
+        try:
+            mask.stream.seek(0)
+            with Image.open(mask.stream) as image:
+                image.verify()
+            mask.stream.seek(0)
+        except Exception:
+            return jsonify({'error': 'Файл маски не является корректным изображением'}), 400
 
     name = (request.form.get('name') or '').strip()
     stem = Path(name or ring.filename).stem
@@ -1719,7 +1786,14 @@ def add_ring():
 
     try:
         ring.save(str(target))
+        if mask and mask.filename:
+            mask.save(str(target.with_name(f'{target.stem}.mask{mask_extension}')))
     except Exception:
+        try:
+            if target.exists():
+                target.unlink()
+        except OSError:
+            pass
         app.logger.error('ring save error', exc_info=True)
         return jsonify({'error': 'Не удалось сохранить кольцо'}), 500
 
@@ -1730,6 +1804,8 @@ def add_ring():
 def ring_file(filename):
     safe = Path(filename).name
     path = RING_DIR / safe
+    if not path.exists() or not path.is_file():
+        path = BUILTIN_RING_DIR / safe
     if not path.exists() or not path.is_file():
         return jsonify({'error': 'Not found'}), 404
     ext = path.suffix.lower()
