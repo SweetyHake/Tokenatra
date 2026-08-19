@@ -252,12 +252,10 @@ const TokenEditor = {
             if (state.showingOriginal) {
                 state.userImage = state.userImageOriginal;
                 btn.classList.remove('active');
-                btn.dataset.tooltip = 'Показать без фона ' + this._removeBgHint();
                 toast('Показан оригинал');
             } else {
                 state.userImage = state.userImageWithoutBg;
                 btn.classList.add('active');
-                btn.dataset.tooltip = 'Показать оригинал ' + this._removeBgHint();
                 toast('Показан без фона');
             }
             TokenCanvas._compositedImageDirty = true;
@@ -318,7 +316,6 @@ const TokenEditor = {
 
                 btn.disabled = false;
                 btn.classList.add('active');
-                btn.dataset.tooltip = 'Показать оригинал ' + this._removeBgHint();
                 this.updateRemoveBgButton();
                 TokenHistory.save();
                 TokenCanvas.render();
@@ -347,11 +344,10 @@ const TokenEditor = {
         if (!btn) return;
         if (state.backgroundRemoved && state.userImageWithoutBg) {
             btn.disabled = false;
-            if (state.showingOriginal) {                 btn.dataset.tooltip = 'Показать без фона ' + this._removeBgHint(); btn.classList.remove('active'); }
-            else { btn.dataset.tooltip = 'Показать оригинал ' + this._removeBgHint(); btn.classList.add('active'); }
+            if (state.showingOriginal) { btn.classList.remove('active'); }
+            else { btn.classList.add('active'); }
         } else {
             btn.disabled = false;
-            btn.dataset.tooltip = 'Вырезать фон ' + this._removeBgHint();
             btn.classList.remove('active');
         }
     },
@@ -740,10 +736,6 @@ const TokenEditor = {
             left: parseHotkey(hk.rotateLeft || 'KeyQ').code,
             right: parseHotkey(hk.rotateRight || 'KeyE').code
         };
-    },
-
-    _removeBgHint() {
-        return '(' + codeToLabel(AppConfig.hotkeys.toolRemoveBg) + ')';
     },
 
     handleKeyDown(e) {

@@ -77,7 +77,7 @@ function setModelAvailability(exists) {
         button.classList.toggle('model-missing', !available);
         button.setAttribute('aria-disabled', String(!available));
         button.dataset.tooltip = available
-            ? (button === removeBgBtn ? 'Вырезать фон (' + codeToLabel(AppConfig.hotkeys.toolRemoveBg) + ')' : 'Удаление фона')
+            ? (button === removeBgBtn ? '' : 'Удаление фона')
             : 'Модель для удаления фона не установлена';
     });
 

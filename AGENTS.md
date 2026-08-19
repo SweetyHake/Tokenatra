@@ -50,11 +50,11 @@ Installer output: `dist/installer/Tokenatra_Setup_v*.exe`
    ```powershell
    $token = ("protocol=https`nhost=github.com`n" | git credential fill 2>$null | Select-String '^password=' | ForEach-Object { ($_ -split '=', 2)[1] })
    # release body — JSON, напр. { "tag_name": "v26.x.y", "name": "Tokenatra 26.x.y", "body": "## Исправления...", "draft": false, "prerelease": false }
-   $resp = curl.exe -s -X POST -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" --data-binary "@release_body.json" "https://api.github.com/repos/SweetyHake/TokenMakerVTT/releases"
+   $resp = curl.exe -s -X POST -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" --data-binary "@release_body.json" "https://api.github.com/repos/SweetyHake/Tokenatra/releases"
    $id = $resp | python -c "import json,sys; print(json.load(sys.stdin).get('id'))"
-   curl.exe -s -X POST -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" -H "Content-Type: application/octet-stream" --data-binary "@Z:\TokenMakerVTT\dist\installer\Tokenatra_Setup_v26.x.y.exe" "https://uploads.github.com/repos/SweetyHake/TokenMakerVTT/releases/$id/assets?name=Tokenatra_Setup_v26.x.y.exe"
+   curl.exe -s -X POST -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" -H "Content-Type: application/octet-stream" --data-binary "@Z:\Tokenatra\dist\installer\Tokenatra_Setup_v26.x.y.exe" "https://uploads.github.com/repos/SweetyHake/Tokenatra/releases/$id/assets?name=Tokenatra_Setup_v26.x.y.exe"
    ```
-6. **Проверка**: `https://api.github.com/repos/SweetyHake/TokenMakerVTT/releases/latest` → тег и имя ассета. В приложении появится баннер «доступна новая версия» (ссылкой на GitHub).
+6. **Проверка**: `https://api.github.com/repos/SweetyHake/Tokenatra/releases/latest` → тег и имя ассета. В приложении появится баннер «доступна новая версия» (ссылкой на GitHub).
 
 Model files (`*.onnx`) are NOT bundled — user places them into the `models/` folder next to the exe and picks one in Settings (только `.onnx`).
 
@@ -84,7 +84,7 @@ No `requirements.txt` — the batch file is the source of truth.
 
 ## Version & updates
 
-- `version.py:GITHUB_REPO` — set to `"username/TokenMakerVTT"` before building (имя репозитория на GitHub не переименовано; приложение называется Tokenatra)
+- `version.py:GITHUB_REPO` — set to `"SweetyHake/Tokenatra"` before building
 - On startup, `updater.py` checks GitHub Releases for newer version
 - If newer version found, splash screen shows download button
 - `model.onnx` is NOT auto-downloaded — the user places it into `models/` and selects it in Settings (see "External assets")

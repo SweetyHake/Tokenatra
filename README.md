@@ -96,7 +96,7 @@ Tokenatra готовит изображения персонажей для Foun
 
 ### Готовый установщик
 
-1. Откройте раздел [Releases](https://github.com/SweetyHake/TokenMakerVTT/releases).
+1. Откройте раздел [Releases](https://github.com/SweetyHake/Tokenatra/releases).
 2. Скачайте `Tokenatra_Setup_v*.exe`.
 3. Запустите установщик и следуйте инструкциям.
 4. Поместите ONNX-модель в папку `models/` рядом с приложением.
@@ -259,7 +259,7 @@ Tokenatra is a local Windows application for preparing character images for Foun
 
 ## Installation
 
-1. Download `Tokenatra_Setup_v*.exe` from the [Releases](https://github.com/SweetyHake/TokenMakerVTT/releases) page.
+1. Download `Tokenatra_Setup_v*.exe` from the [Releases](https://github.com/SweetyHake/Tokenatra/releases) page.
 2. Install and launch Tokenatra.
 3. Put one or more `.onnx` background-removal models in the `models/` folder next to the application.
 4. Select a model in Settings, or use the built-in model download button.
@@ -305,5 +305,5 @@ The portable build is written to `dist/Tokenatra/`. The installer is written to 
 ---
 
 <p align="center">
-  <sub>Tokenatra 26.1.8 · <a href="https://github.com/SweetyHake/TokenMakerVTT">GitHub</a></sub>
+  <sub>Tokenatra 26.0.0 · <a href="https://github.com/SweetyHake/Tokenatra">GitHub</a></sub>
 </p>
