@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Tokenatra</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+    --bg-base: #0B0A13;
+    --bg-panel: #141019;
+    --bg-hover: #302c2a;
+    --border: #3d3835;
+    --accent: #ff9800;
+    --accent-hover: #ffb340;
+    --accent-dim: rgba(255,128,0,0.15);
+    --text-primary: #d0b8a3;
+    --text-muted: #8a7365;
+}
+html, body {
+    height: 100%;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+}
+.splash {
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 24px;
+    max-width: 380px;
+}
+.logo svg { width: 48px; height: 48px; stroke: var(--accent); }
+.spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.status { font-size: 13px; color: var(--text-muted); }
+.status .accent { color: var(--accent); }
+.bar {
+    width: 240px; height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+.btn {
+    padding: 6px 14px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg-panel);
+    color: var(--text-primary); cursor: pointer; font-size: 12px;
+    font-family: 'Inter', sans-serif;
+    transition: border-color 0.15s, background 0.15s;
+}
+.btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-hover); }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="splash" id="splash">
+    <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32"/></svg>
+    </div>
+    <div class="spinner" id="spinner"></div>
+    <div class="status" id="status">Загрузка…</div>
+    <div class="bar" id="bar"><div class="bar-fill" id="barFill"></div></div>
+    <div class="actions" id="actions" style="display:none"></div>
+</div>
+<script>
+function id(name) { return document.getElementById(name); }
+
+function go() { window.location.href = '/'; }
+
+var fakeSteps = [
+    { p: 10, t: 100, m: 'Инициализация…' },
+    { p: 30, t: 300, m: 'Загрузка конфигурации…' },
+    { p: 50, t: 300, m: 'Подготовка интерфейса…' },
+    { p: 70, t: 200, m: 'Почти готово…' },
+    { p: 100, t: 200, m: 'Запуск…' },
+];
+var fi = 0;
+
+function runSteps() {
+    if (fi < fakeSteps.length) {
+        var s = fakeSteps[fi++];
+        id('status').textContent = s.m;
+        id('barFill').style.width = s.p + '%';
+        setTimeout(runSteps, s.t);
+    } else {
+        go();
+    }
+}
+
+// Ждём готовности сервера, затем — фейковая загрузка и переход в приложение
+function waitServer(retries) {
+    if (retries === undefined) retries = 40;
+    fetch('/version').then(function(r) { return r.json(); }).then(function() {
+        runSteps();
+    }).catch(function() {
+        if (retries > 0) setTimeout(function() { waitServer(retries - 1); }, 500);
+        else runSteps();
+    });
+}
+
+waitServer();
+</script>
+</body>
+</html>

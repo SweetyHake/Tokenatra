@@ -1,0 +1,733 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tokenatra</title>
+    <link rel="icon" href="/icon" type="image/x-icon">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v=__version__) }}">
+</head>
+<body>
+<div class="eraser-cursor" id="eraserCursor">
+    <div class="eraser-cursor-inner"></div>
+</div>
+<div class="app-layout">
+    <div class="title-bar" id="titleBar">
+        <div class="tb-brand" id="tbBrand">
+            <img src="/icon" class="tb-icon" alt="Logo">
+            <span class="tb-title">Tokenatra <a class="tb-subtitle" href="https://github.com/{{ github_repo }}" target="_blank" rel="noopener">v<span id="titleVersion"></span></a></span>
+            <button class="tb-update-badge" id="tbUpdateBadge" hidden data-tooltip="Доступно обновление">
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            </button>
+            <div class="device-dot" id="deviceBadge" data-tooltip="Загрузка…"></div>
+        </div>
+        <div class="tb-nav">
+            <button class="nav-btn active" data-mode="token">Создание токена</button>
+            <button class="nav-btn" data-mode="fileTools">Работа с файлами</button>
+            <button class="nav-btn nav-btn-utility" data-mode="settings" data-tooltip="Открыть настройки приложения">Настройки</button>
+            <button class="nav-btn nav-btn-utility" data-mode="about" data-tooltip="Открыть информацию о приложении">О программе</button>
+        </div>
+        <div class="tb-spacer"></div>
+        <div class="window-controls" id="windowControls">
+            <button class="wc-btn" id="wcMinimize" data-tooltip="Свернуть">
+                <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <button class="wc-btn" id="wcMaximize" data-tooltip="Развернуть">
+                <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
+            </button>
+            <button class="wc-btn danger" id="wcClose" data-tooltip="Закрыть">
+                <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+    </div>
+    <div class="model-banner update-banner" id="updateNotifyBanner" hidden>
+        <svg viewBox="0 0 24 24" class="update-banner-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        <span class="model-banner-text">Доступно обновление <b id="updateNotifyVersion"></b></span>
+        <button class="accent-btn accent-btn-compact" id="updateNotifyOpen">Открыть «О программе»</button>
+        <button class="model-banner-close" id="updateNotifyClose" title="Скрыть">&times;</button>
+    </div>
+    <div class="main-area">
+        <div class="panel-container">
+
+        <div class="panel active" id="tokenPanel">
+            <div class="workspace">
+
+            <div class="context-panel context-panel-left">
+                <div class="ctx-scroll">
+                    <div class="editor-section editor-source-section">
+                        <div class="file-row" id="tokenDropzone">
+                            <button class="ghost-btn" id="fileOpenBtn" data-tooltip="Открыть файл (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>Открыть</button>
+                            <span class="file-row-name" id="dropzoneLabel">Файл не выбран</span>
+                        </div>
+                        <input type="file" id="tokenFileInput" accept="image/*">
+                        <div class="nav-arrows" id="navArrows" style="display:none">
+                            <button class="nav-arrow-btn" id="navPrev" data-tooltip="Предыдущий файл (Ctrl+Left)">&#9664;</button>
+                            <input type="text" id="tokenFileName" class="nav-filename-input" placeholder="token">
+                            <button class="nav-arrow-btn" id="navNext" data-tooltip="Следующий файл (Ctrl+Right)">&#9654;</button>
+                            <span class="nav-arrow-info" id="navInfo"></span>
+                        </div>
+                    </div>
+                    <div class="ctx-divider"></div>
+                    <div class="ctx-subtitle">
+                        <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        Пресеты масок
+                    </div>
+                    <div class="preset-buttons" id="presetButtons"></div>
+                    <div class="ctx-divider"></div>
+                    <div class="ctx-subtitle">
+                        <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        Параметры холста
+                    </div>
+                    <div class="display-options">
+                        <label class="display-option"><input type="checkbox" id="protectionEnabledCheck"><span>Область защиты</span></label>
+                        <label class="display-option"><input type="checkbox" id="showZonesCheck"><span>Отображать маску</span></label>
+                        <label class="display-option"><input type="checkbox" id="showBordersCheck"><span>Отображать границы</span></label>
+                    </div>
+                    <div class="ctx-divider"></div>
+                    <div class="ctx-subtitle">
+                        <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                        Действия
+                    </div>
+                    <div class="tool-bar editor-tool-bar">
+                        <button class="tool-icon-btn" id="removeBgBtn" data-tooltip="Вырезать фон (R)"><svg viewBox="0 0 24 24"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg><span>Вырезать фон</span><kbd>R</kbd></button>
+                        <div class="tool-mode-group">
+                        <button class="tool-btn active" data-tool="move"><svg viewBox="0 0 24 24"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg><span>Перемещение</span><kbd>V</kbd></button>
+                        <button class="tool-btn eraser-blue" data-tool="eraser" id="eraserBtn"><svg viewBox="0 0 24 24"><path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L13.8 2.4c.8-.8 2-.8 2.8 0L21 6.8c.8.8 0 2 0 2.8L10.8 20"/></svg><span>Ластик</span><kbd>F</kbd></button>
+                        <button class="tool-btn eraser-pink" data-tool="mask" id="maskBtn"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg><span>Маска</span><kbd>G</kbd></button>
+                        </div>
+                    </div>
+                    <div class="eraser-size-row" id="eraserRow" style="display:none;">
+                        <span class="slider-label">Размер</span>
+                        <input type="range" id="eraserSize" min="1" max="300" step="1" value="50">
+                        <input type="number" id="eraserSizeInput" class="eraser-size-input" value="50" min="1" max="300">
+                        <span class="slider-unit">px</span>
+                        <button class="link-btn" id="resetEraserBtn"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Сброс</button>
+                    </div>
+                    <div class="ctx-divider"></div>
+                    <div class="accordion-header transform-header">
+                        <div class="accordion-header-left">
+                            <svg viewBox="0 0 24 24"><path d="M8 3H3v5M3 3l6 6M16 3h5v5M21 3l-6 6M8 21H3v-5M3 21l6-6M16 21h5v-5M21 21l-6-6"/></svg>
+                            Трансформация
+                        </div>
+                        <div class="accordion-header-right">
+                            <button class="accordion-reset-btn" id="resetTransformBtn" data-tooltip="Сбросить трансформацию" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                        </div>
+                    </div>
+                    <div class="transform-row">
+                        <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="scaleSlider" min="10" max="300" step="1" value="100"><input type="number" id="scaleInput" class="slider-number" value="100" min="10" max="300"><span class="slider-unit">%</span></div>
+                        <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="rotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="rotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="resize-handle" id="leftPanelHandle"></div>
+            <div class="canvas-area">
+                <div class="canvas-undo-bar" id="undoBar" style="display:none;">
+                    <button class="undo-btn" id="undoBtn" data-tooltip="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M3 10h13a4 4 0 0 1 0 8H9"/><polyline points="7 6 3 10 7 14"/></svg></button>
+                    <button class="undo-btn" id="redoBtn" data-tooltip="Повторить (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M21 10H8a4 4 0 0 0 0 8h7"/><polyline points="17 6 21 10 17 14"/></svg></button>
+                </div>
+                <div class="zoom-indicator" id="zoomIndicator">100%</div>
+                <div class="token-canvas-wrapper" id="canvasWrapper">
+                    <canvas id="tokenCanvas" width="2048" height="2048"></canvas>
+                    <div id="presetOverlay" class="preset-overlay"></div>
+                    <div class="canvas-overlay" id="canvasOverlay">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32"/></svg>
+                        <p>Загрузите изображение</p>
+                        <span>Перетащите файл сюда или вставьте из буфера</span>
+                        <span class="overlay-kbd">Ctrl+O</span>
+                    </div>
+                </div>
+                <div class="zoom-controls" id="zoomControls">
+                    <button class="zc-btn" id="zoomOutBtn" data-tooltip="Уменьшить"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                    <span class="zc-label" id="zoomLabel">100%</span>
+                    <button class="zc-btn" id="zoomInBtn" data-tooltip="Увеличить"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                    <button class="zc-btn" id="zoomResetBtn" data-tooltip="Сбросить"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                </div>
+            </div>
+            <div class="resize-handle" id="rightPanelHandle"></div>
+            <div class="context-panel context-panel-right">
+                <div class="ctx-scroll">
+
+                        <div class="ctx-subtitle"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg><span>Кольцо</span><button class="ring-add-btn" id="addRingBtn" type="button" data-tooltip="Добавить кольцо" aria-label="Добавить кольцо"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button></div>
+                        <div class="ring-carousel">
+                            <div class="ring-track" id="ringSelectorList"></div>
+                        </div>
+                        <div class="ring-counter" id="ringCounter" style="display:none;"></div>
+
+                        <div class="ctx-divider"></div>
+
+                        <div class="accordion-header" id="shadowAccordion">
+                            <div class="accordion-header-left">
+                                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                                Тень
+                            </div>
+                            <div class="accordion-header-right">
+                                <button class="accordion-reset-btn" id="shadowResetBtn" data-tooltip="Сбросить настройки тени" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                                <label class="effect-check" onclick="event.stopPropagation()"><input type="checkbox" id="dropShadowCheck"><span class="check-box"></span></label>
+                                <span class="accordion-arrow" id="shadowArrow">▶</span>
+                            </div>
+                        </div>
+                        <div class="accordion-body" id="dropShadowSettings">
+                            <div class="slider-row"><span class="slider-label">Угол</span><input type="range" id="shadowAngle" min="-180" max="180" step="1" value="-45"><span class="slider-value" id="shadowAngleVal">-45</span><span class="slider-unit">°</span></div>
+                            <div class="slider-row"><span class="slider-label">Смещение</span><input type="range" id="shadowDistance" min="0" max="50" step="1" value="10"><span class="slider-value" id="shadowDistanceVal">10</span><span class="slider-unit">px</span></div>
+                            <div class="slider-row"><span class="slider-label">Размытие</span><input type="range" id="shadowBlur" min="0" max="40" step="1" value="10"><span class="slider-value" id="shadowBlurVal">10</span><span class="slider-unit">px</span></div>
+                            <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="shadowOpacity" min="0" max="100" step="1" value="75"><span class="slider-value" id="shadowOpacityVal">75</span><span class="slider-unit">%</span></div>
+                        </div>
+
+                        <div class="ctx-divider"></div>
+
+                        <div class="accordion-header" id="ccAccordion">
+                            <div class="accordion-header-left">
+                                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                Цветокоррекция
+                            </div>
+                            <div class="accordion-header-right">
+                                <button class="accordion-reset-btn" id="ccResetBtn" data-tooltip="Сбросить цветокоррекцию" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                                <label class="effect-check" onclick="event.stopPropagation()"><input type="checkbox" id="colorCorrectionCheck"><span class="check-box"></span></label>
+                                <span class="accordion-arrow" id="ccArrow">▶</span>
+                            </div>
+                        </div>
+                        <div class="accordion-body" id="colorCorrectionSettings">
+                            <div class="slider-row"><span class="slider-label">Насыщенность</span><input type="range" id="ccSaturation" min="-100" max="100" step="1" value="5"><span class="slider-value" id="ccSaturationVal">5</span><span class="slider-unit">%</span></div>
+                            <div class="slider-row"><span class="slider-label">Яркость</span><input type="range" id="ccLightness" min="-100" max="100" step="1" value="-5"><span class="slider-value" id="ccLightnessVal">-5</span><span class="slider-unit">%</span></div>
+                        </div>
+
+                        <div class="ctx-divider"></div>
+
+                        <div class="ctx-subtitle"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Превью</div>
+                        <div class="tab-bar">
+                            <button class="tab-btn active" data-tab="exampleTab">Пример</button>
+                            <button class="tab-btn" data-tab="portraitTab">Портрет</button>
+                        </div>
+                        <div class="tab-content" id="exampleTab">
+                            <div class="toggle-row toggle-row-compact">
+                                <label class="toggle-label"><input type="checkbox" id="exampleCheck"><span class="toggle-track"></span></label>
+                                <span>Показывать</span>
+                            </div>
+                            <div id="exampleSettings" class="example-settings" style="display:none;">
+                                <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="exampleOpacitySlider" min="0" max="100" step="1" value="50"><span class="slider-value" id="exampleOpacityVal">50</span><span class="slider-unit">%</span></div>
+                                <div class="field-row field-row-compact"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="exampleScaleSelect"><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option></select></div>
+                                <div class="field-row field-row-compact">
+                                    <span class="field-row-label field-row-label-tiny">Файл:</span>
+                                    <span id="exampleFileName" class="example-file-name">example.png</span>
+                                    <button class="link-btn link-btn-tiny" id="exampleFileBtn">Файл</button>
+                                </div>
+                                <input type="file" id="exampleFileInput" accept="image/*">
+                                <button class="link-btn link-btn-tiny" id="exampleResetBtn"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Сбросить</button>
+                            </div>
+                        </div>
+                        <div class="tab-content" id="portraitTab" style="display:none;">
+                            <div class="portrait-canvas-wrap"><canvas id="portraitCanvas"></canvas></div>
+                            <div class="portrait-controls">
+                                <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="portraitScaleSlider" min="10" max="500" step="1" value="100"><input type="number" id="portraitScaleInput" class="slider-number" value="100" min="10" max="500"><span class="slider-unit">%</span></div>
+                                <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="portraitRotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="portraitRotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
+                                <button class="link-btn" id="portraitResetBtn"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Сбросить</button>
+                                <div class="portrait-folder-row"><span class="portrait-folder-name" id="portraitFolderName">Папка не выбрана</span><button class="ghost-btn ghost-btn-compact-sm" id="portraitFolderBtn"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Папка</button></div>
+                                <button class="save-action primary save-action-block" id="portraitSaveBtn"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>Сохранить</button>
+                            </div>
+                        </div>
+
+                        <div class="ctx-divider"></div>
+
+                        <div class="editor-export-section">
+                        <div class="ctx-subtitle">
+                            <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                            Экспорт
+                        </div>
+                        <div class="field-row"><span class="field-row-label">Размер:</span><select class="compact-select" id="saveQualitySelect"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select></div>
+                        <div class="field-row"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="saveScaleSelect"><option value="auto" selected>Авто</option><option value="1">×1</option><option value="2">×2</option><option value="3">×3</option></select></div>
+                        <div class="save-info-hint save-info-hint-flush" id="saveInfoHint">Масштаб подбирается автоматически по размеру изображения на холсте</div>
+                        <div class="toggle-row toggle-row-mt">
+                            <label class="toggle-label"><input type="checkbox" id="quickSaveCheck"><span class="toggle-track"></span></label>
+                            <span>Быстрое сохранение</span>
+                        </div>
+                        <div class="quick-save-folder-row" id="quickSaveFolderRow">
+                            <span class="quick-save-folder-name" id="quickSaveFolderName">Папка не выбрана</span>
+                            <button class="ghost-btn ghost-btn-compact-md" id="quickSaveFolderBtn"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Выбрать</button>
+                        </div>
+                    <div class="save-btn-row" id="saveBtnRow">
+                        <button class="save-action primary" id="saveWithRing" disabled><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>С кольцом</button>
+                        <button class="save-action secondary" id="saveWithoutRing" disabled><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>Без кольца</button>
+                     </div>
+                        </div>
+
+                </div>
+            </div>
+            </div>
+        </div>
+
+    <div class="panel" id="fileToolsPanel">
+        <div class="file-tools-layout">
+            <header class="file-tools-header">
+                <div class="file-tools-title">
+                    <h1>Работа с файлами</h1>
+                    <p>Удаление фона и конвертация в одном рабочем окне.</p>
+                </div>
+                <div class="file-mode-switch" role="tablist" aria-label="Инструмент">
+                    <button class="file-mode-btn active" type="button" role="tab" aria-selected="true" data-file-mode="converter" id="fileModeConverterBtn">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10M7 17h10M17 3l4 4-4 4M7 13l-4 4 4 4"/></svg>
+                        Конвертер
+                    </button>
+                    <button class="file-mode-btn" type="button" role="tab" aria-selected="false" data-file-mode="remover" id="fileModeRemoverBtn">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M21 3v6h-6"/><path d="M12 7v5l3 2"/></svg>
+                        Удаление фона
+                    </button>
+                </div>
+            </header>
+            <section class="file-mode-panel" id="removerModePanel" role="tabpanel" hidden>
+        <div class="remover-layout">
+            <div class="remover-top">
+                <div class="remover-dropzone" id="dropzone">
+                    <div class="dropzone-icon">
+                        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                    </div>
+                    <div class="dropzone-text">
+                        <p>Добавьте изображения</p>
+                        <span>Перетащите файлы сюда или нажмите для выбора</span>
+                    </div>
+                </div>
+                <input type="file" id="fileInput" accept="image/*" multiple>
+                <div class="remover-toolbar">
+                    <div class="toolbar-left">
+                        <div class="format-group">
+                            <span class="toolbar-label">Формат файла:</span>
+                            <select class="compact-select" id="formatSelect">
+                                <option value="webp" selected>WEBP</option>
+                                <option value="png">PNG</option>
+                                <option value="jpg">JPG</option>
+                                <option value="avif">AVIF</option>
+                            </select>
+                        </div>
+                        <div class="format-group">
+                            <span class="toolbar-label">Качество:</span>
+                            <input type="range" id="qualitySlider" min="10" max="100" value="90" class="toolbar-slider">
+                            <span id="qualityValue" class="toolbar-value">90%</span>
+                        </div>
+                        <div class="format-group">
+                            <span class="toolbar-label">Смягчение краёв:</span>
+                            <input type="range" id="edgeBlurSlider" min="0" max="10" step="0.5" value="1" class="toolbar-slider">
+                            <span id="edgeBlurValue" class="toolbar-value">1</span>
+                        </div>
+                    </div>
+                    <div class="toolbar-right">
+                        <div class="batch-progress" id="batchProgress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill"></div>
+                            </div>
+                            <span id="progressText">0 / 0</span>
+                        </div>
+                        <span id="resultsCount" class="toolbar-label"></span>
+                        <button class="ghost-btn danger" id="clearAllBtn" style="display:none;">
+                            <svg viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Очистить
+                        </button>
+                        <button class="accent-btn" id="downloadAllBtn" style="display:none;">
+                            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                            Сохранить все
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="results-grid" id="resultsGrid">
+                <div class="empty-state" id="emptyState">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    <p>Результаты появятся здесь</p>
+                    <span>Добавьте изображение для удаления фона</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="file-mode-panel active" id="converterModePanel" role="tabpanel">
+        <div class="remover-layout">
+            <div class="remover-top">
+                <div class="remover-dropzone" id="convDropzone">
+                    <div class="dropzone-icon">
+                        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                    </div>
+                    <div class="dropzone-text">
+                        <p>Добавьте файлы для конвертации</p>
+                        <span>Изображения, аудио и видео • можно несколько файлов</span>
+                    </div>
+                </div>
+                <input type="file" id="convFileInput" accept="image/*,audio/*,video/*,.mp3,.wav,.m4a,.flac,.aac,.wma,.opus,.ogg,.mp4,.mkv,.mov,.avi,.webm" multiple>
+                <div class="remover-toolbar">
+                    <div class="toolbar-left">
+                        <div class="format-group">
+                            <span class="toolbar-label">Формат файла:</span>
+                            <select class="compact-select" id="convFormatSelect">
+                                <option value="webp" selected>WEBP</option>
+                                <option value="png">PNG</option>
+                                <option value="jpg">JPG</option>
+                                <option value="avif">AVIF</option>
+                                <option value="bmp">BMP</option>
+                                <option value="gif">GIF</option>
+                                <option value="tiff">TIFF</option>
+                                <option value="ogg">OGG (аудио)</option>
+                            </select>
+                        </div>
+                        <div class="format-group">
+                            <span class="toolbar-label">Качество:</span>
+                            <input type="range" id="convQualitySlider" min="10" max="100" value="90" class="toolbar-slider">
+                            <span id="convQualityValue" class="toolbar-value">90%</span>
+                        </div>
+                    </div>
+                    <div class="toolbar-right">
+                        <div class="batch-progress" id="convBatchProgress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="convProgressFill"></div>
+                            </div>
+                            <span id="convProgressText">0 / 0</span>
+                        </div>
+                        <span id="convResultsCount" class="toolbar-label"></span>
+                        <button class="ghost-btn danger" id="convClearAllBtn" style="display:none;">
+                            <svg viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Очистить
+                        </button>
+                        <button class="accent-btn" id="convDownloadAllBtn" style="display:none;">
+                            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                            Сохранить все
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="results-grid" id="convResultsGrid">
+                <div class="empty-state" id="convEmptyState">
+                    <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                    <p>Результаты появятся здесь</p>
+                    <span>Добавьте изображение, аудио или видео</span>
+                </div>
+            </div>
+        </div>
+    </section>
+        </div>
+    </div>
+
+    <div class="panel" id="settingsPanel">
+        <div class="settings-panel-inner">
+            <div class="settings-layout">
+                <div class="settings-shell">
+                    <header class="settings-hero" aria-labelledby="settingsTitle">
+                        <div class="settings-hero-copy">
+                            <span class="settings-eyebrow">ПРИЛОЖЕНИЕ</span>
+                            <h1 id="settingsTitle">Настройки приложения</h1>
+                            <p>Параметры обработки, экспорта и горячих клавиш.</p>
+                        </div>
+                        <div class="settings-mark" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M8 14v6"/><circle cx="14" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+                        </div>
+                    </header>
+
+                    <div class="settings-section-heading">
+                        <div>
+                            <span class="settings-eyebrow">РАБОЧАЯ СРЕДА</span>
+                            <h2>Основные параметры</h2>
+                        </div>
+                        <span class="settings-heading-note">Изменения сохраняются автоматически</span>
+                    </div>
+
+                    <div class="settings-option-grid">
+                        <section class="settings-card settings-model-card" id="modelSettingsCard" tabindex="-1">
+                            <div class="settings-card-heading">
+                                <span class="settings-card-icon">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z"/><path d="M9 12h6M12 9v6"/></svg>
+                                </span>
+                                <div>
+                                    <span class="settings-card-kicker">МОДЕЛЬ</span>
+                                    <h3>Модель удаления фона</h3>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                <div class="model-status" id="modelStatus" aria-live="polite">
+                                    <span class="model-status-dot"></span>
+                                    <span id="modelStatusText">Проверка модели…</span>
+                                    <span id="modelSizeLabel" class="model-size-label"></span>
+                                </div>
+                                    <div class="field-row"><span class="field-row-label">Модель:</span><select class="compact-select" id="modelSelect" data-tooltip="Выберите модель удаления фона" disabled><option>Загрузка…</option></select></div>
+                                <div class="settings-model-path"><span class="field-row-label">Папка models</span><span id="modelsDirLabel" class="models-dir-label"></span></div>
+                                <div class="model-actions">
+                                    <button class="ghost-btn model-action-btn" id="downloadModelBtn" type="button" data-tooltip="Загрузить модель удаления фона с сервера">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+                                        Загрузить модель с сервера
+                                    </button>
+                                    <button class="accent-btn model-action-btn" id="loadModelDiskBtn" type="button" data-tooltip="Загрузить модель удаления фона с диска">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg>
+                                        Загрузить модель с диска
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-card">
+                            <div class="settings-card-heading">
+                                <span class="settings-card-icon">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="8"/></svg>
+                                </span>
+                                <div>
+                                    <span class="settings-card-kicker">ПРОИЗВОДИТЕЛЬНОСТЬ</span>
+                                    <h3>Рабочий канвас</h3>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                 <div class="field-row"><span class="field-row-label">Размер холста:</span><select class="compact-select" id="canvasScaleSelect" data-tooltip="Размер рабочего канваса"><option value="1">Производительность</option><option value="2" selected>Баланс</option><option value="3">Качество</option></select></div>
+                                 <div class="field-row"><span class="field-row-label">История отмен:</span><select class="compact-select" id="historyLimitSelect" data-tooltip="Количество шагов отмены"><option value="10">10 шагов</option><option value="20">20 шагов</option><option value="30" selected>30 шагов</option><option value="50">50 шагов</option><option value="100">100 шагов</option></select></div>
+                                <p class="settings-card-hint">Больший размер даёт больше деталей при работе, но требует больше памяти. На экспортируемое изображение это не влияет — экспорт всегда выполняется в полном разрешении.</p>
+                                <p class="settings-card-hint">Больше шагов отмены — больше расход памяти. Применяется к новым записям истории.</p>
+                            </div>
+                        </section>
+
+                        <section class="settings-card">
+                            <div class="settings-card-heading">
+                                <span class="settings-card-icon">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.2 2.4 3.3 5.4 3.3 9S14.2 18.6 12 21c-2.2-2.4-3.3-5.4-3.3-9S9.8 5.4 12 3Z"/></svg>
+                                </span>
+                                <div>
+                                    <span class="settings-card-kicker">ЯЗЫК</span>
+                                    <h3>Язык интерфейса</h3>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                 <div class="field-row"><span class="field-row-label">Язык:</span><select class="compact-select" id="languageSelect" data-tooltip="Выберите язык интерфейса"><option value="system">Как в системе</option><option value="ru">Русский</option><option value="en">English</option></select></div>
+                                <p class="settings-card-hint">Выберите язык интерфейса приложения.</p>
+                            </div>
+                        </section>
+
+                        <section class="settings-card settings-card-save">
+                            <div class="settings-card-heading">
+                                <span class="settings-card-icon">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4M8 20v-6h8v6"/></svg>
+                                </span>
+                                <div>
+                                    <span class="settings-card-kicker">СОХРАНЕНИЕ</span>
+                                    <h3>Сохранение по умолчанию</h3>
+                                </div>
+                            </div>
+                            <div class="settings-save-right">
+                                <div class="settings-save-fields">
+                                     <div class="field-row"><span class="field-row-label">Размер токена:</span><select class="compact-select" id="defQualitySelect" data-tooltip="Размер сохраняемого изображения"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select></div>
+                                     <div class="field-row"><span class="field-row-label">Формат пакетной обработки:</span><select class="compact-select" id="defRemoverFormat" data-tooltip="Формат пакетной обработки"><option value="webp">WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option><option value="avif">AVIF</option></select></div>
+                                     <div class="field-row"><span class="field-row-label">Формат токена:</span><select class="compact-select" id="tokenFormatSelect" data-tooltip="Формат сохраняемого токена"><option value="webp" selected>WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option></select></div>
+                                </div>
+                                <div class="settings-quality-row">
+                                     <span class="field-row-label">Качество токена (WebP/JPG):</span>
+                                     <input type="range" id="tokenCompressionSlider" data-tooltip="Качество токена для WebP/JPG" min="1" max="100" step="1" value="95" class="toolbar-slider">
+                                    <span id="tokenCompressionValue" class="toolbar-value">95%</span>
+                                </div>
+                            </div>
+                            </section>
+                    </div>
+
+                    <section class="settings-card settings-hotkeys-card">
+                        <div class="settings-hotkeys-heading">
+                            <div class="settings-card-heading">
+                                <span class="settings-card-icon">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h.01M11 9h.01M15 9h.01M7 13h.01M11 13h6M7 16h10"/></svg>
+                                </span>
+                                <div>
+                                    <span class="settings-card-kicker">КЛАВИШИ</span>
+                                    <h3>Горячие клавиши</h3>
+                                    <p class="settings-card-subtitle">Настройте управление под свой рабочий процесс.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="hotkeys-toolbar">
+                            <label class="settings-search" for="hotkeysSearch">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input type="text" id="hotkeysSearch" class="settings-search-input" placeholder="Поиск по клавишам…" aria-label="Поиск по горячим клавишам">
+                            </label>
+                             <button class="ghost-btn settings-reset-btn" id="hotkeysResetAllBtn" type="button" data-tooltip="Сбросить все горячие клавиши">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                                Сбросить по умолчанию
+                            </button>
+                        </div>
+                        <div id="hotkeysEditorTable" class="hotkeys-table"></div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </section>
+        </div>
+    </div>
+
+    <div class="panel" id="aboutPanel">
+        <div class="about-layout">
+            <div class="about-shell">
+                <aside class="about-identity" aria-labelledby="aboutTitle">
+                    <div class="about-logo">
+                        <img src="/logo" alt="Логотип Tokenatra">
+                    </div>
+                    <div class="about-identity-copy">
+                        <div class="about-title" id="aboutTitle">Tokenatra</div>
+                        <p class="about-tagline">Локальный редактор токенов</p>
+                        <a class="about-version" id="aboutVersion" href="https://github.com/{{ github_repo }}" target="_blank" rel="noopener">Загрузка…</a>
+                    </div>
+                    <div class="about-header-actions">
+                        <a class="about-link" href="https://github.com/{{ github_repo }}" target="_blank" rel="noopener">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M10.226 17.284c-2.965-.36-5.054-2.493-5.054-5.256 0-1.123.404-2.336 1.078-3.144-.292-.741-.247-2.314.09-2.965.898-.112 2.111.36 2.83 1.01.853-.269 1.752-.404 2.853-.404 1.1 0 1.999.135 2.807.382.696-.629 1.932-1.1 2.83-.988.315.606.36 2.179.067 2.942.72.854 1.101 2 1.101 3.167 0 2.763-2.089 4.852-5.098 5.234.763.494 1.28 1.572 1.28 2.807v2.336c0 .674.561 1.056 1.235.786 4.066-1.55 7.255-5.615 7.255-10.646C23.5 6.188 18.334 1 11.978 1 5.62 1 .5 6.188.5 12.545c0 4.986 3.167 9.12 7.435 10.669.606.225 1.19-.18 1.19-.786V20.63a2.9 2.9 0 0 1-1.078.224c-1.483 0-2.359-.808-2.987-2.313-.247-.607-.517-.966-1.034-1.033-.27-.023-.359-.135-.359-.27 0-.27.45-.471.898-.471.652 0 1.213.404 1.797 1.235.45.651.921.943 1.483.943.561 0 .92-.202 1.437-.719.382-.381.674-.718.944-.943"/></svg>
+                            GitHub
+                            <svg class="about-external-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>
+                        </a>
+                        <button class="accent-btn accent-btn-compact" id="checkUpdatesBtn">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 1 1-2.3-5.7"/><path d="M20 4v6h-6"/></svg>
+                            Проверить обновления
+                        </button>
+                    </div>
+                </aside>
+
+                <main class="about-content" aria-labelledby="aboutHeading">
+                    <header class="about-intro">
+                        <span class="about-eyebrow">О ПРОГРАММЕ</span>
+                        <h1 id="aboutHeading">Подготовьте изображение для игры</h1>
+                        <p class="about-desc">
+                            Откройте портрет из файла, перетащите его в окно или вставьте из буфера. Затем удалите фон,
+                            настройте композицию и сохраните круглый токен для Foundry VTT. Исходные изображения не отправляются в интернет.
+                        </p>
+                    </header>
+
+                    <section class="about-feature-grid" aria-label="Возможности">
+                        <div class="about-feature-card">
+                            <span class="about-feature-icon">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M21 3v6h-6"/><path d="M12 7v5l3 2"/></svg>
+                            </span>
+                            <strong>Удаление фона</strong>
+                            <span>Модель отделяет персонажа от фона. Результат можно уточнить ластиком и маской.</span>
+                        </div>
+                        <div class="about-feature-card">
+                            <span class="about-feature-icon">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+                            </span>
+                            <strong>Настройка композиции</strong>
+                            <span>Масштабируйте, перемещайте и поворачивайте изображение на круглом холсте.</span>
+                        </div>
+                        <div class="about-feature-card">
+                            <span class="about-feature-icon">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 22h8M12 18v4M7 8h.01M11 8h6M7 12h.01M11 12h6"/></svg>
+                            </span>
+                            <strong>Оформление токена</strong>
+                            <span>Добавьте кольцо, тень и цветокоррекцию или подготовьте портретный вариант.</span>
+                        </div>
+                        <div class="about-feature-card">
+                            <span class="about-feature-icon">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 17h6M17 14v6"/></svg>
+                            </span>
+                            <strong>Пакетная обработка</strong>
+                            <span>Обрабатывайте несколько изображений и сохраняйте их в WEBP, PNG, JPG или AVIF.</span>
+                        </div>
+                    </section>
+
+                    <div class="about-device-info">
+                        <span class="about-device-icon">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 9-12h-7l1-8Z"/></svg>
+                        </span>
+                        <span class="about-device-copy">
+                            <span class="about-device-label">Модель удаления фона</span>
+                            <span class="about-device-caption">Модель и устройство выбираются в настройках</span>
+                        </span>
+                        <span class="about-device-value"><span class="about-device-badge"></span><span id="aboutDeviceValue">Загрузка…</span></span>
+                    </div>
+
+                    <div class="about-update-area">
+                        <div class="about-update" id="aboutUpdateBox" hidden>
+                            <div class="about-update-status" id="aboutUpdateStatus" role="status" aria-live="polite"></div>
+                            <div class="about-update-progress" id="aboutUpdateProgress" hidden>
+                                <div class="progress-bar"><div class="progress-fill" id="aboutUpdateBarFill"></div></div>
+                                <span class="about-update-pct" id="aboutUpdatePct">0%</span>
+                            </div>
+                            <div class="about-update-actions" id="aboutUpdateActions"></div>
+                        </div>
+                    </div>
+
+                </main>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+<div class="modal" id="compareModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span>Сравнение</span>
+            <button class="modal-close" id="closeCompare">
+                <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="compare-container">
+            <div class="compare-slider" id="compareSlider">
+                <div class="compare-before" id="compareBefore"></div>
+                <div class="compare-after" id="compareAfter"></div>
+                <div class="compare-handle" id="compareHandle"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="addRingModal" role="dialog" aria-modal="true" aria-labelledby="addRingTitle" aria-hidden="true">
+    <div class="modal-content ring-modal-content">
+        <div class="modal-header">
+            <span id="addRingTitle">Добавить кольцо</span>
+            <button class="modal-close" id="closeAddRing" type="button" aria-label="Закрыть">
+                <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <form class="ring-form" id="addRingForm">
+            <label class="ring-form-label" for="ringFileInput">Изображение кольца</label>
+            <input class="ring-file-input" id="ringFileInput" name="ring" type="file" accept=".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg" required>
+            <label class="ring-form-label" for="ringNameInput">Название <span>(необязательно)</span></label>
+            <input class="ring-text-input" id="ringNameInput" name="name" type="text" maxlength="80" placeholder="Например, Серебряная окантовка">
+            <div class="ring-form-actions">
+                <button class="ghost-btn" id="cancelAddRing" type="button">Отмена</button>
+                <button class="accent-btn" type="submit">Добавить</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    window.__APP_VERSION = '{{ __version__ }}';
+</script>
+<script src="{{ url_for('static', filename='js/config.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/state.js', v=__version__) }}"></script>
+    <script src="{{ url_for('static', filename='js/utils.js', v=__version__) }}"></script>
+    <script src="{{ url_for('static', filename='js/i18n.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/urlManager.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/tokenEffects.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/tokenHistory.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/tokenPresets.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/tokenCanvas.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/tokenEditor.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/portraitGenerator.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/hotkeySettings.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/remover.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/converter.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/main.js', v=__version__) }}"></script>
+<script>
+    document.getElementById('saveQualitySelect').addEventListener('change', function() {
+        updateSaveHint(this.value, document.getElementById('saveScaleSelect').value);
+    });
+
+    document.getElementById('saveScaleSelect').addEventListener('change', function() {
+        updateSaveHint(document.getElementById('saveQualitySelect').value, this.value);
+    });
+
+    function updateSaveHint(quality, scale) {
+        const hint = document.getElementById('saveInfoHint');
+        if (!hint) return;
+        quality = parseInt(quality);
+        if (scale === 'auto') {
+            hint.textContent = I18n.t('Масштаб подбирается автоматически по размеру изображения на холсте');
+        } else {
+            const s = parseInt(scale);
+            hint.textContent = I18n.t(quality + 'px × ' + s + ' = ' + (quality * s) + 'px итоговый файл');
+        }
+    }
+    document.addEventListener('languagechange', function() {
+        updateSaveHint(document.getElementById('saveQualitySelect').value, document.getElementById('saveScaleSelect').value);
+    });
+</script>
+</div>
+</body>
+</html>

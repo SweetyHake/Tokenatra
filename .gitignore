@@ -1,0 +1,15 @@
+model.onnx
+/.vibe_backups
+/__pycache__
+config.json
+app.pid
+/build
+/dist
+*.spec
+*.pyc
+blaze_face_short_range.tflite
+models/
+
+.last_update_check
+
+/.playwright-cli
