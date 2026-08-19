@@ -178,7 +178,7 @@ Stored in `config.json`, managed by `AppConfig` (JS) with a rebindable UI in `ho
 ## External assets
 
 - `model.onnx` — BiRefNet или RMBG-2.0/IS-Net, кладётся вручную в `models/` (не в репозитории, в `.gitignore`)
-- `mask.png` — защита областей для ластика (поставляется с приложением). Включается тумблером «Защита» в редакторе (`state.protectionEnabled`, config `protectionEnabled`), по умолчанию ВЫКЛЮЧЕНА — при включённой тёмные области маски защищены от стирания (и ластик, и розовая маска пропускают их). ВАЖНО: при выключенной защите маска не грузится вовсе — иначе тёмный `mask.png` блокирует стирание (баг «ластик не работает»).
+- `mask.png` — защита областей для ластика (поставляется с приложением). Включается тумблером «Защита» в редакторе (`state.protectionEnabled`, config `protectionEnabled`), по умолчанию ВКЛЮЧЕНА — при включённой тёмные области маски защищены от стирания (и ластик, и розовая маска пропускают их). Маска — полноразмерный дизайн всего канваса (у пользователя `mask.png` = 6144×6144): `buildProtectionCanvasFromImg()` растягивает её на весь рабочий канвас (случай 1:1 при `canvasScale` 3). ВАЖНО: при выключенной защите маска не грузится вовсе — иначе тёмный `mask.png` блокирует стирание (баг «ластик не работает»).
 - `token_rings/` — folder with ring PNG/WebP files (optional)
 - `presets/` — folder with preset mask images (optional)
 - Images loaded from clipboard/files are never stored on disk

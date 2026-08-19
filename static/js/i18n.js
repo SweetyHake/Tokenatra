@@ -4,11 +4,12 @@ const I18n = {
     _applying: false,
     _textSources: new WeakMap(),
     _attributeSources: new WeakMap(),
+    _attributeWritten: new WeakMap(),
 
     translations: {
         'Доступно обновление': 'Update available',
         'Загрузка…': 'Loading…',
-        'Создание токена': 'Token creator',
+        'Создание токена': 'Token Maker',
         'Работа с файлами': 'File tools',
         'Настройки': 'Settings',
         'О программе': 'About',
@@ -97,7 +98,7 @@ const I18n = {
         'Без кольца': 'Without ring',
         'Загрузите изображение': 'Load an image',
         'Перетащите файл сюда или вставьте из буфера': 'Drop a file here or paste it from the clipboard',
-        'Работа с файлами': 'File tools',
+        'Работа с файлами': 'File Tools',
         'Удаление фона и конвертация в одном рабочем окне.': 'Background removal and conversion in one workspace.',
         'Инструмент': 'Tool',
         'Конвертер': 'Converter',
@@ -336,8 +337,17 @@ const I18n = {
                 if (!el.hasAttribute(attr)) return;
                 let sources = this._attributeSources.get(el);
                 if (!sources) { sources = {}; this._attributeSources.set(el, sources); }
-                sources[attr] ||= el.getAttribute(attr);
-                el.setAttribute(attr, this.t(sources[attr]));
+                let written = this._attributeWritten.get(el);
+                if (!written) { written = {}; this._attributeWritten.set(el, written); }
+                const current = el.getAttribute(attr);
+                if (!(attr in sources)) {
+                    sources[attr] = current;
+                } else if (written[attr] !== undefined && current !== written[attr]) {
+                    sources[attr] = current;
+                }
+                const translated = this.t(sources[attr]);
+                el.setAttribute(attr, translated);
+                written[attr] = translated;
             });
         });
         this._applying = false;

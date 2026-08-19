@@ -2,21 +2,21 @@ const TokenPresets = {
     _presetOverlayTimer: null,
 
     buildProtectionCanvasFromImg(img, internalSize) {
-        // Маска (2048-дизайн) = область 1×: масштабируем под текущий канвас,
-        // как кольцо (internalSize/3). Иначе при канвасе 2048 защита была бы
-        // в 3 раза больше области токена. SCALE_SIZES[1]*(internalSize/SCALE_SIZES[3])
-        // после {1536,3072,6144} даёт size/4 — защита не совпадала с кольцом.
-        const maskDisplaySize = Math.round(internalSize / 3);
-        const offset = Math.round((internalSize - maskDisplaySize) / 2);
+        // Маска — полноразмерный дизайн всего канваса (mask.png, напр. 6144×6144):
+        // растягиваем на весь рабочий канвас. Раньше маска центрировалась как
+        // кольцо (internalSize/3) и не совпадала с реальной областью изображения
+        // при экспорте 2×/3×.
         const srcW = img.naturalWidth || img.width;
         const srcH = img.naturalHeight || img.height;
 
         const scaledMask = document.createElement('canvas');
-        scaledMask.width = maskDisplaySize;
-        scaledMask.height = maskDisplaySize;
+        scaledMask.width = internalSize;
+        scaledMask.height = internalSize;
         const sCtx = scaledMask.getContext('2d');
-        sCtx.drawImage(img, 0, 0, srcW, srcH, 0, 0, maskDisplaySize, maskDisplaySize);
-        const srcData = sCtx.getImageData(0, 0, maskDisplaySize, maskDisplaySize);
+        sCtx.imageSmoothingEnabled = true;
+        sCtx.imageSmoothingQuality = 'high';
+        sCtx.drawImage(img, 0, 0, srcW, srcH, 0, 0, internalSize, internalSize);
+        const srcData = sCtx.getImageData(0, 0, internalSize, internalSize);
         const sd = srcData.data;
 
         const protCanvas = document.createElement('canvas');
@@ -25,23 +25,15 @@ const TokenPresets = {
         const pCtx = protCanvas.getContext('2d');
         const protData = pCtx.createImageData(internalSize, internalSize);
         const pd = protData.data;
+        const n = internalSize * internalSize;
 
-        for (let y = 0; y < internalSize; y++) {
-            for (let x = 0; x < internalSize; x++) {
-                const mx = x - offset;
-                const my = y - offset;
-                const oi = (y * internalSize + x) * 4;
-                if (mx < 0 || my < 0 || mx >= maskDisplaySize || my >= maskDisplaySize) {
-                    pd[oi] = 0; pd[oi+1] = 0; pd[oi+2] = 0; pd[oi+3] = 0;
-                    continue;
-                }
-                const si = (my * maskDisplaySize + mx) * 4;
-                const a = sd[si + 3];
-                const brightness = (sd[si] + sd[si+1] + sd[si+2]) / 3;
-                const isProtected = a > 16 && brightness < 220;
-                pd[oi] = 255; pd[oi+1] = 255; pd[oi+2] = 255;
-                pd[oi+3] = isProtected ? 255 : 0;
-            }
+        for (let i = 0; i < n; i++) {
+            const oi = i * 4;
+            const a = sd[oi + 3];
+            const brightness = (sd[oi] + sd[oi+1] + sd[oi+2]) / 3;
+            const isProtected = a > 16 && brightness < 220;
+            pd[oi] = 255; pd[oi+1] = 255; pd[oi+2] = 255;
+            pd[oi+3] = isProtected ? 255 : 0;
         }
 
         pCtx.putImageData(protData, 0, 0);

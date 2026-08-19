@@ -791,6 +791,11 @@ var TokenCanvas = {
                     cctx.globalCompositeOperation = 'source-over';
                     cctx.restore();
                 }
+
+                // Маска стирает Пример в грязном регионе — перерисовываем его поверх патча
+                if (state.userImage && state.exampleEnabled && state.exampleImage) {
+                    this._drawExampleOverlay(size, dr);
+                }
             } else {
                 var tc = perf ? previewCanvas : this._tempCanvas;
                 var tempCtx = tc.getContext('2d');
@@ -850,21 +855,7 @@ var TokenCanvas = {
         }
 
         if (state.userImage && state.exampleEnabled && state.exampleImage) {
-            var ex = state.exampleImage;
-            // Пример — шаблон токена: масштаб m показывает область экспорта m×
-            // (центр m/3 канваса) независимо от масштаба рабочего канваса.
-            // SCALE_SIZES[m] нельзя использовать: это абсолютные px, и при
-            // канвасе 1×/2× пример был бы в 1.5–4 раза больше реальной области.
-            var exMode = [1, 2, 3].includes(state.exampleScaleMode) ? state.exampleScaleMode : 1;
-            var exRatio = exMode / 3;
-            var exW = size * exRatio;
-            var exH = size * exRatio;
-            this.ctx.save();
-            this.ctx.globalAlpha = state.exampleOpacity;
-            this.ctx.imageSmoothingEnabled = true;
-            this.ctx.imageSmoothingQuality = 'high';
-            this.ctx.drawImage(ex, (size - exW) / 2, (size - exH) / 2, exW, exH);
-            this.ctx.restore();
+            this._drawExampleOverlay(size, null);
         }
 
         if (!erasing && state.presetOverlayActive && state.presetOverlayCanvas && !$('presetOverlay')) {
@@ -1930,6 +1921,28 @@ var TokenCanvas = {
         TokenHistory.save();
         this.render();
         toast('Маска сброшена');
+    },
+
+    _drawExampleOverlay: function(size, clipRect) {
+        if (!state.userImage || !state.exampleEnabled || !state.exampleImage) return;
+        var ex = state.exampleImage;
+        // Пример — шаблон токена: масштаб m показывает область экспорта m×
+        // (центр m/3 канваса) независимо от масштаба рабочего канваса.
+        var exMode = [1, 2, 3].includes(state.exampleScaleMode) ? state.exampleScaleMode : 1;
+        var exRatio = exMode / 3;
+        var exW = size * exRatio;
+        var exH = size * exRatio;
+        this.ctx.save();
+        if (clipRect) {
+            this.ctx.beginPath();
+            this.ctx.rect(clipRect.x, clipRect.y, clipRect.w, clipRect.h);
+            this.ctx.clip();
+        }
+        this.ctx.globalAlpha = state.exampleOpacity;
+        this.ctx.imageSmoothingEnabled = true;
+        this.ctx.imageSmoothingQuality = 'high';
+        this.ctx.drawImage(ex, (size - exW) / 2, (size - exH) / 2, exW, exH);
+        this.ctx.restore();
     },
 
     _renderProtectionMaskOverlay: function(size) {

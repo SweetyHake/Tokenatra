@@ -168,6 +168,7 @@ const AppConfig = {
     get edgeBlur() { return this._data.edgeBlur; },
     get dropShadowEnabled() { return this._data.dropShadowEnabled; },
 get colorCorrectionEnabled() { return this._data.colorCorrectionEnabled; },
+    get protectionEnabled() { return this._data.protectionEnabled; },
     get quickSaveEnabled() { return this._data.quickSaveEnabled; },
 
     setTheme(val) { this._data.theme = val; this.save(); },
