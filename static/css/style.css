@@ -14,7 +14,7 @@
     --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
 
     /* Typography */
-    --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13.5px;
+    --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px;
     --fs-md: 15px; --fs-lg: 17px; --fs-xl: 22px; --fs-2xl: 28px;
     --lh-tight: 1.25; --lh-base: 1.5;
     --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
@@ -56,8 +56,8 @@
     --accent-subtle: rgba(255,128,0,.07);
     --accent-text: #ffb340;
     --text-primary: #d0b8a3;
-    --text-secondary: #9f8475;
-    --text-muted: #8a7365;
+    --text-secondary: #c0a493;
+    --text-muted: #ad9281;
     --text-disabled: #5a4b42;
     --danger: #f87171;
     --danger-hover: #fca5a5;
@@ -216,6 +216,7 @@ textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
     opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
 }
 .panel.active { opacity: 1; pointer-events: auto; }
+.panel[aria-hidden="true"] { visibility: hidden; }
 
 /* Token workspace */
 .workspace { display: flex; flex: 1; overflow: hidden; position: relative; }
@@ -331,8 +332,11 @@ input[type="file"] { display: none; }
 
 /* ── Toggle row ─────────────────────────────────────────────── */
 .toggle-row { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-secondary); flex-wrap: nowrap; }
-.toggle-label { display: flex; align-items: center; cursor: pointer; }
-.toggle-label input[type="checkbox"] { display: none; }
+.toggle-label { display: flex; align-items: center; cursor: pointer; position: relative; }
+.toggle-label input[type="checkbox"] {
+    position: absolute; width: 1px; height: 1px; margin: 0;
+    opacity: 0; clip-path: inset(50%); overflow: hidden;
+}
 .toggle-track {
     width: 30px; height: 18px;
     background: var(--border); border-radius: 9px;
@@ -347,6 +351,7 @@ input[type="file"] { display: none; }
 }
 .toggle-label input:checked + .toggle-track { background: var(--accent-dim); }
 .toggle-label input:checked + .toggle-track::after { transform: translateX(12px); background: var(--accent); }
+.toggle-label input:focus-visible + .toggle-track { box-shadow: var(--focus-ring); }
 
 .display-options { display: flex; flex-direction: column; gap: 6px; }
 .display-option {
@@ -696,7 +701,7 @@ input[type="file"] { display: none; }
 .ring-empty svg { width: 14px; height: 14px; color: var(--text-muted); opacity: 0.3; }
 .ring-counter { font-size: 9px; color: var(--text-muted); text-align: center; padding: 2px 0; }
 .ring-add-btn {
-    width: 20px; height: 20px; margin-left: auto; padding: 0;
+    width: 32px; height: 32px; margin-left: auto; padding: 0;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--bg-input); border: 1px solid var(--border);
     border-radius: var(--r-sm); color: var(--text-muted); cursor: pointer;
@@ -721,7 +726,7 @@ input[type="file"] { display: none; }
 .accordion-header-left svg { width: 12px; height: 12px; }
 .accordion-header-right { display: flex; align-items: center; gap: 4px; }
 .accordion-reset-btn {
-    width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
     background: transparent; border: none; border-radius: var(--r-xs);
     color: var(--text-muted); cursor: pointer; padding: 0;
     transition: all var(--dur-fast) var(--ease-out);
@@ -746,10 +751,13 @@ input[type="file"] { display: none; }
 /* Accordion body dims when collapsed (already handled by JS .open class) */
 
 /* ── Effect check ───────────────────────────────────────────── */
-.effect-check { display: flex; align-items: center; cursor: pointer; }
-.effect-check input[type="checkbox"] { display: none; }
+.effect-check { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; cursor: pointer; position: relative; }
+.effect-check input[type="checkbox"] {
+    position: absolute; width: 1px; height: 1px; margin: 0;
+    opacity: 0; clip-path: inset(50%); overflow: hidden;
+}
 .check-box {
-    width: 16px; height: 16px; border: 1.5px solid var(--border-light);
+    width: 20px; height: 20px; border: 1.5px solid var(--border-light);
     border-radius: 4px; display: flex; align-items: center; justify-content: center;
     transition: all var(--dur-fast) var(--ease-out);
 }
@@ -758,6 +766,7 @@ input[type="file"] { display: none; }
     content: ''; width: 9px; height: 9px;
     background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center/contain no-repeat;
 }
+.effect-check input:focus-visible + .check-box { box-shadow: var(--focus-ring); }
 
 /* ── Feature-toggle row ─────────────────────────────────────── */
 .feature-toggle {
@@ -1853,7 +1862,7 @@ input[type="file"] { display: none; }
 .ctx-scroll { padding: 12px 14px 14px; gap: 9px; }
 .ctx-subtitle {
     min-height: 27px; padding: 5px 7px; gap: 6px; border: 1px solid var(--border-subtle);
-    border-radius: var(--r-sm); background: rgba(48,40,49,.35); font-size: 9px; letter-spacing: .08em;
+    border-radius: var(--r-sm); background: rgba(48,40,49,.35); font-size: 12px; letter-spacing: .06em;
 }
 .ctx-subtitle svg { width: 11px; height: 11px; color: var(--accent); opacity: .85; }
 .ctx-divider { background: var(--border-subtle); margin: 1px 0; }
@@ -1868,11 +1877,11 @@ input[type="file"] { display: none; }
 .eraser-size-row { border-radius: var(--r-sm); background: var(--bg-raised); }
 .transform-row { gap: 5px; }
 .slider-row { min-height: 22px; }
-.slider-label { min-width: 58px; font-size: 10px; }
+.slider-label { min-width: 58px; font-size: var(--fs-xs); }
 .slider-number { width: 38px; padding: 2px 4px; }
 .context-panel-right .ctx-scroll { gap: 8px; }
 .accordion-header { min-height: 30px; padding: 5px 7px; border: 1px solid var(--border-subtle); border-radius: var(--r-sm); background: rgba(48,40,49,.35); }
-.accordion-header-left { font-size: 9px; letter-spacing: .08em; }
+.accordion-header-left { font-size: 12px; letter-spacing: .06em; }
 .accordion-header-left svg { color: var(--accent); }
 .accordion-header-right { gap: 5px; }
 .accordion-body.open { padding: 7px 5px 3px; }

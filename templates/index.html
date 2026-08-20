@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tokenatra</title>
     <link rel="icon" href="/icon" type="image/x-icon">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,11 +23,11 @@
             </button>
             <div class="device-dot" id="deviceBadge" data-tooltip="Загрузка…"></div>
         </div>
-        <div class="tb-nav">
-            <button class="nav-btn active" data-mode="token">Создание токена</button>
-            <button class="nav-btn" data-mode="fileTools">Работа с файлами</button>
-<button class="nav-btn nav-btn-utility" data-mode="settings">Настройки</button>
-            <button class="nav-btn nav-btn-utility" data-mode="about">О программе</button>
+        <div class="tb-nav" role="tablist" aria-label="Разделы приложения">
+            <button class="nav-btn active" data-mode="token" role="tab" aria-selected="true" aria-controls="tokenPanel">Создание токена</button>
+            <button class="nav-btn" data-mode="fileTools" role="tab" aria-selected="false" aria-controls="fileToolsPanel">Работа с файлами</button>
+<button class="nav-btn nav-btn-utility" data-mode="settings" role="tab" aria-selected="false" aria-controls="settingsPanel">Настройки</button>
+            <button class="nav-btn nav-btn-utility" data-mode="about" role="tab" aria-selected="false" aria-controls="aboutPanel">О программе</button>
         </div>
         <div class="tb-spacer"></div>
         <div class="window-controls" id="windowControls">
@@ -51,7 +51,7 @@
     <div class="main-area">
         <div class="panel-container">
 
-        <div class="panel active" id="tokenPanel">
+        <div class="panel active" id="tokenPanel" role="tabpanel">
             <div class="workspace">
 
             <div class="context-panel context-panel-left">
@@ -120,7 +120,7 @@
                         <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="rotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="rotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
                     </div>
                     <div class="ctx-divider"></div>
-                    <div class="accordion-header" id="exampleAccordion">
+                    <div class="accordion-header" id="exampleAccordion" role="button" tabindex="0" aria-expanded="false" aria-controls="exampleSettings">
                         <div class="accordion-header-left">
                             <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             Пример
@@ -179,7 +179,7 @@
 
                         <div class="ctx-divider"></div>
 
-                        <div class="accordion-header" id="shadowAccordion">
+                        <div class="accordion-header" id="shadowAccordion" role="button" tabindex="0" aria-expanded="false" aria-controls="dropShadowSettings">
                             <div class="accordion-header-left">
                                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
                                 Тень
@@ -199,7 +199,7 @@
 
                         <div class="ctx-divider"></div>
 
-                        <div class="accordion-header" id="ccAccordion">
+                        <div class="accordion-header" id="ccAccordion" role="button" tabindex="0" aria-expanded="false" aria-controls="colorCorrectionSettings">
                             <div class="accordion-header-left">
                                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                                 Цветокоррекция
@@ -217,7 +217,7 @@
 
                         <div class="ctx-divider"></div>
 
-                        <div class="accordion-header" id="portraitAccordion">
+                        <div class="accordion-header" id="portraitAccordion" role="button" tabindex="0" aria-expanded="false" aria-controls="portraitSettings">
                             <div class="accordion-header-left">
                                 <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                 Портрет
@@ -273,7 +273,7 @@
             </div>
         </div>
 
-    <div class="panel" id="fileToolsPanel">
+    <div class="panel" id="fileToolsPanel" role="tabpanel">
         <div class="file-tools-layout">
             <header class="file-tools-header">
                 <div class="file-tools-title">
@@ -420,7 +420,7 @@
         </div>
     </div>
 
-    <div class="panel" id="settingsPanel">
+    <div class="panel" id="settingsPanel" role="tabpanel">
         <div class="settings-panel-inner">
             <div class="settings-layout">
                 <div class="settings-shell">
@@ -568,7 +568,7 @@
         </div>
     </div>
 
-    <div class="panel" id="aboutPanel">
+    <div class="panel" id="aboutPanel" role="tabpanel">
         <div class="about-layout">
             <div class="about-shell">
                 <aside class="about-identity" aria-labelledby="aboutTitle">

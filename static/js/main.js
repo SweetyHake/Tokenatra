@@ -1,12 +1,26 @@
 function initTabs() {
+    const panels = document.querySelectorAll('.panel');
+    const tabs = document.querySelectorAll('.nav-btn[data-mode]');
+    tabs.forEach(tab => tab.setAttribute('role', 'tab'));
+    panels.forEach(panel => {
+        const active = panel.classList.contains('active');
+        panel.setAttribute('aria-hidden', String(!active));
+        panel.inert = !active;
+    });
     document.querySelectorAll('.nav-btn[data-mode]').forEach(tab => {
         tab.onclick = () => {
             const mode = tab.dataset.mode;
             document.querySelectorAll('.nav-btn[data-mode]').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
-            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-btn[data-mode]').forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+            document.querySelectorAll('.panel').forEach(p => {
+                const active = p.id === mode + 'Panel';
+                p.classList.toggle('active', active);
+                p.setAttribute('aria-hidden', String(!active));
+                p.inert = !active;
+            });
             const panel = $(mode + 'Panel');
-            if (panel) panel.classList.add('active');
+            if (panel) panel.focus?.({ preventScroll: true });
         };
     });
 }

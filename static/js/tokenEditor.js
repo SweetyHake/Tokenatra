@@ -436,15 +436,26 @@ const TokenEditor = {
             var body = $(bodyId);
             var arrow = $(arrowId);
             if (!header || !body) return;
-            header.onclick = function(e) {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') return;
-                if (e.target.closest('.accordion-reset-btn')) return;
-                var isOpen = body.classList.toggle('open');
+            var setOpen = function(isOpen) {
+                body.classList.toggle('open', isOpen);
+                body.inert = !isOpen;
+                header.setAttribute('aria-expanded', String(isOpen));
                 if (arrow) arrow.classList.toggle('open', isOpen);
                 if (isOpen) {
                     if (onOpen) onOpen();
                     setTimeout(function() { body.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
                 }
+            };
+            body.inert = !body.classList.contains('open');
+            header.onclick = function(e) {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') return;
+                if (e.target.closest('.accordion-reset-btn')) return;
+                setOpen(!body.classList.contains('open'));
+            };
+            header.onkeydown = function(e) {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                setOpen(!body.classList.contains('open'));
             };
         }
         toggle('shadowAccordion', 'dropShadowSettings', 'shadowArrow');
