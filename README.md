@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Локальное Windows-приложение для создания токенов персонажей,<br>
+  Локальное приложение для Windows, macOS и Linux для создания токенов персонажей,<br>
   удаления фона и пакетной конвертации файлов.
 </p>
 
@@ -102,6 +102,10 @@ Tokenatra готовит картинки персонажей для Foundry VT
 
 ## Установка
 
+Основной редактор токенов, конвертер файлов и удаление фона через локальную ONNX-модель
+поддерживаются на Windows, macOS и Linux. Контекстное меню файлового менеджера и
+автоматическая установка обновлений пока остаются функциями Windows.
+
 Установить Tokenatra можно из готового установщика или запустить из исходников.
 
 ### Готовый установщик
@@ -116,7 +120,7 @@ Tokenatra готовит картинки персонажей для Foundry VT
 
 ### Запуск из исходников
 
-Нужны Windows и Python 3. Скрипт `start.bat` сам поставит недостающие зависимости, пересоберёт приложение через PyInstaller и запустит desktop-оболочку без консольного окна:
+Нужны Python 3 и системный WebKit-бэкенд для pywebview. На Windows используйте `start.bat`:
 
 ```bat
 start.bat
@@ -136,11 +140,26 @@ python server.py
 
 После запуска интерфейс будет по адресу `http://127.0.0.1:7878`.
 
-Зависимости ставит `start.bat`:
+На macOS и Linux:
+
+```bash
+./start.sh
+```
+
+Для Linux обычно нужны пакеты GTK/WebKitGTK, например `python3-tk`, `gir1.2-gtk-3.0`
+и `gir1.2-webkit2-4.1` или их эквиваленты для конкретного дистрибутива. Для конвертации
+аудио и видео можно использовать встроенный FFmpeg из `imageio-ffmpeg` или системный
+`ffmpeg` в `PATH`.
+
+Зависимости Windows ставит `start.bat`:
 
 ```bat
 python -m pip install onnxruntime-directml numpy Pillow flask pywebview psutil imageio-ffmpeg
 ```
+
+Для macOS и Linux используется `requirements-cross-platform.txt`. В нём указан обычный
+`onnxruntime`, поэтому обязательный режим удаления фона работает через CPU. На Linux
+можно отдельно установить совместимый CUDA- или ROCm-провайдер ONNX Runtime.
 
 ## ONNX-модель
 
@@ -210,6 +229,16 @@ build_installer.bat
 ```
 
 Результат — в `dist/installer/Tokenatra_Setup_v*.exe`. Нужен [Inno Setup 6](https://jrsoftware.org/isdl.php).
+
+Для macOS и Linux сборку выполняйте на самой целевой ОС:
+
+```bash
+./build-unix.sh
+```
+
+Скрипт создаёт portable-сборку в `dist/Tokenatra/`. Для macOS её можно дополнительно
+упаковать в `.app` или `.dmg`, а для Linux — в AppImage. PyInstaller не создаёт нативные
+сборки macOS и Linux из Windows.
 
 ## Структура проекта
 

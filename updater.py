@@ -9,6 +9,7 @@ from threading import Lock, Thread
 from urllib.request import Request, urlopen
 
 from version import __version__, APP_NAME, GITHUB_REPO
+from platform_utils import user_data_dir
 
 _logger = logging.getLogger(__name__)
 
@@ -154,8 +155,7 @@ def _touch_throttle_file():
 
 def _update_dir():
     """Каталог для скачанных обновлений (LOCALAPPDATA — в Program Files запись запрещена)."""
-    base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
-    d = Path(base) / "Tokenatra" / "update"
+    d = user_data_dir() / "update"
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -210,7 +210,12 @@ def check_for_updates(force=False):
             _state.complete_check(False)
             return
 
-        url = _find_exe_asset(assets)
+        if sys.platform == "win32":
+            url = _find_exe_asset(assets)
+        else:
+            # Unix packages have different formats and must not be passed to
+            # the Windows .exe downloader or replacement script.
+            url = data.get("html_url", _releases_url())
         if not url:
             url = data.get("html_url", _releases_url())
 
@@ -225,6 +230,11 @@ def check_for_updates(force=False):
 
 
 def download_update():
+    if sys.platform != "win32":
+        _state.complete_download(
+            error="Автоматическая установка обновлений пока поддерживается только в Windows"
+        )
+        return
     try:
         with _state.lock:
             if _state.download_active or _state.download_done:

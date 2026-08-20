@@ -1,0 +1,7 @@
+numpy
+Pillow
+flask
+pywebview
+psutil
+imageio-ffmpeg
+onnxruntime

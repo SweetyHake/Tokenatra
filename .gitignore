@@ -6,6 +6,7 @@ app.pid
 /build
 /dist
 *.spec
+!build.spec
 *.pyc
 blaze_face_short_range.tflite
 models/

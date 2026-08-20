@@ -2,6 +2,8 @@ import ctypes
 import os
 import sys
 
+from platform_utils import terminate_process
+
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tiff', '.tif'}
 MEDIA_EXTENSIONS = {
     '.mp3', '.wav', '.m4a', '.flac', '.aac', '.wma', '.opus', '.ogg',
@@ -161,6 +163,15 @@ PID_FILE = None
 
 def _kill_process_on_port(port):
     import subprocess
+    if sys.platform != 'win32':
+        try:
+            import psutil
+            for conn in psutil.net_connections(kind='tcp'):
+                if conn.laddr and conn.laddr.port == port and conn.pid:
+                    terminate_process(conn.pid)
+        except Exception:
+            pass
+        return
     try:
         r = subprocess.run(['netstat', '-ano'], capture_output=True, text=True)
         target = f'127.0.0.1:{port}'
@@ -175,7 +186,7 @@ def _kill_process_on_port(port):
         pass
 
 
-kernel32 = ctypes.windll.kernel32
+kernel32 = ctypes.windll.kernel32 if sys.platform == 'win32' else None
 
 # Keep WNDPROC callback objects alive (prevent GC)
 _wndproc_refs = []
@@ -262,8 +273,8 @@ def _nuclear_exit():
             PID_FILE.unlink()
         except Exception:
             pass
-    _unregister_context_menu()
-    kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0)
+    if sys.platform == 'win32':
+        _unregister_context_menu()
 
 
 def main():
@@ -278,8 +289,9 @@ def main():
 
     global PID_FILE
 
-    _set_taskbar_identity()
-    _setup_webview2_gpu()
+    if sys.platform == 'win32':
+        _set_taskbar_identity()
+        _setup_webview2_gpu()
 
     if '--tune-gpu' in sys.argv:
         from server import cli_tune_gpu
@@ -290,10 +302,11 @@ def main():
     URL = f'http://localhost:{PORT}'
     SPLASH_URL = f'http://localhost:{PORT}/splash'
 
-    kernel32.SetConsoleCtrlHandler(
-        ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint)(lambda event: (kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0), True)[1]),
-        1
-    )
+    if kernel32 is not None:
+        kernel32.SetConsoleCtrlHandler(
+            ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint)(lambda event: (kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0), True)[1]),
+            1
+        )
 
     PID_FILE = BASE_DIR / 'app.pid'
 
@@ -301,7 +314,7 @@ def main():
         try:
             old_pid = int(PID_FILE.read_text())
             if old_pid != _os.getpid():
-                subprocess.run(['taskkill', '/F', '/PID', str(old_pid)], capture_output=True)
+                terminate_process(old_pid)
                 time.sleep(0.3)
         except Exception:
             pass
@@ -313,7 +326,8 @@ def main():
     except Exception:
         pass
 
-    _register_context_menu()
+    if sys.platform == 'win32':
+        _register_context_menu()
     # The on-disk throttle has no cached result to restore in a new process.
     # Always perform one real check for each application session.
     start_background_tasks(force=True, delay=15)
@@ -388,6 +402,12 @@ def main():
 
     def _on_loaded():
         _set_icon()
+        if sys.platform != 'win32':
+            try:
+                window.show()
+            except Exception:
+                pass
+            return
         try:
             native = window.native
             if native and hasattr(native, 'Handle'):
@@ -510,7 +530,9 @@ def main():
     window.events.closing += _nuclear_exit
     window.events.closed += _nuclear_exit
 
-    webview.start(gui='edgechromium', debug=False)
+    # Let pywebview select Cocoa/WebKit2GTK on Unix; EdgeChromium is Windows-only.
+    gui = 'edgechromium' if sys.platform == 'win32' else None
+    webview.start(gui=gui, debug=False)
 
     _nuclear_exit()
 

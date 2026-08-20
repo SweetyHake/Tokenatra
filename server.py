@@ -18,6 +18,7 @@ from flask import Flask, request, render_template, jsonify, send_file, current_a
 from PIL import Image, ImageFilter, ImageDraw
 import onnxruntime as ort
 from version import __version__, APP_NAME, GITHUB_REPO, MODEL_DOWNLOAD_URL
+from platform_utils import user_data_dir
 from updater import (
     get_status as updater_status,
     start_background_tasks,
@@ -76,10 +77,7 @@ def _resolve_user_data_dir():
     """Каталог для пользовательских данных (models/, config.json).
     Установленные сборки лежат в Program Files и недоступны для записи
     обычному пользователю — переходим в LOCALAPPDATA (как в updater.py)."""
-    candidates = [
-        BASE_DIR,
-        Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir()) / "Tokenatra",
-    ]
+    candidates = [user_data_dir(), BASE_DIR]
     for cand in candidates:
         try:
             cand.mkdir(parents=True, exist_ok=True)
@@ -154,7 +152,7 @@ def get_selected_model_path():
             return onnx_files[0]
     except Exception:
         pass
-    # Ручные модели рядом с exe (недоступны для записи, но читаются)
+    # Also read models from the application directory for portable builds.
     legacy = BASE_DIR / "models"
     if legacy.resolve() != MODELS_DIR.resolve():
         try:
@@ -291,7 +289,7 @@ def convert_media_to_ogg(file, quality):
     """Конвертирует первый аудиопоток аудио- или видеофайла в OGG Vorbis."""
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
-        raise RuntimeError('FFmpeg не найден. Положите ffmpeg.exe в папку tools рядом с приложением')
+        raise RuntimeError('FFmpeg не найден. Установите FFmpeg или добавьте его в PATH')
 
     suffix = Path(file.filename or '').suffix.lower() or '.media'
     input_fd, input_path = tempfile.mkstemp(suffix=suffix)
@@ -309,13 +307,10 @@ def convert_media_to_ogg(file, quality):
             output_path,
         ]
         creationflags = 0x08000000 if sys.platform == 'win32' else 0
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            creationflags=creationflags,
-        )
+        run_options = {'capture_output': True, 'text': True, 'timeout': 600}
+        if sys.platform == 'win32':
+            run_options['creationflags'] = creationflags
+        result = subprocess.run(command, **run_options)
         if result.returncode != 0:
             details = result.stderr.strip().splitlines()
             detail = details[-1] if details else 'неизвестная ошибка FFmpeg'
@@ -721,7 +716,10 @@ def _spawn_tune_child():
             else:
                 args = [sys.executable, str(BASE_DIR / 'server.py'), '--tune-gpu']
             # 0x08000000 = CREATE_NO_WINDOW, 0x00004000 = BELOW_NORMAL_PRIORITY_CLASS
-            subprocess.Popen(args, creationflags=0x08000000 | 0x00004000, close_fds=True)
+            options = {'close_fds': True}
+            if sys.platform == 'win32':
+                options['creationflags'] = 0x08000000 | 0x00004000
+            subprocess.Popen(args, **options)
             print(" Запущен фоновый подбор адаптера DirectML (отдельный процесс)…")
 
         t = threading.Timer(5.0, _spawn)
@@ -1215,6 +1213,8 @@ def window_action(action):
         elif action in ('close', 'destroy'):
             win.destroy()
         elif action == 'move':
+            if sys.platform != 'win32':
+                return jsonify({'ok': False, 'error': 'native move is unavailable on this platform'}), 501
             import ctypes
             native = win.native
             if native:
@@ -1231,6 +1231,8 @@ def window_action(action):
 @app.route('/api/window/resize_start', methods=['POST'])
 def window_resize_start():
     """Resize the parent window when WebView2 owns the client-area hit-test."""
+    if sys.platform != 'win32':
+        return jsonify({'ok': False, 'error': 'native resize is unavailable on this platform'}), 501
     win = getattr(current_app, 'window_ref', None)
     if not win:
         return jsonify({'ok': False, 'error': 'no window'})
@@ -1361,6 +1363,11 @@ def check_update():
 
 @app.route('/apply_update', methods=['POST'])
 def apply_update():
+    if sys.platform != 'win32':
+        return jsonify({
+            'error': 'Автоматическая установка обновлений пока поддерживается только в Windows. '
+                     'Откройте страницу релиза и установите пакет вручную.'
+        }), 501
     try:
         s = updater_status()
         src = s.get('download_path', '')
