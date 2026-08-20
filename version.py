@@ -1,4 +1,4 @@
-__version__ = "26.1.2"
+__version__ = "26.1.3"
 APP_NAME = "Tokenatra"
 MODEL_FILE = "model.onnx"
 # Прямая ссылка на модель для кнопки «Загрузить модель с сервера».
