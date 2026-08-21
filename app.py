@@ -284,7 +284,7 @@ def main():
     import threading
     import time
     import webview
-    from server import app, BASE_DIR
+    from server import app, BASE_DIR, RESOURCE_DIR, USER_DATA_DIR
     from updater import start_background_tasks
 
     global PID_FILE
@@ -308,7 +308,7 @@ def main():
             1
         )
 
-    PID_FILE = BASE_DIR / 'app.pid'
+    PID_FILE = USER_DATA_DIR / 'app.pid'
 
     if PID_FILE.exists():
         try:
@@ -377,7 +377,7 @@ def main():
 
     def _set_icon():
         try:
-            icon_path = str(BASE_DIR / 'icon.ico')
+            icon_path = str(RESOURCE_DIR / 'icon.ico')
             native = window.native
             if not native or not hasattr(native, 'Handle'):
                 return

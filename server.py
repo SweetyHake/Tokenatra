@@ -29,7 +29,38 @@ from updater import (
 
 warnings.filterwarnings('ignore')
 
-app = Flask(__name__)
+
+def _resolve_resource_dir():
+    """Find bundled read-only resources in source and PyInstaller builds."""
+    configured = os.environ.get('TOKENATRA_RESOURCE_DIR')
+    if configured:
+        return Path(configured)
+
+    candidates = []
+    if getattr(sys, 'frozen', False):
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            candidates.append(Path(meipass))
+
+        executable_dir = Path(sys.executable).resolve().parent
+        if sys.platform == 'darwin' and executable_dir.name == 'MacOS':
+            candidates.append(executable_dir.parent / 'Resources')
+        candidates.append(executable_dir)
+    else:
+        candidates.append(Path(__file__).resolve().parent)
+
+    for candidate in candidates:
+        if (candidate / 'templates').is_dir() and (candidate / 'static').is_dir():
+            return candidate
+    return candidates[0]
+
+
+RESOURCE_DIR = _resolve_resource_dir()
+app = Flask(
+    __name__,
+    template_folder=str(RESOURCE_DIR / 'templates'),
+    static_folder=str(RESOURCE_DIR / 'static'),
+)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 # Статика не кэшируется: после обновления приложения WebView2 не должен
 # подхватывать старые JS (12-часовой дефолт Flask давал микс старых/новых файлов)
@@ -100,9 +131,9 @@ USER_DATA_DIR = _resolve_user_data_dir()
 MODELS_DIR = USER_DATA_DIR / "models"
 # Встроенные кольца живут рядом с приложением (read-only в Program Files),
 # пользовательские — в LOCALAPPDATA (куда разрешена запись).
-BUILTIN_RING_DIR = BASE_DIR / "token_rings"
+BUILTIN_RING_DIR = RESOURCE_DIR / "token_rings"
 RING_DIR = USER_DATA_DIR / "token_rings"
-MASK_PATH = BASE_DIR / "mask.png"
+MASK_PATH = RESOURCE_DIR / "mask.png"
 
 # Встроенные кольца: имя файла (casefold) → отображаемое имя.
 # Имя — исходный русский текст; в UI переводится через I18n.t().
@@ -112,7 +143,7 @@ BUILTIN_RINGS = {
     'ag-stormsteel.webp': 'Штормовая сталь',
     'ag-wood-runic.png': 'Руническое дерево',
 }
-PRESET_DIR = BASE_DIR
+PRESET_DIR = RESOURCE_DIR
 MODEL_DOWNLOAD_URL = os.environ.get('TOKENATRA_MODEL_URL', MODEL_DOWNLOAD_URL).strip()
 
 
@@ -264,6 +295,10 @@ def is_media_file(file):
 def find_ffmpeg():
     """Ищет FFmpeg рядом с приложением, в tools/ или в PATH."""
     candidates = (
+        RESOURCE_DIR / 'ffmpeg.exe',
+        RESOURCE_DIR / 'tools' / 'ffmpeg.exe',
+        RESOURCE_DIR / 'ffmpeg',
+        RESOURCE_DIR / 'tools' / 'ffmpeg',
         BASE_DIR / 'ffmpeg.exe',
         BASE_DIR / 'tools' / 'ffmpeg.exe',
         BASE_DIR / 'ffmpeg',
@@ -1031,7 +1066,7 @@ def models_list():
     models = []
     seen = set()
     dirs = [MODELS_DIR]
-    legacy = BASE_DIR / "models"
+    legacy = RESOURCE_DIR / "models"
     if legacy.resolve() != MODELS_DIR.resolve():
         dirs.append(legacy)
     for d in dirs:
@@ -1066,7 +1101,7 @@ def select_model():
     p = MODELS_DIR / Path(filename).name
     if p.suffix.lower() != '.onnx' or not p.exists() or not p.is_file():
         # Модель, положенная вручную рядом с exe (Program Files) — только чтение
-        legacy = BASE_DIR / "models" / Path(filename).name
+        legacy = RESOURCE_DIR / "models" / Path(filename).name
         if legacy.suffix.lower() == '.onnx' and legacy.is_file():
             p = legacy
         else:
@@ -1182,15 +1217,15 @@ def load_model_from_disk():
 
 @app.route('/icon')
 def app_icon():
-    return send_file(BASE_DIR / 'icon.ico', mimetype='image/x-icon')
+    return send_file(RESOURCE_DIR / 'icon.ico', mimetype='image/x-icon')
 
 
 @app.route('/logo')
 def app_logo():
-    logo = BASE_DIR / 'logo.png'
+    logo = RESOURCE_DIR / 'logo.png'
     if logo.exists():
         return send_file(logo, mimetype='image/png')
-    return send_file(BASE_DIR / 'icon.ico', mimetype='image/x-icon')
+    return send_file(RESOURCE_DIR / 'icon.ico', mimetype='image/x-icon')
 
 
 @app.route('/splash')
@@ -1308,7 +1343,7 @@ def window_resize_start():
 @app.route('/presets_list')
 def presets_list():
     extensions = {'.png', '.webp', '.jpg', '.jpeg'}
-    preset_dir = BASE_DIR / 'presets'
+    preset_dir = RESOURCE_DIR / 'presets'
     if not preset_dir.exists():
         preset_dir.mkdir(exist_ok=True)
     presets = []
@@ -1321,7 +1356,7 @@ def presets_list():
 @app.route('/preset_file/<filename>')
 def preset_file(filename):
     safe = Path(filename).name
-    preset_dir = BASE_DIR / 'presets'
+    preset_dir = RESOURCE_DIR / 'presets'
     path = preset_dir / safe
     if not path.exists() or not path.is_file():
         return jsonify({'error': 'Not found'}), 404
@@ -1527,7 +1562,7 @@ def preset():
     name = request.args.get('name', 'preset1')
     if not name.replace('_', '').replace('-', '').isalnum():
         return jsonify({'error': 'Invalid preset name'}), 400
-    preset_dir = BASE_DIR / 'presets'
+    preset_dir = RESOURCE_DIR / 'presets'
     for ext in ['.png', '.webp', '.jpg']:
         preset_path = preset_dir / f"{name}{ext}"
         if preset_path.exists():
