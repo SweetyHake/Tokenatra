@@ -62,6 +62,8 @@ var state = {
     _rawProtectionMaskImg: null,
     protectionMask: null,
     erasableCanvas: null,
+    protectionAlpha: null,
+    protectionSize: 0,
     exampleEnabled: false,
     exampleImage: null,
     exampleOpacity: 0.5,

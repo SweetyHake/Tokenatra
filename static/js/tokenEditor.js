@@ -306,6 +306,8 @@ const TokenEditor = {
                     ctx.clearRect(0, 0, state.imageMaskCanvas.width, state.imageMaskCanvas.height);
                     ctx.fillStyle = 'white';
                     ctx.fillRect(0, 0, state.imageMaskCanvas.width, state.imageMaskCanvas.height);
+                    // Маска переписана напрямую — синхронизируем альфа-зеркало воркера
+                    TokenCanvas._pushMaskToWorker(false);
                 }
 
                 TokenCanvas._compositedImageDirty = true;

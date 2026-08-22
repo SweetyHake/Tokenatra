@@ -13,12 +13,16 @@ var TokenCanvas = {
     _compositedImageDirty: true,
 
     _ccDirty: true,
+    _ccImageCache: null,
+    _ccCacheKey: null,
     _shadowCache: null,
     _shadowDirty: true,
     _isErasing: false,
     _worker: null,
-    _workerPending: false,
-    _workerBatch: null,
+    _workerInFlight: 0,
+    // Очереди раздельные: смена инструмента (eraser↔mask) при занятом воркере
+    // не должна штамповать точки одного режима кистью другого
+    _workerQueues: { pink: [], image: [] },
     _workerBatchTimer: null,
     _workerBrushSent: {},
 
@@ -110,28 +114,61 @@ var TokenCanvas = {
             if (window.__APP_VERSION) workerUrl += '?v=' + window.__APP_VERSION;
             this._worker = new Worker(workerUrl);
             this._workerBrushSent = {};
+            this._workerQueues.pink = [];
+            this._workerQueues.image = [];
+            this._workerInFlight = 0;
             this._worker.onmessage = this._onWorkerBrushDone.bind(this);
             this._worker.onerror = function() {
-                // Сбрасываем очередь, чтобы штрихи не зависли и не применились позже
+                // Сбрасываем очереди, чтобы штрихи не зависли и не применились позже
                 TokenCanvas._worker = null;
-                TokenCanvas._workerPending = false;
-                TokenCanvas._workerBatch = null;
+                TokenCanvas._workerInFlight = 0;
+                TokenCanvas._workerQueues.pink = [];
+                TokenCanvas._workerQueues.image = [];
                 if (TokenCanvas._workerBatchTimer) {
                     clearTimeout(TokenCanvas._workerBatchTimer);
                     TokenCanvas._workerBatchTimer = null;
                 }
             };
+            // Воркер хранит альфа-зеркала масок: при (пере)создании отправляем
+            // текущее состояние, чтобы пачки не несли пиксели маски
+            if (state.maskCanvas) this._pushMaskToWorker(true);
+            if (state.imageMaskCanvas) this._pushMaskToWorker(false);
         } catch(e) {
             this._worker = null;
         }
     },
 
+    // Полный снапшот альфы маски в воркер. Дорогой (полный getImageData),
+    // но вызывается только при загрузке/undo/сбросе/пресете — не в горячем пути
+    _pushMaskToWorker: function(pink) {
+        if (!this._worker) return;
+        var src = pink ? state.maskCanvas : state.imageMaskCanvas;
+        var mode = pink ? 'pink' : 'image';
+        if (!src) {
+            this._worker.postMessage({ type: 'setMask', mode: mode, alphaData: null, width: 0, height: 0 });
+            return;
+        }
+        var w = src.width;
+        var h = src.height;
+        var d = src.getContext('2d').getImageData(0, 0, w, h).data;
+        var n = w * h;
+        var alpha = new Uint8Array(n);
+        for (var i = 0; i < n; i++) alpha[i] = d[i * 4 + 3];
+        this._worker.postMessage({ type: 'setMask', mode: mode, alphaData: alpha, width: w, height: h }, [alpha.buffer]);
+    },
+
     _onWorkerBrushDone: function(e) {
-        this._workerPending = false;
+        this._workerInFlight--;
 
         var d = e.data;
+
+        // Сначала кормим воркер следующей пачкой — он не должен простаивать,
+        // пока главный поток применяет результат (putImageData/рендер)
+        this._flushWorkerBatch(true);
+
         // Ответ устаревшего поколения (после undo/сброса/загрузки нового изображения) — отбрасываем
         if (d.gen !== this._maskGen) return;
+        if (!d.maskData) return;
 
         var pink = d.mode === 'pink';
         var target = pink ? state.maskCanvas : state.imageMaskCanvas;
@@ -165,11 +202,6 @@ var TokenCanvas = {
 
             this.requestRender();
         }
-
-        // Накопленная пачка улетает сразу, не дожидаясь таймера
-        if (this._workerBatch && this._workerBatch.length > 0) {
-            this._flushWorkerBatch(true);
-        }
     },
 
     _flushWorkerBatch: function(force) {
@@ -179,46 +211,42 @@ var TokenCanvas = {
         }
         if (!this._worker || (!state.imageMaskCanvas && !state.maskCanvas)) {
             // Воркер недоступен — прогоняем накопленные точки фолбэком
-            var pts = this._workerBatch || [];
-            this._workerBatch = null;
-            for (var i = 0; i < pts.length; i++) {
-                var p = pts[i];
-                if (p.mode === 'pink') {
-                    this.applyEraserBrushToPinkMask(p.cx, p.cy, p.restore);
-                } else {
-                    this._fallbackBrushToImageMask(p.cx, p.cy, p.restore);
+            var modes = ['pink', 'image'];
+            for (var m = 0; m < modes.length; m++) {
+                var pts = this._workerQueues[modes[m]];
+                this._workerQueues[modes[m]] = [];
+                for (var i = 0; i < pts.length; i++) {
+                    var p = pts[i];
+                    if (p.mode === 'pink') {
+                        this.applyEraserBrushToPinkMask(p.cx, p.cy, p.restore);
+                    } else {
+                        this._fallbackBrushToImageMask(p.cx, p.cy, p.restore);
+                    }
                 }
             }
             return;
         }
-        if (!this._workerBatch || this._workerBatch.length === 0) {
-            this._workerBatch = null;
-            return;
+        // Глубина пайплайна 2: воркер обрабатывает следующую пачку, пока
+        // главный поток применяет результат предыдущей
+        while (this._workerInFlight < 2) {
+            // Маски разные, порядок между режимами не важен — берём любую непустую
+            var mode = this._workerQueues.pink.length > 0 ? 'pink' :
+                       (this._workerQueues.image.length > 0 ? 'image' : null);
+            if (!mode) break;
+            var queue = this._workerQueues[mode];
+            var batch = queue.splice(0, Math.min(queue.length, 64));
+            this._workerInFlight++;
+            this._sendWorkerBatch(mode, batch);
+            if (!this._worker) break; // onerror внутри send-пути маловероятен, но дешёвая страховка
         }
-        if (this._workerPending) {
-            // Текущий ответ улетает в _onWorkerBrushDone → flush остатка
-            return;
-        }
-        var batch = this._workerBatch;
-        if (batch.length > 64) {
-            batch = batch.splice(0, 64);
-        } else {
-            this._workerBatch = null;
-        }
-        this._workerPending = true;
-        this._sendWorkerBatch(batch);
     },
 
     _ensureWorkerBrush: function(brushCanvas, key) {
         if (!this._worker || this._workerBrushSent[key] === brushCanvas) return;
+        // Свежий getImageData на каждую отправку: буфер передаётся воркеру
+        // (detach), закэшированный ImageData повторно использовать нельзя
         var brushCtx = brushCanvas.getContext('2d');
-        var brushImageData = this._brushImageDataCache;
-        if (!brushImageData || this._brushImageDataCacheCanvas !== brushCanvas) {
-            brushImageData = brushCtx.getImageData(0, 0, brushCanvas.width, brushCanvas.height);
-            this._brushImageDataCache = brushImageData;
-            this._brushImageDataCacheCanvas = brushCanvas;
-        }
-        var buf = brushImageData.data.buffer.slice(0);
+        var buf = brushCtx.getImageData(0, 0, brushCanvas.width, brushCanvas.height).data.buffer;
         this._worker.postMessage({
             type: 'setBrush',
             brushData: buf,
@@ -249,14 +277,14 @@ var TokenCanvas = {
         this._strokeDirtyRect = this._unionDirtyRect(this._strokeDirtyRect, { x: cx - r, y: cy - r, w: r * 2, h: r * 2 });
     },
 
-    _sendWorkerBatch: function(batch) {
-        var pink = batch[0].mode === 'pink';
+    _sendWorkerBatch: function(mode, batch) {
+        var pink = mode === 'pink';
         var maskCanvas = pink ? state.maskCanvas : state.imageMaskCanvas;
-        if (!maskCanvas) { this._workerPending = false; return; }
+        if (!maskCanvas) { this._workerInFlight--; return; }
 
         var brush = pink ? this.eraserBrush : this._getImageBrush();
-        if (!brush) { this._workerPending = false; return; }
-        this._ensureWorkerBrush(brush.canvas, pink ? 'pink' : 'image');
+        if (!brush) { this._workerInFlight--; return; }
+        this._ensureWorkerBrush(brush.canvas, mode);
 
         var mw = maskCanvas.width;
         var mh = maskCanvas.height;
@@ -267,12 +295,20 @@ var TokenCanvas = {
         var effectiveScale = pink ? 1 : state.imageScale * scale;
         var rotation = pink ? 0 : state.imageRotation;
 
-        // Общий регион пачки = объединение bbox всех точек кисти
+        // Лимит площади региона на пачку: длинный быстрый штрих иначе сливается
+        // в один гигантский прямоугольник и ответ воркера/putImageData
+        // становятся O(длина штриха²). Пачка делится на компактные кластеры —
+        // стоимость каждого сообщения предсказуема
+        var maxArea = Math.max(brush.fullSize * brush.fullSize * 6, 262144);
+
+        // Бюджет кластера считается по объединению bbox (регион воркер
+        // вычисляет сам — главный поток маску не читает)
         var minX = mw, minY = mh, maxX = 0, maxY = 0;
-        var strokes = [];
+        var packed = [];
         var dirtyRect = null;
         var brushRadius = this._strokeBrushRadius(pink);
-        for (var i = 0; i < batch.length; i++) {
+        var i = 0;
+        for (; i < batch.length; i++) {
             var task = batch[i];
             var drawX, drawY;
             if (pink) {
@@ -289,45 +325,43 @@ var TokenCanvas = {
             var rx2 = Math.min(mw, drawX + brush.fullSize + pad);
             var ry2 = Math.min(mh, drawY + brush.fullSize + pad);
             if (rx2 <= rx1 || ry2 <= ry1) continue;
-            if (rx1 < minX) minX = rx1;
-            if (ry1 < minY) minY = ry1;
-            if (rx2 > maxX) maxX = rx2;
-            if (ry2 > maxY) maxY = ry2;
-            strokes.push({ cx: task.cx, cy: task.cy, drawX: drawX, drawY: drawY, restore: !!task.restore });
+
+            var nx1 = minX < rx1 ? minX : rx1;
+            var ny1 = minY < ry1 ? minY : ry1;
+            var nx2 = maxX > rx2 ? maxX : rx2;
+            var ny2 = maxY > ry2 ? maxY : ry2;
+            // Одиночный штамп всегда влезает в лимит, поэтому после break
+            // пачка не пуста и воркер получит сообщение → хвост не зависнет
+            if (packed.length > 0 && (nx2 - nx1) * (ny2 - ny1) > maxArea) break;
+            minX = nx1; minY = ny1; maxX = nx2; maxY = ny2;
+            packed.push(Math.round(task.cx), Math.round(task.cy), drawX, drawY, task.restore ? 1 : 0);
 
             // Грязный регион в координатах канваса для инкрементального рендера
             dirtyRect = this._unionDirtyRect(dirtyRect, { x: task.cx - brushRadius, y: task.cy - brushRadius, w: brushRadius * 2, h: brushRadius * 2 });
         }
-        if (strokes.length === 0) { this._workerPending = false; return; }
+        if (i < batch.length) {
+            // Остаток возвращается в начало очереди — уйдёт следующим сообщением
+            var q = this._workerQueues[mode];
+            for (var j = batch.length - 1; j >= i; j--) q.unshift(batch[j]);
+        }
+        if (packed.length === 0) { this._workerInFlight--; return; }
 
-        var regionX = minX;
-        var regionY = minY;
-        var regionW = maxX - minX;
-        var regionH = maxY - minY;
-
-        // Одно чтение маски и одна запись на пачку (раньше — на точку)
-        var maskCtx = maskCanvas.getContext('2d');
-        var maskImageData = maskCtx.getImageData(regionX, regionY, regionW, regionH);
-
-        var transferList = [maskImageData.data.buffer.slice(0)];
+        // Штрихи упакованы в Float64Array: [cx, cy, drawX, drawY, flags]×N —
+        // компактное сообщение без мусора для GC, cx/cy без потери точности
+        // (от них зависит сэмпл защиты)
+        var strokeBuf = new Float64Array(packed).buffer;
 
         this._worker.postMessage({
             type: 'applyBrushBatch',
             id: Date.now(),
             gen: this._maskGen,
-            mode: pink ? 'pink' : 'image',
-            maskData: transferList[0],
-            maskWidth: mw,
-            maskHeight: mh,
-            regionX: regionX,
-            regionY: regionY,
-            regionWidth: regionW,
-            regionHeight: regionH,
+            mode: mode,
+            strokeData: strokeBuf,
+            strokeCount: packed.length / 5,
             effectiveScale: effectiveScale,
             imageRotation: rotation,
-            strokes: strokes,
             dirtyRect: dirtyRect
-        }, transferList);
+        }, [strokeBuf]);
     },
 
     _fixCanvasDisplay: function() {
@@ -411,8 +445,6 @@ var TokenCanvas = {
         this.eraserBrush = { canvas: brush, size: scaledRadius, fullSize: brushSize };
         this._imageBrushCache = null;
         this._imageBrushCacheSize = -1;
-        this._brushImageDataCache = null;
-        this._brushImageDataCacheCanvas = null;
         this._workerBrushSent = {};
     },
 
@@ -458,18 +490,15 @@ var TokenCanvas = {
 
     syncProtectionToWorker: function() {
         if (!this._worker) return;
-        var src = state.erasableCanvas;
-        if (!src) {
+        // Альфа защиты уже посчитана при построении erasableCanvas
+        // (buildProtectionCanvasFromImg) — второй полный проход не нужен
+        var alpha = state.protectionAlpha;
+        if (!alpha) {
             this._worker.postMessage({ type: 'setProtection', protData: null, protSize: 0 });
             return;
         }
-        var w = src.width;
-        var h = src.height;
-        var d = src.getContext('2d').getImageData(0, 0, w, h).data;
-        var n = w * h;
-        var alpha = new Uint8Array(n);
-        for (var i = 0; i < n; i++) alpha[i] = d[i * 4 + 3];
-        this._worker.postMessage({ type: 'setProtection', protData: alpha, protSize: w }, [alpha.buffer]);
+        // Без transfer: postMessage клонирует массив, state сохраняет владение
+        this._worker.postMessage({ type: 'setProtection', protData: alpha, protSize: state.protectionSize });
     },
 
     invalidateEffectsCache: function() {
@@ -482,6 +511,38 @@ var TokenCanvas = {
         this._ccDirty = true;
         this._shadowDirty = true;
         this._compositedImageDirty = true;
+    },
+
+    // Цветокоррекция применяется один раз к копии изображения, а не на каждый
+    // патч композита: ctx.filter на drawImage — самая дорогая часть стирания
+    // при включённой КС. Инвалидация — через _ccDirty (слайдеры КС, тумблер,
+    // смена изображения уже выставляют его)
+    _getColorCorrectedImage: function() {
+        var src = state.userImage;
+        if (!src) return null;
+        if (!state.colorCorrectionEnabled) {
+            this._ccImageCache = null;
+            this._ccCacheKey = null;
+            return src;
+        }
+        if (this._ccImageCache && this._ccCacheKey === src && !this._ccDirty) {
+            return this._ccImageCache;
+        }
+        var w = src.width;
+        var h = src.height;
+        if (!this._ccImageCache || this._ccImageCache.width !== w || this._ccImageCache.height !== h) {
+            this._ccImageCache = document.createElement('canvas');
+            this._ccImageCache.width = w;
+            this._ccImageCache.height = h;
+        }
+        var ctx = this._ccImageCache.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        ctx.filter = colorCorrectionFilter();
+        ctx.drawImage(src, 0, 0);
+        ctx.filter = 'none';
+        this._ccCacheKey = src;
+        this._ccDirty = false;
+        return this._ccImageCache;
     },
 
     _freeEffectCaches: function() {
@@ -517,9 +578,8 @@ var TokenCanvas = {
         ctx.rect(rx, ry, rw, rh);
         ctx.clip();
         ctx.clearRect(rx, ry, rw, rh);
-        if (state.colorCorrectionEnabled) ctx.filter = colorCorrectionFilter();
-        ctx.drawImage(state.userImage, rx, ry, rw, rh, rx, ry, rw, rh);
-        ctx.filter = 'none';
+        // Цветокоррекция уже вшита в кэш — фильтр на патч не применяется
+        ctx.drawImage(this._getColorCorrectedImage(), rx, ry, rw, rh, rx, ry, rw, rh);
         ctx.globalCompositeOperation = 'destination-in';
         ctx.drawImage(state.imageMaskCanvas, rx, ry, rw, rh, rx, ry, rw, rh);
         ctx.globalCompositeOperation = 'source-over';
@@ -553,11 +613,9 @@ var TokenCanvas = {
         var ctx = this._compositedImageCache.getContext('2d');
         ctx.clearRect(0, 0, iw, ih);
 
-        if (state.colorCorrectionEnabled) {
-            ctx.filter = colorCorrectionFilter();
-        }
-        ctx.drawImage(state.userImage, 0, 0);
-        ctx.filter = 'none';
+        // Источник уже с цветокоррекцией (кэш) — фильтр не нужен
+        var ccSrc = this._getColorCorrectedImage();
+        if (ccSrc) ctx.drawImage(ccSrc, 0, 0);
 
         if (state.imageMaskCanvas) {
             ctx.globalCompositeOperation = 'destination-in';
@@ -582,15 +640,24 @@ var TokenCanvas = {
         }
         if (!displaySide) return;
         var pixelsPerInternalUnit = (displaySide / this.internalSize) * state.viewZoom;
-        var brushInternalRadius = state.eraserSize * internalScale;
-        var displayDiameter = brushInternalRadius * 2 * pixelsPerInternalUnit;
-        this.eraserCursor.style.width = displayDiameter + 'px';
-        this.eraserCursor.style.height = displayDiameter + 'px';
-        this.eraserCursor.style.left = e.clientX + 'px';
-        this.eraserCursor.style.top = e.clientY + 'px';
-        this.eraserCursor.style.borderColor = state.currentEraserMode === 'blue'
+        var displayDiameter = Math.round(state.eraserSize * internalScale * 2 * pixelsPerInternalUnit * 100) / 100;
+        var color = state.currentEraserMode === 'blue'
             ? 'rgba(100, 180, 255, 0.85)'
             : 'rgba(255, 100, 180, 0.85)';
+        var st = this.eraserCursor.style;
+        // Позиция — через transform (композитор, без layout/paint); размер и
+        // цвет меняются только при зуме/смене режима — не дёргаем стили
+        // на каждом mousemove
+        st.transform = 'translate3d(' + e.clientX + 'px,' + e.clientY + 'px,0) translate(-50%,-50%)';
+        if (displayDiameter !== this._cursorLastSize) {
+            st.width = displayDiameter + 'px';
+            st.height = displayDiameter + 'px';
+            this._cursorLastSize = displayDiameter;
+        }
+        if (color !== this._cursorLastColor) {
+            st.borderColor = color;
+            this._cursorLastColor = color;
+        }
     },
 
     showEraserCursor: function() {
@@ -629,6 +696,7 @@ var TokenCanvas = {
         }
 
         state.maskCanvas = newMask;
+        this._pushMaskToWorker(true);
     },
 
     createImageMask: function() {
@@ -649,6 +717,7 @@ var TokenCanvas = {
 
         state.imageMaskCanvas = newMask;
         this._invalidateComposite();
+        this._pushMaskToWorker(false);
     },
 
     render: function() {
@@ -671,6 +740,10 @@ var TokenCanvas = {
         if (areaEl) areaEl.classList.remove('no-image');
 
         var erasing = this._isErasing;
+        // Во время штриха достаточно medium: на больших регионах апскейл
+        // high в разы дороже, разница на экране неотличима. Финальный кадр
+        // и экспорт всегда рендерятся с high
+        var strokeQuality = erasing ? 'medium' : 'high';
         // Режим производительности (канвас 1×, 1536px) рисует штрих пониженным
         // превью и растягивает на канвас — быстрее, но мягче. В режимах
         // «баланс»/«качество» штрих рендерится на полном разрешении без апскейла.
@@ -767,7 +840,7 @@ var TokenCanvas = {
                     pctx.globalCompositeOperation = 'source-over';
                     pctx.restore();
                     this.ctx.imageSmoothingEnabled = true;
-                    this.ctx.imageSmoothingQuality = 'high';
+                    this.ctx.imageSmoothingQuality = strokeQuality;
                     this.ctx.drawImage(pc, sx, sy, sw, sh, dr.x, dr.y, dr.w, dr.h);
                 } else {
                     // Полное разрешение: изображение с маской собираем в offscreen-
@@ -775,7 +848,7 @@ var TokenCanvas = {
                     // destination-in маски не стирал кольцо в грязном регионе
                     var tctx = this._tempCtx;
                     tctx.imageSmoothingEnabled = true;
-                    tctx.imageSmoothingQuality = 'high';
+                    tctx.imageSmoothingQuality = strokeQuality;
                     tctx.save();
                     tctx.beginPath();
                     tctx.rect(dr.x, dr.y, dr.w, dr.h);
@@ -799,7 +872,7 @@ var TokenCanvas = {
                     cctx.rect(dr.x, dr.y, dr.w, dr.h);
                     cctx.clip();
                     cctx.imageSmoothingEnabled = true;
-                    cctx.imageSmoothingQuality = 'high';
+                    cctx.imageSmoothingQuality = strokeQuality;
                     cctx.drawImage(this._tempCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
                     cctx.restore();
                 }
@@ -813,7 +886,7 @@ var TokenCanvas = {
                 var tempCtx = tc.getContext('2d');
                 tempCtx.clearRect(0, 0, drawSize, drawSize);
                 tempCtx.imageSmoothingEnabled = true;
-                tempCtx.imageSmoothingQuality = 'high';
+                tempCtx.imageSmoothingQuality = strokeQuality;
 
                 if (ringImage) {
                     tempCtx.drawImage(ringImage, ringOffset * k, ringOffset * k, ringSize * k, ringSize * k);
@@ -836,7 +909,7 @@ var TokenCanvas = {
 
                 if (erasing) {
                     this.ctx.imageSmoothingEnabled = true;
-                    this.ctx.imageSmoothingQuality = 'high';
+                    this.ctx.imageSmoothingQuality = strokeQuality;
                     this.ctx.drawImage(tc, 0, 0, drawSize, drawSize, 0, 0, size, size);
                 } else {
                     if (state.effectsEnabled && state.dropShadowEnabled) {
@@ -1277,14 +1350,34 @@ var TokenCanvas = {
     },
 
     _queueWorkerTask: function(cx, cy, restore, mode) {
-        if (!this._workerBatch) this._workerBatch = [];
-        if (this._workerBatch.length >= 64) {
-            // Пачка переполнена — новые точки дропаем, чтобы штрих
-            // не лагал за воркером (в полёте уже до 64 точек)
-            return false;
+        var q = this._workerQueues[mode];
+        if (!q) return false;
+        restore = !!restore;
+
+        // Точки не дропаем никогда — потеря штампа это дыра в штрихе.
+        // Вместо этого сливаем близкие точки: интерполяция в addErasePoint
+        // режет путь шагом 0.35·size, перекрытие штампов огромное, схлопывание
+        // дрожащих (< половины шага) точек визуально ничего не меняет
+        var step = this.eraserBrush ? this.eraserBrush.size * 0.4 : 4;
+        var last = q.length ? q[q.length - 1] : null;
+        if (last && last.restore === restore) {
+            var dx = cx - last.cx;
+            var dy = cy - last.cy;
+            if (dx * dx + dy * dy < step * step * 0.25) {
+                last.cx = cx;
+                last.cy = cy;
+                return true;
+            }
         }
-        this._workerBatch.push({ cx: cx, cy: cy, restore: !!restore, mode: mode });
-        if (!this._workerPending && !this._workerBatchTimer) {
+        if (q.length >= 1024 && last) {
+            // Патологический случай (воркер молчит): растягиваем хвостовой
+            // штамп до новой точки вместо бесконечного роста очереди
+            last.cx = cx;
+            last.cy = cy;
+            return true;
+        }
+        q.push({ cx: cx, cy: cy, restore: restore, mode: mode });
+        if (this._workerInFlight === 0 && !this._workerBatchTimer) {
             var self = this;
             this._workerBatchTimer = setTimeout(function() {
                 self._flushWorkerBatch(true);
@@ -1454,7 +1547,7 @@ var TokenCanvas = {
             var dx = cx - state.lastErasePos.x;
             var dy = cy - state.lastErasePos.y;
             var dist = Math.sqrt(dx * dx + dy * dy);
-            var step = this.eraserBrush.size * 0.35;
+            var step = this.eraserBrush.size * 0.4;
             if (dist > step) {
                 var steps = Math.ceil(dist / step);
                 for (var i = 1; i <= steps; i++) {
@@ -1528,24 +1621,26 @@ var TokenCanvas = {
     },
 
     _trySaveHistoryAfterErase: function() {
-        // Ждём завершения worker-пачек, чтобы последний штрих попал в историю
+        // Ждём завершения worker-пачек: снимок истории обязан включать
+        // последние штрихи, иначе undo откатывает больше, чем стёрто
         if (this.pendingErasePoints.length === 0 && !this.eraseAnimationId &&
-            !this._workerPending && !this._workerBatchTimer &&
-            (!this._workerBatch || this._workerBatch.length === 0)) {
+            !this._workerInFlight &&
+            !this._workerQueues.pink.length && !this._workerQueues.image.length) {
             this._eraseSaveTries = 0;
             if (this._strokeChanged) TokenHistory.save();
             this.render();
             return;
         }
-        if (this._eraseSaveTries < 10) {
+        // _workerInFlight уменьшается и по ответу воркера, и по onerror —
+        // цикл гарантированно завершится; кап — только от тихого зависания.
+        // Раньше здесь по таймауту принудительно сбрасывался pending и
+        // сохранялась история без последней пачки — терялся хвост штриха
+        if (this._eraseSaveTries < 100) {
             this._eraseSaveTries++;
             var self = this;
-            setTimeout(function() { self._trySaveHistoryAfterErase(); }, 100);
+            setTimeout(function() { self._trySaveHistoryAfterErase(); }, this._eraseSaveTries > 20 ? 200 : 100);
         } else {
             this._eraseSaveTries = 0;
-            this._workerPending = false;
-            this._workerBatch = null;
-            this._workerBatchTimer = null;
             if (this._strokeChanged) TokenHistory.save();
             this.render();
         }
@@ -1559,13 +1654,19 @@ var TokenCanvas = {
         window.addEventListener('resize', invalidateRect);
         window.addEventListener('scroll', invalidateRect, true);
 
-        target.onmouseenter = function(e) {
+        // Pointer Events вместо mouse+touch: единый путь ввода, а
+        // getCoalescedEvents отдаёт промежуточные точки высокочастотных
+        // мышек/перов (125-240 Гц) — штрих глаже при меньшем числе штампов.
+        // touch-action: none в CSS не даёт браузеру перехватить жест
+        target.onpointerenter = function(e) {
             self._rectDirty = true;
             if (state.userImage && (state.currentTool === 'eraser' || state.currentTool === 'mask')) {
                 self.showEraserCursor();
                 self.updateEraserCursor(e);
             }
-        };target.onmouseleave = function(e) {
+        };
+
+        target.onpointerleave = function(e) {
             self.hideEraserCursor();
             if (state.isPanning) {
                 state.isPanning = false;
@@ -1578,25 +1679,25 @@ var TokenCanvas = {
             state.isDragging = false;
         };
 
-        target.onmousedown = function(e) {
+        var beginPan = function(e) {
+            state.isPanning = true;
+            state.panStart = { x: e.clientX, y: e.clientY };
+            state.panStartView = { x: state.viewPanX, y: state.viewPanY };
+            target.style.cursor = 'grabbing';
+            self.hideEraserCursor();
+        };
+
+        target.onpointerdown = function(e) {
             self._rectDirty = true;
             if (!state.userImage) return;
             if (e.button === 1 || e.button === 2) {
                 e.preventDefault();
-                state.isPanning = true;
-                state.panStart = { x: e.clientX, y: e.clientY };
-                state.panStartView = { x: state.viewPanX, y: state.viewPanY };
-                target.style.cursor = 'grabbing';
-                self.hideEraserCursor();
+                beginPan(e);
                 return;
             }
             if (e.button === 0 && e.altKey) {
                 e.preventDefault();
-                state.isPanning = true;
-                state.panStart = { x: e.clientX, y: e.clientY };
-                state.panStartView = { x: state.viewPanX, y: state.viewPanY };
-                target.style.cursor = 'grabbing';
-                self.hideEraserCursor();
+                beginPan(e);
                 return;
             }
             e.preventDefault();
@@ -1607,34 +1708,46 @@ var TokenCanvas = {
                 state.dragStart = { x: pos.x / sc - state.imageX, y: pos.y / sc - state.imageY };
                 state.dragStartPos = { x: state.imageX, y: state.imageY };
             } else if (state.currentTool === 'eraser' || state.currentTool === 'mask') {
+                // Тач не имеет shift — восстановление только мышью/пером
                 self.startErasing(pos, e.shiftKey);
             }
         };
 
-        target.onmousemove = function(e) {
+        target.onpointermove = function(e) {
             if ((state.currentTool === 'eraser' || state.currentTool === 'mask') && !state.isPanning) self.updateEraserCursor(e);
             if (state.isPanning) {
-                var dx = (e.clientX - state.panStart.x) / state.viewZoom;
-                var dy = (e.clientY - state.panStart.y) / state.viewZoom;
-                state.viewPanX = state.panStartView.x + dx;
-                state.viewPanY = state.panStartView.y + dy;
+                var pdx = (e.clientX - state.panStart.x) / state.viewZoom;
+                var pdy = (e.clientY - state.panStart.y) / state.viewZoom;
+                state.viewPanX = state.panStartView.x + pdx;
+                state.viewPanY = state.panStartView.y + pdy;
                 self.updateViewTransform();
                 return;
             }
             e.preventDefault();
-            var pos = self.getCanvasPos(e);
             if (state.currentTool === 'move' && state.isDragging) {
+                var pos = self.getCanvasPos(e);
                 var sc = self.internalSize / 1024;
                 state.imageX = pos.x / sc - state.dragStart.x;
                 state.imageY = pos.y / sc - state.dragStart.y;
                 self.scheduleEffects();
                 self.requestRender();
             } else if ((state.currentTool === 'eraser' || state.currentTool === 'mask') && self.isErasing) {
-                self.addErasePoint(pos.x, pos.y, state.isRestoring);
+                // Коалесцированные точки: вся траектория между кадрами,
+                // а не только позиция на момент rAF
+                var evs = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+                if (evs && evs.length > 1) {
+                    for (var ci = 0; ci < evs.length; ci++) {
+                        var cpos = self.getCanvasPos(evs[ci]);
+                        self.addErasePoint(cpos.x, cpos.y, state.isRestoring);
+                    }
+                } else {
+                    var pos2 = self.getCanvasPos(e);
+                    self.addErasePoint(pos2.x, pos2.y, state.isRestoring);
+                }
             }
         };
 
-        target.onmouseup = function(e) {
+        target.onpointerup = function(e) {
             if (state.isPanning) {
                 state.isPanning = false;
                 target.style.cursor = '';
@@ -1651,41 +1764,18 @@ var TokenCanvas = {
             state.isDragging = false;
         };
 
-        target.ontouchstart = function(e) {
-            e.preventDefault();
-            self._rectDirty = true;
-            if (!state.userImage) return;
-            var pos = self.getCanvasPos(e);
-            if (state.currentTool === 'move') {
-                state.isDragging = true;
-                var sc = self.internalSize / 1024;
-                state.dragStart = { x: pos.x / sc - state.imageX, y: pos.y / sc - state.imageY };
-                state.dragStartPos = { x: state.imageX, y: state.imageY };
-            } else if (state.currentTool === 'eraser' || state.currentTool === 'mask') {
-                self.startErasing(pos, false);
+        // Жест прерван системой (жест ОС, входящий звонок стилуса и т.п.)
+        target.onpointercancel = function() {
+            if (state.isPanning) {
+                state.isPanning = false;
+                target.style.cursor = '';
             }
-        };
-
-        target.ontouchmove = function(e) {
-            e.preventDefault();
-            var pos = self.getCanvasPos(e);
-            if (state.currentTool === 'move' && state.isDragging) {
-                var sc = self.internalSize / 1024;
-                state.imageX = pos.x / sc - state.dragStart.x;
-                state.imageY = pos.y / sc - state.dragStart.y;
-                self.scheduleEffects();
-                self.requestRender();
-            } else if ((state.currentTool === 'eraser' || state.currentTool === 'mask') && self.isErasing) {
-                self.addErasePoint(pos.x, pos.y, state.isRestoring);
-            }
-        };
-
-        target.ontouchend = function() {
             if (state.isDragging && (state.dragStartPos.x !== state.imageX || state.dragStartPos.y !== state.imageY)) {
                 TokenHistory.save();
             }
             if (self.isErasing) self.stopErasing();
             state.isDragging = false;
+            self.hideEraserCursor();
         };
 
         target.oncontextmenu = function(e) { e.preventDefault(); };
@@ -1894,9 +1984,12 @@ var TokenCanvas = {
         this._zonesDirty = true;
         this._imageBrushCache = null;
         this._imageBrushCacheSize = -1;
-        this._workerBatch = null;
+        this._workerQueues.pink = [];
+        this._workerQueues.image = [];
+        if (this._workerBatchTimer) clearTimeout(this._workerBatchTimer);
         this._workerBatchTimer = null;
-        this._workerPending = false;
+        this._ccImageCache = null;
+        this._ccCacheKey = null;
         this._deferCC = false;
         this._strokeDirtyRect = null;
         this._strokeFullDirty = false;
@@ -1904,9 +1997,11 @@ var TokenCanvas = {
         this._maskGen++;
     },
     resetMask: function() {
-        this._workerBatch = null;
+        this._workerQueues.pink = [];
+        this._workerQueues.image = [];
+        if (this._workerBatchTimer) clearTimeout(this._workerBatchTimer);
         this._workerBatchTimer = null;
-        this._workerPending = false;
+        // _workerInFlight не трогаем: ответы в полёте декрементируют сами
         this._strokeDirtyRect = null;
         this._strokeFullDirty = false;
         this._strokeChanged = false;
@@ -1915,6 +2010,7 @@ var TokenCanvas = {
         maskCtx.globalCompositeOperation = 'source-over';
         maskCtx.fillStyle = 'white';
         maskCtx.fillRect(0, 0, state.maskCanvas.width, state.maskCanvas.height);
+        this._pushMaskToWorker(true);
         state.currentPreset = -1;
         this._zonesDirty = true;
         this._shadowDirty = true;
@@ -1947,42 +2043,70 @@ var TokenCanvas = {
     },
 
     _renderProtectionMaskOverlay: function(size) {
-        if (!state.erasableCanvas) return;
+        if (!state.erasableCanvas && !state.protectionAlpha) return;
 
         var internalSize = this.internalSize;
+        // Оверлей — полупрозрачная красная подсветка: строится в пониженном
+        // разрешении (до 1536) и растягивается. На 3072² это в 4 раза меньше
+        // работы, на экране разницы нет
+        var overlaySize = Math.min(internalSize, 1536);
 
-        if (this._protectionOverlayDirty || !this._protectionOverlayCache || this._protectionOverlayCache.width !== internalSize) {
-            if (!this._protectionOverlayCache || this._protectionOverlayCache.width !== internalSize) {
+        if (this._protectionOverlayDirty || !this._protectionOverlayCache || this._protectionOverlayCache.width !== overlaySize) {
+            if (!this._protectionOverlayCache || this._protectionOverlayCache.width !== overlaySize) {
                 this._protectionOverlayCache = document.createElement('canvas');
-                this._protectionOverlayCache.width = internalSize;
-                this._protectionOverlayCache.height = internalSize;
+                this._protectionOverlayCache.width = overlaySize;
+                this._protectionOverlayCache.height = overlaySize;
             }
             var oCtx = this._protectionOverlayCache.getContext('2d');
-
-            var eData = state.erasableCanvas.getContext('2d').getImageData(0, 0, internalSize, internalSize);
-            var oData = oCtx.createImageData(internalSize, internalSize);
-            var ed = eData.data;
+            var oData = oCtx.createImageData(overlaySize, overlaySize);
             var od = oData.data;
 
-            for (var i = 0; i < ed.length; i += 4) {
-                var isBlocked = ed[i + 3] >= 128;
-                od[i]     = isBlocked ? 255 : 0;
-                od[i + 1] = isBlocked ? 80  : 0;
-                od[i + 2] = isBlocked ? 80  : 0;
-                od[i + 3] = isBlocked ? 120 : 0;
+            var alpha = state.protectionAlpha;
+            if (alpha && state.protectionSize === internalSize) {
+                // Быстрый путь: сэмплируем готовый альфа-массив защиты
+                var stride = internalSize / overlaySize;
+                for (var y = 0; y < overlaySize; y++) {
+                    var srow = Math.round(y * stride) * internalSize;
+                    for (var x = 0; x < overlaySize; x++) {
+                        var isBlocked = alpha[srow + Math.round(x * stride)] >= 128;
+                        var oi = (y * overlaySize + x) * 4;
+                        od[oi]     = isBlocked ? 255 : 0;
+                        od[oi + 1] = isBlocked ? 80  : 0;
+                        od[oi + 2] = isBlocked ? 80  : 0;
+                        od[oi + 3] = isBlocked ? 120 : 0;
+                    }
+                }
+            } else {
+                // Резервный путь: чтение канваса защиты
+                var eData = state.erasableCanvas.getContext('2d').getImageData(0, 0, internalSize, internalSize);
+                var ed = eData.data;
+                var estep = internalSize / overlaySize;
+                for (var y2 = 0; y2 < overlaySize; y2++) {
+                    var srow2 = Math.round(y2 * estep) * internalSize * 4;
+                    for (var x2 = 0; x2 < overlaySize; x2++) {
+                        var isBlocked2 = ed[srow2 + Math.round(x2 * estep) * 4 + 3] >= 128;
+                        var oi2 = (y2 * overlaySize + x2) * 4;
+                        od[oi2]     = isBlocked2 ? 255 : 0;
+                        od[oi2 + 1] = isBlocked2 ? 80  : 0;
+                        od[oi2 + 2] = isBlocked2 ? 80  : 0;
+                        od[oi2 + 3] = isBlocked2 ? 120 : 0;
+                    }
+                }
             }
 
             oCtx.putImageData(oData, 0, 0);
             this._protectionOverlayDirty = false;
         }
-        this.ctx.drawImage(this._protectionOverlayCache, 0, 0);
+        this.ctx.drawImage(this._protectionOverlayCache, 0, 0, overlaySize, overlaySize, 0, 0, size, size);
     },
     
     resetImageMask: function() {
         if (!state.imageMaskCanvas) return;
-        this._workerBatch = null;
+        this._workerQueues.pink = [];
+        this._workerQueues.image = [];
+        if (this._workerBatchTimer) clearTimeout(this._workerBatchTimer);
         this._workerBatchTimer = null;
-        this._workerPending = false;
+        // _workerInFlight не трогаем: ответы в полёте декрементируют сами
         this._strokeDirtyRect = null;
         this._strokeFullDirty = false;
         this._strokeChanged = false;
@@ -1991,6 +2115,7 @@ var TokenCanvas = {
         ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, state.imageMaskCanvas.width, state.imageMaskCanvas.height);
+        this._pushMaskToWorker(false);
         this._invalidateComposite();
         TokenHistory.save();
         this.render();

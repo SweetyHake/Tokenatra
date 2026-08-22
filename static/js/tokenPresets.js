@@ -4,6 +4,8 @@ const TokenPresets = {
     buildProtectionCanvasFromImg(img, internalSize) {
         // Защитная маска соответствует области кольца 1× (internalSize / 3),
         // например 2048×2048 на рабочем холсте 6144×6144.
+        // Возвращает { canvas, alpha }: альфа-массив отдаётся воркеру и
+        // оверлею напрямую — без повторного getImageData всего канваса.
         const srcW = img.naturalWidth || img.width;
         const srcH = img.naturalHeight || img.height;
         const maskSize = Math.round(internalSize / 3);
@@ -26,17 +28,19 @@ const TokenPresets = {
         const protData = pCtx.createImageData(internalSize, internalSize);
         const pd = protData.data;
         const n = internalSize * internalSize;
+        const alpha = new Uint8Array(n);
 
         for (let i = 0; i < n; i++) {
             const oi = i * 4;
             const a = sd[oi + 3];
             const isProtected = a > 0;
+            alpha[i] = isProtected ? 255 : 0;
             pd[oi] = 255; pd[oi+1] = 255; pd[oi+2] = 255;
             pd[oi+3] = isProtected ? 255 : 0;
         }
 
         pCtx.putImageData(protData, 0, 0);
-        return protCanvas;
+        return { canvas: protCanvas, alpha: alpha };
     },
 
     processMaskImage(img, size) {
@@ -64,6 +68,8 @@ const TokenPresets = {
     loadProtectionMask(maskFile = state.activeRingMaskFile) {
         if (!state.protectionEnabled) {
             state.erasableCanvas = null;
+            state.protectionAlpha = null;
+            state.protectionSize = 0;
             state.protectionMask = null;
             TokenCanvas.invalidateProtectionOverlay();
             TokenCanvas.syncProtectionToWorker();
@@ -108,14 +114,18 @@ const TokenPresets = {
         const internalSize = TokenCanvas.internalSize;
         if (!img) {
             state.erasableCanvas = null;
+            state.protectionAlpha = null;
+            state.protectionSize = 0;
             state.protectionMask = null;
             TokenCanvas.invalidateProtectionOverlay();
             TokenCanvas.syncProtectionToWorker();
             return;
         }
-        const protCanvas = this.buildProtectionCanvasFromImg(img, internalSize);
-        state.protectionMask = protCanvas;
-        state.erasableCanvas = protCanvas;
+        const built = this.buildProtectionCanvasFromImg(img, internalSize);
+        state.protectionMask = built.canvas;
+        state.erasableCanvas = built.canvas;
+        state.protectionAlpha = built.alpha;
+        state.protectionSize = internalSize;
         TokenCanvas.invalidateProtectionOverlay();
         TokenCanvas.syncProtectionToWorker();
     },
@@ -273,6 +283,8 @@ const TokenPresets = {
 
         state.currentPreset = index;
         this.updateButtons();
+        // Маска переписана напрямую — синхронизируем альфа-зеркало воркера
+        TokenCanvas._pushMaskToWorker(true);
         TokenCanvas.invalidateAllCaches();
         TokenHistory.save();
         TokenCanvas.render();
@@ -436,6 +448,8 @@ const TokenPresets = {
                     this._rebuildErasableCanvas();
                 } else {
                     state.erasableCanvas = null;
+                    state.protectionAlpha = null;
+                    state.protectionSize = 0;
                     state.protectionMask = null;
                 }
                 TokenCanvas.render();

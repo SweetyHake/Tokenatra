@@ -784,6 +784,7 @@ input[type="file"] { display: none; }
    ================================================================ */
 .canvas-area {
     flex: 1; min-width: 0;
+    touch-action: none;
     display: flex; align-items: center; justify-content: center;
     background: repeating-conic-gradient(var(--checker-1) 0% 25%, var(--checker-2) 0% 50%) 0 0 / 20px 20px;
     position: relative; overflow: hidden; cursor: grab;
