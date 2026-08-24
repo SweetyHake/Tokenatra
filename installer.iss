@@ -4,7 +4,7 @@
 #define MyAppName "Tokenatra"
 #ifndef MyAppVersion
 ; Fallback для локальной сборки без /DMyAppVersion; CI передаёт версию из version.py
-#define MyAppVersion "26.1.5"
+#define MyAppVersion "26.1.6"
 #endif
 #define MyAppPublisher "SweetyHake"
 #define MyAppURL "https://github.com/SweetyHake/Tokenatra"

@@ -682,7 +682,7 @@ def load_session():
     до выхода из него — ссылка, переживший лок «быстрый путь» вернувшая
     сессия, может оказаться старой после /select_model, а две живые
     DML-сессии ломают инференс (ExecuteKernel 80070057)."""
-    global SESSION
+    global SESSION, DEVICE_NAME, _PROVIDER_OPTIONS
     if SESSION is None:
         # Создание сессии и прогрев — под блокировкой: параллельные DML-сессии
         # ломают инференс (ExecuteKernel 80070057)
