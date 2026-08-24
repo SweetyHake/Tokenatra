@@ -60,6 +60,8 @@ const TokenEditor = {
         if (undoBtn) undoBtn.dataset.tooltip = 'Отменить (' + codeToLabel(hk.undo) + ')';
         const redoBtn = $('redoBtn');
         if (redoBtn) redoBtn.dataset.tooltip = 'Повторить (' + codeToLabel(hk.redo) + ')';
+        // Тултипы перезаписаны — обновляем ⌘-подсказки для текущей платформы
+        if (typeof applyHotkeyHints === 'function') applyHotkeyHints();
     },
 
     setupDropzone() {
@@ -302,6 +304,9 @@ const TokenEditor = {
                 state.showingOriginal = false;
 
                 if (state.imageMaskCanvas) {
+                    // Полная перезапись маски в обход ластика — сбрасываем
+                    // несброшенные штрихи и инкрементируем ген (см. _invalidatePendingStrokes)
+                    TokenCanvas._invalidatePendingStrokes();
                     const ctx = state.imageMaskCanvas.getContext('2d');
                     ctx.clearRect(0, 0, state.imageMaskCanvas.width, state.imageMaskCanvas.height);
                     ctx.fillStyle = 'white';
@@ -736,6 +741,22 @@ const TokenEditor = {
     setupKeyboardControls() {
         document.addEventListener('keydown', e => this.handleKeyDown(e));
         document.addEventListener('keyup', e => this.handleKeyUp(e));
+        // keyup теряется при системных жестах (Win, Alt-Tab, диалоги ОС):
+        // без этого интервалы перемещения/поворота тикают бесконечно
+        window.addEventListener('blur', () => this.releaseAllKeys());
+        document.addEventListener('visibilitychange', () => { if (document.hidden) this.releaseAllKeys(); });
+    },
+
+    releaseAllKeys() {
+        if (this.pressedKeys.size === 0 && !this.rotateInterval && !this.moveInterval &&
+            !this.rotateTimeout && !this.moveTimeout) return;
+        const hadImage = !!state.userImage;
+        this.pressedKeys.clear();
+        this.clearRotateTimers();
+        this.clearMoveTimers();
+        this.initialRotateDone = false;
+        this.initialMoveDone = false;
+        if (hadImage) TokenHistory.save();
     },
 
     _rotateCodes() {
@@ -757,12 +778,11 @@ const TokenEditor = {
         if (hotkeyMatches(e, hk.undo)) { e.preventDefault(); TokenHistory.undo(); return; }
         if (hotkeyMatches(e, hk.redo)) { e.preventDefault(); TokenHistory.redo(); return; }
         const undoParsed = parseHotkey(hk.undo);
-        if (e.ctrlKey && e.shiftKey && !e.altKey && undoParsed.ctrl && !undoParsed.alt && !undoParsed.shift && code === undoParsed.code) { e.preventDefault(); TokenHistory.redo(); return; }
-        const rc = this._rotateCodes();
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && undoParsed.ctrl && !undoParsed.alt && !undoParsed.shift && code === undoParsed.code) { e.preventDefault(); TokenHistory.redo(); return; }
         if (!isInput && state.userImage && (hotkeyMatches(e, hk.rotateLeft) || hotkeyMatches(e, hk.rotateRight))) { e.preventDefault(); this.handleRotateKey(code); return; }
-        if (!isInput && state.userImage && MOVE_KEYS.includes(code) && !e.ctrlKey) { e.preventDefault(); this.handleMoveKey(code); return; }
-        if (!isInput && e.ctrlKey && code === 'ArrowLeft' && state.imageFileList.length > 1) { e.preventDefault(); this.navigateTo(-1); }
-        if (!isInput && e.ctrlKey && code === 'ArrowRight' && state.imageFileList.length > 1) { e.preventDefault(); this.navigateTo(1); }
+        if (!isInput && state.userImage && MOVE_KEYS.includes(code) && !(e.ctrlKey || e.metaKey)) { e.preventDefault(); this.handleMoveKey(code); return; }
+        if (!isInput && (e.ctrlKey || e.metaKey) && code === 'ArrowLeft' && state.imageFileList.length > 1) { e.preventDefault(); this.navigateTo(-1); }
+        if (!isInput && (e.ctrlKey || e.metaKey) && code === 'ArrowRight' && state.imageFileList.length > 1) { e.preventDefault(); this.navigateTo(1); }
     },
 
     handleKeyUp(e) {

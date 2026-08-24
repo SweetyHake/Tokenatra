@@ -26,11 +26,11 @@ echo [3/5] Checking dependencies...
 python -c "import onnxruntime, imageio_ffmpeg" >nul 2>&1
 if errorlevel 1 (
     echo   Installing dependencies...
-    python -m pip install onnxruntime-directml numpy Pillow flask pywebview psutil imageio-ffmpeg
+    python -m pip install -r requirements.txt
     if errorlevel 1 (
         echo   ERROR: Could not install dependencies.
         echo   Try this manually in the command prompt:
-        echo   pip install onnxruntime-directml numpy Pillow flask pywebview psutil imageio-ffmpeg
+        echo   pip install -r requirements.txt
         goto :error
     )
 )

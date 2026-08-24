@@ -1,0 +1,8 @@
+numpy
+Pillow
+flask
+pywebview>=4
+psutil
+imageio-ffmpeg
+onnxruntime-directml; sys_platform == 'win32'
+onnxruntime; sys_platform != 'win32'

@@ -164,13 +164,25 @@ PID_FILE = None
 def _kill_process_on_port(port):
     import subprocess
     if sys.platform != 'win32':
+        found = False
         try:
             import psutil
+            # На Linux без прав psutil отдаёт pid=None — тогда падаем на lsof
             for conn in psutil.net_connections(kind='tcp'):
                 if conn.laddr and conn.laddr.port == port and conn.pid:
                     terminate_process(conn.pid)
+                    found = True
         except Exception:
             pass
+        if not found:
+            try:
+                r = subprocess.run(['lsof', '-t', '-i', f'tcp:{port}'], capture_output=True, text=True)
+                for line in r.stdout.splitlines():
+                    pid = line.strip()
+                    if pid.isdigit():
+                        terminate_process(int(pid))
+            except Exception:
+                pass
         return
     try:
         r = subprocess.run(['netstat', '-ano'], capture_output=True, text=True)
@@ -532,7 +544,16 @@ def main():
 
     # Let pywebview select Cocoa/WebKit2GTK on Unix; EdgeChromium is Windows-only.
     gui = 'edgechromium' if sys.platform == 'win32' else None
-    webview.start(gui=gui, debug=False)
+    start_kwargs = {'gui': gui}
+    if sys.platform != 'win32':
+        try:
+            import inspect
+            _icon = RESOURCE_DIR / 'logo.png'
+            if _icon.exists() and 'icon' in inspect.signature(webview.start).parameters:
+                start_kwargs['icon'] = str(_icon)
+        except Exception:
+            pass
+    webview.start(**start_kwargs, debug=False)
 
     _nuclear_exit()
 

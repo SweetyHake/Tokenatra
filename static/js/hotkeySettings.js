@@ -113,10 +113,25 @@ const HotkeySettings = {
 
     _onKey(e) {
         if (!this._listeningAction) return;
-        if (e.code === 'Escape' && !e.ctrlKey && !e.altKey && !e.shiftKey) { this._stopListening(); return; }
+        if (e.code === 'Escape' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) { this._stopListening(); return; }
         if (['Control','Shift','Alt','Meta'].includes(e.key)) return;
         e.preventDefault(); e.stopPropagation();
-        const hk = serializeHotkey(e.code, { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
+        const hk = serializeHotkey(e.code, { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
+        // Конфликт: та же комбинация (Ctrl и Meta считаем эквивалентно,
+        // как в hotkeyMatches) уже назначена другому действию — отклоняем
+        const norm = s => {
+            const q = parseHotkey(s);
+            return q.code ? [q.code, !!q.alt, !!q.shift, !!q.ctrl || !!q.meta].join('|') : null;
+        };
+        const owner = Object.entries(AppConfig.hotkeys).find(([act, val]) =>
+            act !== this._listeningAction && norm(val) === norm(hk));
+        if (owner) {
+            const ownerMeta = HOTKEYS_META[owner[0]];
+            const ownerLabel = ownerMeta ? I18n.t(ownerMeta.label) : owner[0];
+            toast(`«${codeToLabel(hk)}» уже назначено действию «${ownerLabel}»`, true);
+            this._stopListening();
+            return;
+        }
         AppConfig.setHotkey(this._listeningAction, hk);
         this._listeningEl.textContent = codeToLabel(hk);
         this._stopListening();

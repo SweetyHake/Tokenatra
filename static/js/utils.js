@@ -1,5 +1,46 @@
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const IS_WINDOWS = /^Win/.test(navigator.platform || '');
+
 function $(id) {
     return document.getElementById(id);
+}
+
+function escapeHtml(s) {
+    return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function applyHotkeyHints() {
+    var toMac = function(s) { return s.replaceAll('Ctrl + ', '⌘').replaceAll('Ctrl+', '⌘'); };
+    var translate = function(src) {
+        var res = typeof I18n !== 'undefined' ? I18n.t(src) : src;
+        if (res === src) {
+            var squeezed = src.replace(/ \+ /g, '+');
+            var alt = I18n.t(squeezed);
+            if (alt !== squeezed) res = alt;
+        }
+        return res;
+    };
+    document.querySelectorAll('[data-hotkey-hint]').forEach(function(el) {
+        if (!el._hintBase) el._hintBase = {};
+        ['data-tooltip', 'title'].forEach(function(attr) {
+            var cur = el.getAttribute(attr);
+            if (!cur) return;
+            if (cur.indexOf('Ctrl') !== -1 || !el._hintBase[attr]) el._hintBase[attr] = cur;
+            var out = toMac(translate(el._hintBase[attr]));
+            if (el.getAttribute(attr) !== out) el.setAttribute(attr, out);
+        });
+        if (!el.firstElementChild && el.textContent) {
+            var txt = el.textContent;
+            if (txt.indexOf('Ctrl') !== -1 || !el._hintBase.text) el._hintBase.text = txt;
+            var outT = toMac(translate(el._hintBase.text));
+            if (txt !== outT) el.textContent = outT;
+        }
+    });
 }
 
 function debounce(func, wait) {

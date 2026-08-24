@@ -66,8 +66,14 @@ exit /b 0
 
 :run_iscc
 if not defined ISCC set ISCC=iscc
-echo Running Inno Setup...
-"%ISCC%" installer.iss
+set "APPVER="
+for /f "usebackq delims=" %%v in (`python -c "from version import __version__; print(__version__)"`) do set "APPVER=%%v"
+if not defined APPVER (
+    echo   [WARN] Could not read version from version.py; using installer.iss fallback
+    "%ISCC%" installer.iss
+) else (
+    "%ISCC%" /DMyAppVersion=%APPVER% installer.iss
+)
 if errorlevel 1 (
     echo [ERROR] Inno Setup build failed
     pause

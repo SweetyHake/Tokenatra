@@ -151,15 +151,14 @@ python server.py
 аудио и видео можно использовать встроенный FFmpeg из `imageio-ffmpeg` или системный
 `ffmpeg` в `PATH`.
 
-Зависимости Windows ставит `start.bat`:
+Зависимости описаны в едином `requirements.txt`: маркеры окружения ставят
+`onnxruntime-directml` только в Windows, в macOS и Linux используется обычный
+`onnxruntime` (CPU). При желании на Linux можно установить `onnxruntime-gpu`
+(CUDA) или ROCm-сборку ONNX Runtime.
 
 ```bat
-python -m pip install onnxruntime-directml numpy Pillow flask pywebview psutil imageio-ffmpeg
+python -m pip install -r requirements.txt
 ```
-
-Для macOS и Linux используется `requirements-cross-platform.txt`. В нём указан обычный
-`onnxruntime`, поэтому обязательный режим удаления фона работает через CPU. На Linux
-можно отдельно установить совместимый CUDA- или ROCm-провайдер ONNX Runtime.
 
 ## ONNX-модель
 

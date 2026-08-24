@@ -204,17 +204,19 @@ const Remover = {
         
         state.isProcessing = true;
         if (this._progressTimer) clearTimeout(this._progressTimer);
-        const total = state.processingQueue.length + state.results.size;
-        
+
         $('batchProgress').classList.add('show');
-        
+
         while (state.processingQueue.length > 0) {
             const { id, file } = state.processingQueue.shift();
             const done = state.results.size;
-            
+            // total пересчитывается на каждом шаге: файлы могут быть
+            // добавлены в очередь прямо во время обработки пачки
+            const total = done + state.processingQueue.length + 1;
+
             $('progressFill').style.width = `${(done / total) * 100}%`;
             $('progressText').textContent = `${done} / ${total}`;
-            
+
             await this.processFile(id, file);
         }
         
@@ -291,7 +293,9 @@ const Remover = {
             preview.style.cursor = 'pointer';
             preview.dataset.tooltip = 'Нажмите для сравнения';
 
-            const safeNewName = newName.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Имя файла идёт в атрибут data-tooltip в двойных кавычках —
+            // экранируем и кавычки, иначе имя вида x" onmouseover="… внедрит обработчик
+            const safeNewName = escapeHtml(newName);
             const safeBlobSize = formatSize(blob.size);
 
             const infoText = document.createElement('div');

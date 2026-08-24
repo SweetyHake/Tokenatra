@@ -79,6 +79,12 @@ def _guard_localhost_only():
             host_name = host_name.lstrip('[')
         if host_name not in ('127.0.0.1', 'localhost', '::1'):
             return jsonify({'error': 'Forbidden'}), 403
+        state_changing = request.method in ('POST', 'PUT', 'DELETE', 'PATCH')
+        # Chromium присылает Sec-Fetch-Site всегда; кросс-сайтовые state-changing
+        # запросы режем сразу (страховка от будущих дыр в Origin-проверке)
+        sec_fetch_site = request.headers.get('Sec-Fetch-Site', '').lower()
+        if state_changing and sec_fetch_site and sec_fetch_site not in ('same-origin', 'same-site', 'none'):
+            return jsonify({'error': 'Forbidden'}), 403
         origin = request.headers.get('Origin', '')
         if origin:
             from urllib.parse import urlparse
@@ -86,12 +92,14 @@ def _guard_localhost_only():
             oh_name = oh.rsplit(':', 1)[0]
             if oh_name.startswith('['):
                 oh_name = oh_name.lstrip('[')
-            if oh_name not in ('127.0.0.1', 'localhost', '::1', ''):
+            # Пустой netloc (Origin: null из sandboxed iframe / data:-документа)
+            # НЕ пропускаем: это вектор CSRF на /save_to_folder и другие POST.
+            # Легитимное приложение шлёт Origin http://127.0.0.1:7878 либо не шлёт вовсе.
+            if oh_name not in ('127.0.0.1', 'localhost', '::1'):
                 return jsonify({'error': 'Forbidden'}), 403
-        else:
-            # State-changing запросы без Origin (не-браузерный клиент, sandboxed iframe)
-            if request.method in ('POST', 'PUT', 'DELETE', 'PATCH'):
-                return jsonify({'error': 'Forbidden'}), 403
+        elif state_changing:
+            # State-changing запросы без Origin (не-браузерный клиент)
+            return jsonify({'error': 'Forbidden'}), 403
     except Exception:
         return jsonify({'error': 'Forbidden'}), 403
     return None
@@ -198,9 +206,12 @@ def get_selected_model_path():
 def _activate_model(path):
     """Сохраняет модель выбранной и сбрасывает кеш ONNX-сессии."""
     global SESSION
-    cfg = _load_config()
-    cfg['selected_model'] = path.name
-    _save_config(cfg)
+
+    def _mutate(cfg):
+        cfg['selected_model'] = path.name
+        return cfg
+
+    _update_config(_mutate)
     with SESSION_LOCK:
         SESSION = None
 
@@ -220,7 +231,9 @@ MAX_IMAGE_DIMENSION = 8192
 MAX_PROCESS_DIM = 4096
 
 SESSION = None
-SESSION_LOCK = threading.Lock()
+# RLock: load_session() легитимно вызывается и снаружи, и из-под уже
+# удерживаемого SESSION_LOCK (инференс держит лок от получения сессии до run())
+SESSION_LOCK = threading.RLock()
 CONFIG_LOCK = threading.Lock()
 DEVICE_NAME = "Определение…"
 _PROVIDERS = None
@@ -238,6 +251,21 @@ def _load_config():
 def _save_config(cfg):
     with CONFIG_LOCK:
         config_file().write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def _update_config(mutator):
+    """Атомарный read-modify-write config.json: чтение, изменение и запись
+    под ОДНИМ захватом CONFIG_LOCK. Иначе параллельные сохранения (настройки
+    UI через POST /config, выбор модели, кеш GPU-адаптера) читают устаревший
+    снимок и молча затирают чужие ключи. mutator(dict)->dict|None
+    (None = только читать)."""
+    with CONFIG_LOCK:
+        cfg = _load_config()
+        new_cfg = mutator(cfg)
+        if new_cfg is not None:
+            config_file().write_text(json.dumps(new_cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+            return new_cfg
+        return cfg
 
 
 def _read_device_cache():
@@ -271,13 +299,14 @@ def _read_device_cache():
 
 def _save_device_cache(providers, provider_options, device_name):
     try:
-        cfg = _load_config()
-        cfg['device_cache'] = {
-            'providers': providers,
-            'provider_options': provider_options,
-            'device_name': device_name,
-        }
-        _save_config(cfg)
+        def _mutate(cfg):
+            cfg['device_cache'] = {
+                'providers': providers,
+                'provider_options': provider_options,
+                'device_name': device_name,
+            }
+            return cfg
+        _update_config(_mutate)
     except Exception:
         pass
 
@@ -522,10 +551,17 @@ def get_providers():
     try:
         available = ort.get_available_providers()
     except AttributeError:
+        ort_pkg = 'onnxruntime-directml' if sys.platform == 'win32' else 'onnxruntime'
         print(" WARNING: onnxruntime повреждён или установлен не полностью.")
-        print(" Выполните: pip install --force-reinstall onnxruntime-directml")
+        print(f" Выполните: pip install --force-reinstall {ort_pkg}")
         DEVICE_NAME = 'CPU (onnxruntime повреждён)'
         return ['CPUExecutionProvider']
+
+    # macOS: CoreML определяется сразу, чтобы не запускать nvidia-smi/rocm-smi впустую
+    if sys.platform == 'darwin' and 'CoreMLExecutionProvider' in available:
+        DEVICE_NAME = 'CoreML'
+        _save_device_cache(['CoreMLExecutionProvider', 'CPUExecutionProvider'], None, DEVICE_NAME)
+        return ['CoreMLExecutionProvider', 'CPUExecutionProvider']
 
     VIRTUAL_ADAPTER_KEYWORDS = [
         'parsec', 'virtual', 'microsoft', 'basic', 'remote',
@@ -569,6 +605,8 @@ def get_providers():
             if sys.platform == 'win32':
                 cpu = run_cmd(['powershell', '-Command',
                                '(Get-CimInstance Win32_Processor | Select-Object -First 1).Name']).strip()
+            elif sys.platform == 'darwin':
+                cpu = run_cmd(['sysctl', '-n', 'machdep.cpu.brand_string']).strip()
             else:
                 cpu = run_cmd(['grep', '-m1', 'model name', '/proc/cpuinfo'])
                 cpu = cpu.split(':')[-1].strip() if ':' in cpu else ''
@@ -589,7 +627,9 @@ def get_providers():
                 cfg = json.loads(cfg_path.read_text(encoding='utf-8'))
                 dev = cfg.get('gpu_device_id')
                 if isinstance(dev, int) and dev >= 0:
-                    return [{'device_id': dev}] + [{}] * (len(available) - 1)
+                    # Длина обязана совпадать с числом провайдеров (2),
+                    # а не с len(available) — иначе ORT отбрасывает опции
+                    return [{'device_id': dev}, {}]
         except Exception:
             pass
         return None
@@ -613,7 +653,7 @@ def get_providers():
             # ищем дискретную через DXGI и указываем её device_id напрямую.
             dml_id, dml_name = _detect_discrete_dml_adapter()
             if dml_id is not None:
-                _PROVIDER_OPTIONS = [{'device_id': dml_id}] + [{}] * (len(available) - 1)
+                _PROVIDER_OPTIONS = [{'device_id': dml_id}, {}]
                 name_to_show = dml_name
                 print(f"  Дискретная видеокарта: {dml_name} (адаптер #{dml_id})")
         DEVICE_NAME = f'DirectML ({name_to_show})'
@@ -637,7 +677,12 @@ except Exception:
 
 
 def load_session():
-    global SESSION, _PROVIDERS, _PROVIDER_OPTIONS, DEVICE_NAME
+    """Возвращает активную сессию, создавая её при необходимости.
+    ВАЖНО: для run() сессию нужно получать ПОД SESSION_LOCK и использовать
+    до выхода из него — ссылка, переживший лок «быстрый путь» вернувшая
+    сессия, может оказаться старой после /select_model, а две живые
+    DML-сессии ломают инференс (ExecuteKernel 80070057)."""
+    global SESSION
     if SESSION is None:
         # Создание сессии и прогрев — под блокировкой: параллельные DML-сессии
         # ломают инференс (ExecuteKernel 80070057)
@@ -821,9 +866,10 @@ def cli_tune_gpu():
         if best_time >= default_t * 0.85:
             print(f"  [tune] текущий адаптер оптимален ({default_t:.2f} с) — оставляем")
             return
-        cfg = _load_config()
-        cfg['gpu_device_id'] = best_id
-        _save_config(cfg)
+        def _mutate(cfg):
+            cfg['gpu_device_id'] = best_id
+            return cfg
+        _update_config(_mutate)
         print(f"  [tune] выбран адаптер #{best_id} ({best_time:.2f} с), сохранено в config.json")
     except Exception as e:
         print(f"  [tune] ошибка: {e}")
@@ -892,13 +938,16 @@ def remove_background(image, edge_blur=1):
     arr = arr.transpose(2, 0, 1)
 
     tensor = arr[np.newaxis]
-    input_name = session.get_inputs()[0].name
 
     print(f"  [RAM] перед инференсом: {mem():.0f} МБ")
     t_infer = time.time()
-    # Инференс под блокировкой: /select_model не сможет создать вторую DML-сессию,
-    # пока эта запущена (параллельные DML-сессии — ExecuteKernel 80070057)
+    # Сессия и run() обязаны жить под ОДНИМ захватом лока: быстрый путь
+    # load_session() вне лока мог вернуть ссылку на старую сессию, а
+    # /select_model тем временем создать новую — две живые DML-сессии
+    # дают ExecuteKernel 80070057. RLock допускает вложенный вход.
     with SESSION_LOCK:
+        session = load_session()
+        input_name = session.get_inputs()[0].name
         output = session.run(None, {input_name: tensor})
     print(f"  Инференс: {time.time() - t_infer:.2f} с")
     print(f"  [RAM] после инференса: {mem():.0f} МБ")
@@ -922,7 +971,12 @@ def remove_background(image, edge_blur=1):
     else:
         mask = 1.0 / (1.0 + np.exp(-mask))
     mn, mx = mask.min(), mask.max()
-    mask = ((mask - mn) / (mx - mn + 1e-8) * 255).astype(np.uint8)
+    if mx - mn < 1e-4:
+        # Модель не нашла объект: почти однородная маска. Растяжение делением
+        # на (mx-mn) превратило бы числовой шум в спекл «маску» — отдаём пустую.
+        mask = np.zeros(mask.shape, dtype=np.uint8)
+    else:
+        mask = ((mask - mn) / (mx - mn + 1e-8) * 255).astype(np.uint8)
 
     mask_pil = Image.fromarray(mask, mode='L')
     del mask
@@ -977,6 +1031,12 @@ def save_image(image, format_type, quality=90):
         image.save(buffer, format='WEBP', quality=quality, lossless=False)
         mime = 'image/webp'
     elif format_type == 'avif':
+        if 'avif' not in Image.SAVE or not callable(Image.SAVE['avif']):
+            # pillow-avif-plugin не установлен (нет в зависимостях) —
+            # отдаём понятную ошибку вместо generic 500
+            raise ValueError(
+                "Формат AVIF недоступен: установите pillow-avif-plugin"
+            )
         image.save(buffer, format='AVIF', quality=quality)
         mime = 'image/avif'
     elif format_type == 'png':
@@ -1041,7 +1101,7 @@ def index():
 
 @app.route('/version')
 def version_info():
-    return jsonify({'version': __version__, 'name': APP_NAME})
+    return jsonify({'version': __version__, 'name': APP_NAME, 'platform': sys.platform})
 
 
 @app.route('/model_status')
@@ -1066,9 +1126,12 @@ def models_list():
     models = []
     seen = set()
     dirs = [MODELS_DIR]
-    legacy = RESOURCE_DIR / "models"
-    if legacy.resolve() != MODELS_DIR.resolve():
-        dirs.append(legacy)
+    # Модель «рядом с exe» (сценарий из документации) и бандл-каталог:
+    # в frozen-сборках BASE_DIR (каталог exe) != RESOURCE_DIR (_internal),
+    # показываем обе, иначе пользовательская модель невидима в настройках
+    for extra in (BASE_DIR / "models", RESOURCE_DIR / "models"):
+        if extra.resolve() not in {d.resolve() for d in dirs} and extra.resolve() != MODELS_DIR.resolve():
+            dirs.append(extra)
     for d in dirs:
         if not d.is_dir():
             continue
@@ -1100,10 +1163,12 @@ def select_model():
     filename = str(data.get('name', ''))
     p = MODELS_DIR / Path(filename).name
     if p.suffix.lower() != '.onnx' or not p.exists() or not p.is_file():
-        # Модель, положенная вручную рядом с exe (Program Files) — только чтение
-        legacy = RESOURCE_DIR / "models" / Path(filename).name
-        if legacy.suffix.lower() == '.onnx' and legacy.is_file():
-            p = legacy
+        # Модель, положенная вручную рядом с exe (BASE_DIR) или в бандл
+        for legacy in (BASE_DIR / "models" / Path(filename).name,
+                       RESOURCE_DIR / "models" / Path(filename).name):
+            if legacy.suffix.lower() == '.onnx' and legacy.is_file():
+                p = legacy
+                break
         else:
             return jsonify({'error': 'Модель не найдена'}), 404
 
@@ -1141,7 +1206,9 @@ def _download_model(url):
         raise FileExistsError(
             f"Модель «{target.name}» уже загружена — повторная загрузка не требуется"
         )
-    temp_path = MODELS_DIR / (filename + '.download')
+    # Уникальный temp: два параллельных запроса не должны писать в один
+    # файл, иначе перемешанные чанки публикуют битую модель через os.replace
+    temp_path = MODELS_DIR / f"{filename}.{os.getpid()}.{threading.get_ident()}.download"
     request_obj = Request(_dropbox_direct_url(url), headers={'User-Agent': 'Tokenatra model downloader'})
     try:
         with urlopen(request_obj, timeout=600) as response, temp_path.open('wb') as output:
@@ -1176,22 +1243,85 @@ def download_model_from_server():
         return jsonify({'error': f'Не удалось загрузить модель: {e}'}), 502
 
 
+def _pw_dialog_open(file_types=(), allow_multiple=False):
+    """Нативный диалог открытия через pywebview (работает из любого потока)."""
+    win = getattr(app, 'window_ref', None)
+    if win is None:
+        return None
+    try:
+        import webview
+        result = win.create_file_dialog(
+            webview.OPEN_DIALOG, directory='', allow_multiple=allow_multiple, file_types=file_types)
+        if result:
+            return result[0] if isinstance(result, (list, tuple)) else result
+    except Exception:
+        pass
+    return None
+
+
+def _pw_dialog_save(save_filename):
+    """Нативный диалог сохранения через pywebview (работает из любого потока)."""
+    win = getattr(app, 'window_ref', None)
+    if win is None:
+        return None
+    try:
+        import webview
+        result = win.create_file_dialog(webview.SAVE_DIALOG, directory='', save_filename=save_filename)
+        if result:
+            return result if isinstance(result, str) else result[0]
+    except Exception:
+        pass
+    return None
+
+
+def _pw_dialog_folder():
+    """Нативный диалог выбора папки через pywebview (работает из любого потока)."""
+    win = getattr(app, 'window_ref', None)
+    if win is None:
+        return None
+    try:
+        import webview
+        result = win.create_file_dialog(webview.FOLDER_DIALOG, directory='')
+        if result:
+            return result[0] if isinstance(result, (list, tuple)) else result
+    except Exception:
+        pass
+    return None
+
+
+# Папки, выбранные пользователем через нативный диалог в текущей сессии.
+# /save_to_folder принимает запись только в них (плюс папки из config.json),
+# чтобы CSRF/компрометация фронта не дала писать в произвольные каталоги.
+_picked_folders = set()
+
+
+def _norm_folder(p):
+    return os.path.normcase(os.path.abspath(str(p)))
+
+
 @app.route('/load_model_from_disk', methods=['POST'])
 def load_model_from_disk():
-    import tkinter as tk
-    from tkinter import filedialog
+    win = getattr(app, 'window_ref', None)
+    if win is not None:
+        path = _pw_dialog_open(('Модель ONNX (*.onnx)',))
+        if not path:
+            return jsonify({'cancelled': True})
+    else:
+        # Браузерный/автономный режим без GUI-окна: tkinter доступен только на Windows
+        import tkinter as tk
+        from tkinter import filedialog
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    path = filedialog.askopenfilename(
-        title='Выберите модель ONNX',
-        filetypes=[('Модель ONNX', '*.onnx')]
-    )
-    root.destroy()
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        path = filedialog.askopenfilename(
+            title='Выберите модель ONNX',
+            filetypes=[('Модель ONNX', '*.onnx')]
+        )
+        root.destroy()
 
-    if not path:
-        return jsonify({'cancelled': True})
+        if not path:
+            return jsonify({'cancelled': True})
 
     source = Path(path)
     if source.suffix.lower() != '.onnx' or not source.is_file():
@@ -1345,7 +1475,11 @@ def presets_list():
     extensions = {'.png', '.webp', '.jpg', '.jpeg'}
     preset_dir = RESOURCE_DIR / 'presets'
     if not preset_dir.exists():
-        preset_dir.mkdir(exist_ok=True)
+        try:
+            # Read-only установка (Program Files) — просто отдаём пустой список
+            preset_dir.mkdir(exist_ok=True)
+        except OSError:
+            return jsonify([])
     presets = []
     for f in sorted(preset_dir.iterdir()):
         if f.is_file() and f.suffix.lower() in extensions:
@@ -1396,13 +1530,127 @@ def check_update():
     return jsonify({'ok': True})
 
 
+def _macos_app_bundle():
+    """Каталог .app, из которого запущено приложение (None вне frozen-.app)."""
+    if not getattr(sys, 'frozen', False):
+        return None
+    exe_dir = Path(sys.executable).resolve().parent
+    if exe_dir.name != 'MacOS':
+        return None
+    bundle = exe_dir.parent.parent
+    if bundle.suffix == '.app' and bundle.is_dir():
+        return bundle
+    return None
+
+
+def _linux_appimage_path():
+    """Путь к запущенному AppImage ($APPIMAGE), None вне AppImage."""
+    p = os.environ.get('APPIMAGE')
+    if p:
+        path = Path(p)
+        if path.is_file():
+            return path
+    return None
+
+
+def _apply_update_macos(src):
+    kind = updater_status().get('download_kind', '')
+    if kind != 'dmg':
+        return jsonify({'error': 'Ожидался DMG-файл обновления'}), 400
+    target = _macos_app_bundle()
+    if not target:
+        return jsonify({'error': 'Обновление доступно только для установленного приложения (.app)'}), 400
+    if str(target).startswith('/Volumes/'):
+        return jsonify({'error': 'Приложение запущено из образа. Скопируйте Tokenatra в «Программы» и запустите оттуда'}), 400
+    try:
+        writable = os.access(str(target.parent), os.W_OK)
+    except OSError:
+        writable = True
+    if not writable:
+        return jsonify({'error': 'Нет прав на замену приложения. Перенесите Tokenatra в «Программы»'}), 400
+
+    # Сценарий выполняется ПОСЛЕ закрытия приложения: ждём PID, монтируем DMG,
+    # меняем .app (со старым на время подмены бэкапом), перезапускаем, чистим.
+    upd_dir = user_data_dir() / 'update'
+    upd_dir.mkdir(parents=True, exist_ok=True)
+    script = upd_dir / '_update.sh'
+    script.write_text('\n'.join([
+        '#!/bin/sh',
+        'tries=0',
+        'while kill -0 "$PID" 2>/dev/null; do',
+        '  tries=$((tries+1))',
+        '  [ "$tries" -ge 120 ] && break',
+        '  sleep 0.5',
+        'done',
+        'sleep 1',
+        'MNT="$(mktemp -d)"',
+        'if ! hdiutil attach -nobrowse -quiet -mountpoint "$MNT" "$SRC"; then',
+        '  rmdir "$MNT" 2>/dev/null',
+        '  rm -f "$0"',
+        '  exit 1',
+        'fi',
+        'APP_SRC="$(find "$MNT" -maxdepth 2 -name "*.app" -type d 2>/dev/null | head -n 1)"',
+        'if [ -z "$APP_SRC" ]; then',
+        '  hdiutil detach "$MNT" -quiet 2>/dev/null',
+        '  rmdir "$MNT" 2>/dev/null',
+        '  rm -f "$0"',
+        '  exit 1',
+        'fi',
+        'mv "$TARGET" "$TARGET.old"',
+        'if cp -R "$APP_SRC" "$TARGET"; then',
+        '  rm -rf "$TARGET.old"',
+        '  hdiutil detach "$MNT" -quiet 2>/dev/null',
+        '  rm -f "$SRC"',
+        '  open "$TARGET"',
+        'else',
+        '  mv "$TARGET.old" "$TARGET"',
+        '  hdiutil detach "$MNT" -quiet 2>/dev/null',
+        'fi',
+        'rmdir "$MNT" 2>/dev/null',
+        'rm -f "$0"',
+    ]) + '\n', encoding='utf-8')
+    os.chmod(script, 0o755)
+    subprocess.Popen(
+        ['/bin/sh', str(script)],
+        env={**os.environ, 'SRC': src, 'TARGET': str(target), 'PID': str(os.getpid())},
+        start_new_session=True,
+        close_fds=True,
+    )
+    return jsonify({'ok': True})
+
+
+def _apply_update_linux(src):
+    kind = updater_status().get('download_kind', '')
+    if kind != 'appimage':
+        return jsonify({'error': 'Ожидался AppImage-файл обновления'}), 400
+    appimage = _linux_appimage_path()
+    if not appimage:
+        return jsonify({'error': 'Обновление доступно только для AppImage-версии. Скачайте новый файл вручную.'}), 400
+    tmp = appimage.parent / (appimage.name + '.new')
+    shutil.copyfile(src, tmp)
+    os.chmod(tmp, 0o755)
+    os.replace(str(tmp), str(appimage))  # атомарно: запущенный процесс держит старый inode
+    try:
+        os.unlink(src)
+    except OSError:
+        pass
+    subprocess.Popen([str(appimage)], start_new_session=True, close_fds=True)
+    return jsonify({'ok': True})
+
+
 @app.route('/apply_update', methods=['POST'])
 def apply_update():
-    if sys.platform != 'win32':
-        return jsonify({
-            'error': 'Автоматическая установка обновлений пока поддерживается только в Windows. '
-                     'Откройте страницу релиза и установите пакет вручную.'
-        }), 501
+    if sys.platform == 'darwin':
+        src = updater_status().get('download_path', '')
+        if not src or not os.path.exists(src):
+            return jsonify({'error': 'No update file'}), 400
+        return _apply_update_macos(src)
+    if sys.platform.startswith('linux'):
+        src = updater_status().get('download_path', '')
+        if not src or not os.path.exists(src):
+            return jsonify({'error': 'No update file'}), 400
+        return _apply_update_linux(src)
+
     try:
         s = updater_status()
         src = s.get('download_path', '')
@@ -1476,7 +1724,7 @@ def apply_update():
                 'set /a mtries=0',
                 ':moveloop',
                 'move /Y "%DST%.new" "%DST%" >nul 2>&1',
-                'if exist "%DST%" goto done',
+                'if not exist "%DST%.new" goto done',
                 'set /a mtries+=1',
                 'if %mtries% geq 10 goto fail',
                 'ping 127.0.0.1 -n 2 > nul',
@@ -1879,18 +2127,24 @@ def cli_to_webp(input_path: str):
     if not input_path.exists():
         print(f"Файл не найден: {input_path}", file=sys.stderr)
         sys.exit(1)
+    if input_path.suffix.lower() == '.webp':
+        # Перекодирование lossy поверх оригинала = потеря данных
+        print(f"Уже WebP, пропущено: {input_path.name}")
+        return
     print(f"Конвертация в WebP: {input_path.name}")
     with Image.open(input_path) as image:
         out_path = input_path.with_suffix('.webp')
         buf, _ = save_image(image, 'webp', 90)
         out_path.write_bytes(buf.read())
+    # Конвертация заменяет исходник (см. AGENTS.md: «deletes original»)
+    try:
+        input_path.unlink()
+    except OSError as ex:
+        print(f"Не удалось удалить исходник: {ex}", file=sys.stderr)
     print(f"Сохранено: {out_path}")
 
 @app.route('/save_file', methods=['POST'])
 def save_file():
-    import tkinter as tk
-    from tkinter import filedialog
-
     suggested = request.form.get('filename', 'file.webp')
     ext = suggested.rsplit('.', 1)[-1].lower() if '.' in suggested else 'webp'
     mime_map = {'webp': 'WebP Image', 'png': 'PNG Image', 'jpg': 'JPEG Image', 'avif': 'AVIF Image'}
@@ -1901,18 +2155,28 @@ def save_file():
 
     data = request.files['file'].read()
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    path = filedialog.asksaveasfilename(
-        initialfile=suggested,
-        defaultextension='.' + ext,
-        filetypes=[(label, '*.' + ext), ('All files', '*.*')]
-    )
-    root.destroy()
+    win = getattr(app, 'window_ref', None)
+    if win is not None:
+        path = _pw_dialog_save(suggested)
+        if not path:
+            return jsonify({'cancelled': True})
+    else:
+        # Браузерный/автономный режим без GUI-окна: tkinter доступен только на Windows
+        import tkinter as tk
+        from tkinter import filedialog
 
-    if not path:
-        return jsonify({'cancelled': True})
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        path = filedialog.asksaveasfilename(
+            initialfile=suggested,
+            defaultextension='.' + ext,
+            filetypes=[(label, '*.' + ext), ('All files', '*.*')]
+        )
+        root.destroy()
+
+        if not path:
+            return jsonify({'cancelled': True})
 
     try:
         Path(path).write_bytes(data)
@@ -1922,17 +2186,25 @@ def save_file():
 
 @app.route('/pick_folder', methods=['GET'])
 def pick_folder():
-    import tkinter as tk
-    from tkinter import filedialog
+    win = getattr(app, 'window_ref', None)
+    if win is not None:
+        path = _pw_dialog_folder()
+        if not path:
+            return jsonify({'cancelled': True})
+    else:
+        # Браузерный/автономный режим без GUI-окна: tkinter доступен только на Windows
+        import tkinter as tk
+        from tkinter import filedialog
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    path = filedialog.askdirectory()
-    root.destroy()
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        path = filedialog.askdirectory()
+        root.destroy()
 
-    if not path:
-        return jsonify({'cancelled': True})
+        if not path:
+            return jsonify({'cancelled': True})
+    _picked_folders.add(_norm_folder(path))
 
     return jsonify({'path': path})
 
@@ -1950,6 +2222,20 @@ def save_to_folder():
     if not folder_path.exists() or not folder_path.is_dir():
         return jsonify({'error': 'Invalid folder'}), 400
 
+    # Разрешены только папки, выбранные через диалог в этой сессии, либо
+    # сохранённые в config.json (quick-save/портрет/remover/converter после
+    # перезапуска приложения). Произвольные пути — 403.
+    allowed = set(_picked_folders)
+    try:
+        cfg_last_folders = (_load_config() or {}).get('lastFolders') or {}
+        for f in cfg_last_folders.values():
+            if f:
+                allowed.add(_norm_folder(f))
+    except Exception:
+        pass
+    if _norm_folder(folder_path) not in allowed:
+        return jsonify({'error': 'Folder was not picked via dialog'}), 403
+
     data = request.files['file'].read()
     out = folder_path / Path(filename).name
 
@@ -1961,20 +2247,27 @@ def save_to_folder():
 
 @app.route('/pick_image_to_open', methods=['GET'])
 def pick_image_to_open():
-    import tkinter as tk
-    from tkinter import filedialog
+    win = getattr(app, 'window_ref', None)
+    if win is not None:
+        path = _pw_dialog_open(('Images (*.webp;*.png;*.jpg;*.jpeg)', 'All files (*.*)'))
+        if not path:
+            return jsonify({'cancelled': True})
+    else:
+        # Браузерный/автономный режим без GUI-окна: tkinter доступен только на Windows
+        import tkinter as tk
+        from tkinter import filedialog
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    path = filedialog.askopenfilename(
-        title='Выберите изображение',
-        filetypes=[('Images', '*.webp *.png *.jpg *.jpeg'), ('All files', '*.*')]
-    )
-    root.destroy()
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        path = filedialog.askopenfilename(
+            title='Выберите изображение',
+            filetypes=[('Images', '*.webp *.png *.jpg *.jpeg'), ('All files', '*.*')]
+        )
+        root.destroy()
 
-    if not path:
-        return jsonify({'cancelled': True})
+        if not path:
+            return jsonify({'cancelled': True})
 
     path_obj = Path(path)
     ext = path_obj.suffix.lower()
@@ -2046,17 +2339,20 @@ def get_config():
 
 @app.route('/config', methods=['POST'])
 def save_config():
-    config_path = config_file()
     try:
         data = request.get_json(force=True, silent=True)
         if not isinstance(data, dict):
             return jsonify({'error': 'Invalid body'}), 400
-        # Серверные ключи (выбор модели, GPU) не должны затираться клиентским снапшотом
-        existing = _load_config()
-        for key in ('selected_model', 'gpu_device_id'):
-            if (key not in data or data[key] is None) and key in existing:
-                data[key] = existing[key]
-        _save_config(data)
+        # Серверные ключи (выбор модели, GPU) не должны затираться клиентским снапшотом.
+        # Слияние и запись — атомарно под CONFIG_LOCK, иначе параллельный
+        # /select_model или tune-gpu потеряет свои ключи.
+        def _mutate(existing):
+            merged = dict(data)
+            for key in ('selected_model', 'gpu_device_id'):
+                if (key not in data or data[key] is None) and key in existing:
+                    merged[key] = existing[key]
+            return merged
+        _update_config(_mutate)
         return jsonify({'ok': True})
     except Exception as ex:
         return jsonify({'error': str(ex)}), 500

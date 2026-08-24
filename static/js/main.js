@@ -152,13 +152,13 @@ function initZoomControls() {
     };
 
     document.addEventListener('keydown', e => {
-        if (e.ctrlKey && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
+        if ((e.ctrlKey || e.metaKey) && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
             e.preventDefault(); zoomIn?.click();
         }
-        if (e.ctrlKey && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
+        if ((e.ctrlKey || e.metaKey) && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
             e.preventDefault(); zoomOut?.click();
         }
-        if (e.ctrlKey && e.code === 'Digit0') {
+        if ((e.ctrlKey || e.metaKey) && e.code === 'Digit0') {
             e.preventDefault(); zoomReset?.click();
         }
     });
@@ -172,8 +172,11 @@ function initGlobalShortcuts() {
         const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
 
         if (code === 'F11') {
-            e.preventDefault();
-            window.pywebview?.api?.toggle_fullscreen?.();
+            // В браузере оставляем нативный полноэкранный режим
+            if (window.pywebview?.api?.toggle_fullscreen) {
+                e.preventDefault();
+                window.pywebview.api.toggle_fullscreen();
+            }
             return;
         }
 
@@ -207,19 +210,19 @@ function initGlobalShortcuts() {
 
         if (isInput) return;
 
+        // Эксклюзивная активация: при совпадении комбинаций (возможно при
+        // ручной правке config.json) срабатывает только первый инструмент,
+        // а не оба сразу
         if (hotkeyMatches(e, hk.toolMove)) {
             const btn = document.querySelector('.tool-btn[data-tool="move"]');
             if (btn && !btn.classList.contains('active')) btn.click();
-        }
-        if (hotkeyMatches(e, hk.toolEraser)) {
+        } else if (hotkeyMatches(e, hk.toolEraser)) {
             const btn = document.querySelector('.tool-btn[data-tool="eraser"]');
             if (btn) btn.click();
-        }
-        if (hotkeyMatches(e, hk.toolMask)) {
+        } else if (hotkeyMatches(e, hk.toolMask)) {
             const btn = document.querySelector('.tool-btn[data-tool="mask"]');
             if (btn) btn.click();
-        }
-        if (hotkeyMatches(e, hk.toolRemoveBg)) {
+        } else if (hotkeyMatches(e, hk.toolRemoveBg)) {
             const btn = $('removeBgBtn');
             if (btn) btn.click();
         }
@@ -403,6 +406,11 @@ function initResizeHandles() {
 }
 
 function initWindowControls() {
+    if (!IS_WINDOWS) {
+        // macOS/Linux: системная рамка окна, кастомный тайтлбар скрыт через body.native-frame
+        document.body.classList.add('native-frame');
+        return;
+    }
     const flask = (action) => fetch('/api/window/' + action, { method: 'POST' }).catch(() => {});
     const api = window.pywebview?.api;
 
@@ -596,10 +604,20 @@ let aboutDownloading = false;
 function openAboutTab() {
     document.querySelectorAll('.nav-btn[data-mode]').forEach(function(t) { t.classList.remove('active'); });
     const btn = document.querySelector('.nav-btn[data-mode="about"]');
-    if (btn) btn.classList.add('active');
-    document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+    if (btn) {
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+    }
+    // Как в initTabs(): классы + aria-hidden + inert, иначе панель видима,
+    // но неинтерактивна (кнопки «Проверить обновления»/«Скачать» мертвы)
+    document.querySelectorAll('.panel').forEach(function(p) {
+        const active = p.id === 'aboutPanel';
+        p.classList.toggle('active', active);
+        p.setAttribute('aria-hidden', String(!active));
+        p.inert = !active;
+    });
     const panel = $('aboutPanel');
-    if (panel) panel.classList.add('active');
+    if (panel) panel.focus?.({ preventScroll: true });
 }
 
 function initUpdateNotify() {
@@ -726,7 +744,8 @@ function pollAboutUpdate(retries) {
     fetch('/update_status').then(r => r.json()).then(d => {
         const actions = $('aboutUpdateActions');
         if (d.download_error) {
-            aboutUpdateSetStatus('<span style="color:#ef4444">Ошибка скачивания: ' + d.download_error + '</span>');
+            // Строка из исключений updater — экранируем перед вставкой в HTML
+            aboutUpdateSetStatus('<span style="color:#ef4444">Ошибка скачивания: ' + escapeHtml(d.download_error) + '</span>');
             if (actions) actions.innerHTML = '<button class="about-link" onclick="hideAboutUpdate()">Закрыть</button>';
             aboutUpdating = false;
             aboutDownloading = false;
@@ -735,7 +754,7 @@ function pollAboutUpdate(retries) {
         }
         if (d.download_done) {
             aboutUpdateShowProgress(100);
-            aboutUpdateSetStatus('Обновление <b>' + (d.update_tag || '') + '</b> скачано. Установить сейчас?');
+            aboutUpdateSetStatus('Обновление <b>' + escapeHtml(d.update_tag || '') + '</b> скачано. Установить сейчас?');
             if (actions) actions.innerHTML =
                 '<button class="accent-btn accent-btn-compact" onclick="applyAboutUpdate()">Установить</button>' +
                 '<button class="about-link" onclick="hideAboutUpdate()">Позже</button>';
@@ -762,7 +781,7 @@ function pollAboutUpdate(retries) {
             return;
         }
         if (d.update_available && d.update_url) {
-            aboutUpdateSetStatus('Доступна версия <b>' + (d.update_tag || '') + '</b> (текущая: ' + d.current_version + ')');
+            aboutUpdateSetStatus('Доступна версия <b>' + escapeHtml(d.update_tag || '') + '</b> (текущая: ' + escapeHtml(d.current_version || '') + ')');
             if (actions) actions.innerHTML =
                 '<button class="accent-btn accent-btn-compact" onclick="startAboutDownload()">Скачать</button>' +
                 '<button class="about-link" onclick="hideAboutUpdate()">Закрыть</button>';
@@ -812,17 +831,31 @@ function startAboutDownload() {
 }
 
 function applyAboutUpdate() {
-    aboutUpdateSetStatus('Установка обновления… Приложение закроется');
+    aboutUpdateSetStatus('Установка обновления…');
     const actions = $('aboutUpdateActions');
     if (actions) actions.innerHTML = '';
-    fetch('/apply_update', { method: 'POST' }).catch(() => {});
-    fetch('/api/window/destroy', { method: 'POST' }).catch(() => {});
-    setTimeout(() => { try { window.location.href = '/'; } catch (e) {} }, 2000);
+    fetch('/apply_update', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (!d || !d.ok) {
+                aboutUpdateSetStatus((d && d.error) ? d.error : 'Не удалось установить обновление');
+                return;
+            }
+            aboutUpdateSetStatus('Установка обновления… Приложение закроется');
+            fetch('/api/window/destroy', { method: 'POST' }).catch(() => {});
+        })
+        .catch(() => aboutUpdateSetStatus('Не удалось связаться с сервером'));
 }
 
 async function init() {
     await AppConfig.load();
     I18n.init();
+    applyHotkeyHints();
+    document.addEventListener('languagechange', applyHotkeyHints);
+    if (!IS_WINDOWS) {
+        // Функции, доступные только в Windows (контекстное меню ОС)
+        document.querySelectorAll('[data-windows-only]').forEach(el => { el.style.display = 'none'; });
+    }
     state.canvasScale = AppConfig.canvasScale || 2;
     state.dropShadowEnabled = !!AppConfig.dropShadowEnabled;
     state.colorCorrectionEnabled = !!AppConfig.colorCorrectionEnabled;
@@ -850,7 +883,7 @@ initTabs();
     TokenEditor.init();
     initModelSelector();
     HotkeySettings.init();
-    window.addEventListener('beforeunload', () => urlManager.revokeAll());
+    window.addEventListener('beforeunload', () => { AppConfig.flush(); urlManager.revokeAll(); });
 }
 
 if (document.readyState === 'loading') {

@@ -107,7 +107,7 @@ const AppConfig = {
             for (const [action, value] of Object.entries(savedHotkeys)) {
                 if (typeof value !== 'string') continue;
                 const p = parseHotkey(value);
-                if (!p.ctrl && !p.alt && !p.shift && HOTKEYS_META[action]?.ctrl) {
+                if (!p.ctrl && !p.alt && !p.shift && !p.meta && HOTKEYS_META[action]?.ctrl) {
                     savedHotkeys[action] = 'Ctrl+' + p.code;
                 }
             }
@@ -150,12 +150,29 @@ const AppConfig = {
     save() {
         if (this._saveTimeout) clearTimeout(this._saveTimeout);
         this._saveTimeout = setTimeout(() => {
-            fetch('/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(this._data)
-            }).catch(() => {});
+            this._saveTimeout = null;
+            this._postNow();
         }, 500);
+    },
+
+    _postNow() {
+        fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(this._data)
+        }).catch(() => {});
+    },
+
+    // Немедленно отправляет отложенное сохранение (вызывается при закрытии
+    // окна — иначе изменение в пределах 500 мс до закрытия теряется)
+    flush() {
+        if (!this._saveTimeout) return;
+        if (this._saveTimeout) { clearTimeout(this._saveTimeout); this._saveTimeout = null; }
+        try {
+            if (navigator.sendBeacon && navigator.sendBeacon('/config',
+                new Blob([JSON.stringify(this._data)], { type: 'application/json' }))) return;
+        } catch (e) {}
+        this._postNow();
     },
 
     get hotkeys() { return this._data.hotkeys; },
@@ -215,8 +232,9 @@ function parseHotkey(str) {
     const ctrl = parts.includes('Ctrl');
     const alt = parts.includes('Alt');
     const shift = parts.includes('Shift');
-    const code = parts.filter(p => p !== 'Ctrl' && p !== 'Alt' && p !== 'Shift').join('+');
-    return { ctrl, alt, shift, code };
+    const meta = parts.includes('Meta');
+    const code = parts.filter(p => p !== 'Ctrl' && p !== 'Alt' && p !== 'Shift' && p !== 'Meta').join('+');
+    return { ctrl, alt, shift, meta, code };
 }
 
 function serializeHotkey(code, mods) {
@@ -224,6 +242,7 @@ function serializeHotkey(code, mods) {
     if (mods?.ctrl) parts.push('Ctrl');
     if (mods?.alt) parts.push('Alt');
     if (mods?.shift) parts.push('Shift');
+    if (mods?.meta) parts.push('Meta');
     parts.push(code);
     return parts.join('+');
 }
@@ -232,7 +251,7 @@ function hotkeyMatches(e, str) {
     const p = parseHotkey(str);
     if (!p.code) return false;
     return e.code === p.code
-        && !!e.ctrlKey === p.ctrl
+        && (e.ctrlKey || e.metaKey) === (!!p.ctrl || !!p.meta)
         && !!e.altKey === p.alt
         && !!e.shiftKey === p.shift;
 }
@@ -244,6 +263,7 @@ function codeToLabel(code) {
     if (p.ctrl) parts.push('Ctrl');
     if (p.alt) parts.push('Alt');
     if (p.shift) parts.push('Shift');
+    if (p.meta && !p.ctrl) parts.push(typeof IS_MAC !== 'undefined' && IS_MAC ? '⌘' : 'Meta');
     parts.push(p.code
         .replace('ArrowUp','↑').replace('ArrowDown','↓')
         .replace('ArrowLeft','←').replace('ArrowRight','→')

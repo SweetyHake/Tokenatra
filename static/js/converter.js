@@ -166,7 +166,6 @@ const Converter = {
         if (this.isProcessing || this.processingQueue.length === 0) return;
 
         this.isProcessing = true;
-        const total = this.processingQueue.length + this.results.size;
 
         $('convBatchProgress').classList.add('show');
         if (this._progressTimer) clearTimeout(this._progressTimer);
@@ -174,6 +173,9 @@ const Converter = {
         while (this.processingQueue.length > 0) {
             const { id, file } = this.processingQueue.shift();
             const done = this.results.size;
+            // total пересчитывается на каждом шаге: файлы могут быть
+            // добавлены в очередь прямо во время обработки пачки
+            const total = done + this.processingQueue.length + 1;
 
             $('convProgressFill').style.width = `${(done / total) * 100}%`;
             $('convProgressText').textContent = `${done} / ${total}`;
@@ -242,7 +244,9 @@ const Converter = {
             preview.innerHTML = '';
             preview.appendChild(resultElement);
 
-            const safeNewName = newName.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Имя файла идёт в атрибут data-tooltip в двойных кавычках —
+            // экранируем и кавычки, иначе имя вида x" onmouseover="… внедрит обработчик
+            const safeNewName = escapeHtml(newName);
             const safeBlobSize = formatSize(blob.size);
 
             const infoText = document.createElement('div');

@@ -20,13 +20,13 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-cross-platform.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install Python dependencies
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller onnxruntime-directml numpy Pillow flask pywebview psutil imageio-ffmpeg
+          python -m pip install -r requirements.txt pyinstaller
 
       - name: Check Python modules
         run: python -m py_compile app.py server.py updater.py platform_utils.py context_menu_helper.py
@@ -43,7 +43,9 @@ jobs:
 
       - name: Build installer
         shell: pwsh
-        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer.iss'
+        run: |
+          $ver = (Select-String -Path version.py -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$ver" installer.iss
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -62,7 +64,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-cross-platform.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install Linux desktop libraries
         run: |
@@ -72,25 +74,28 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-cross-platform.txt pyinstaller
+          python -m pip install -r requirements.txt pyinstaller
 
       - name: Check Python modules
         run: python -m py_compile app.py server.py updater.py platform_utils.py context_menu_helper.py
 
-      - name: Build and archive application
-        run: |
-          python -m PyInstaller build.spec --noconfirm --clean
-          tar -C dist -czf "dist/Tokenatra-linux-x86_64.tar.gz" Tokenatra
+      - name: Build portable application and AppImage
+        run: bash build-unix.sh
+
+      - name: Create portable archive
+        run: tar -C dist -czf "dist/Tokenatra-linux-x86_64.tar.gz" Tokenatra
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: tokenatra-linux-x86_64
-          path: dist/Tokenatra-linux-x86_64.tar.gz
+          path: |
+            dist/Tokenatra_*_x86_64.AppImage
+            dist/Tokenatra-linux-x86_64.tar.gz
           if-no-files-found: error
 
   macos:
-    name: macOS
+    name: macOS (Apple Silicon)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -99,35 +104,60 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-cross-platform.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-cross-platform.txt pyinstaller
+          python -m pip install -r requirements.txt pyinstaller
 
       - name: Check Python modules
         run: python -m py_compile app.py server.py updater.py platform_utils.py context_menu_helper.py
 
-      - name: Build and archive application
-        run: |
-          python -m PyInstaller build.spec --noconfirm --clean
-          ARCH="$(uname -m)"
-          ditto -c -k --sequesterRsrc --keepParent \
-            "dist/Tokenatra.app" "dist/Tokenatra-macos-${ARCH}.zip"
-          printf '%s' "$ARCH" > macos-arch.txt
+      - name: Build app bundle and DMG
+        run: bash build-unix.sh
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: tokenatra-macos
-          path: dist/Tokenatra-macos-*.zip
+          path: dist/Tokenatra_*.dmg
+          if-no-files-found: error
+
+  macos-intel:
+    name: macOS Intel
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Check Python modules
+        run: python -m py_compile app.py server.py updater.py platform_utils.py context_menu_helper.py
+
+      - name: Build app bundle and DMG
+        run: bash build-unix.sh
+
+      - name: Upload macOS Intel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tokenatra-macos-intel
+          path: dist/Tokenatra_*.dmg
           if-no-files-found: error
 
   release:
     name: Publish release assets
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux, macos]
+    needs: [windows, linux, macos, macos-intel]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tag

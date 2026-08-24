@@ -92,6 +92,8 @@ const TokenPresets = {
                 state._rawProtectionMaskImg = img;
                 this._rebuildErasableCanvas();
             };
+            // Ошибка декодирования: URL больше не нужен — иначе утечка
+            img.onerror = () => urlManager.revoke('protection-mask');
             img.src = maskUrl;
         }).catch(() => {
             if (loadId !== this._protectionLoadId) return;
@@ -271,6 +273,10 @@ const TokenPresets = {
         this.hidePresetOverlay();
 
         const maskCtx = state.maskCanvas.getContext('2d');
+        // Полная перезапись маски в обход ластика: сбрасываем несброшенные
+        // штрихи и инкрементируем ген, чтобы пачки из полёта не втаптывали
+        // старые штрихи в свежую маску
+        TokenCanvas._invalidatePendingStrokes();
         maskCtx.globalCompositeOperation = 'source-over';
         maskCtx.fillStyle = 'white';
         maskCtx.fillRect(0, 0, state.maskCanvas.width, state.maskCanvas.height);
@@ -309,10 +315,13 @@ const TokenPresets = {
                     container.appendChild(empty);
                     return;
                 }
+                // По умолчанию выбрано кольцо «Сталь» (steel.webp);
+                // если его нет в наборе — первое в списке
+                const defaultIdx = Math.max(0, rings.findIndex(r => r.file === 'steel.webp'));
                 rings.forEach((ring, index) => {
                     const item = document.createElement('div');
                     item.className = 'ring-thumb';
-                    if (index === 0) item.classList.add('active');
+                    if (index === defaultIdx) item.classList.add('active');
                     item.dataset.ringName = ring.name;
                     const img = document.createElement('img');
                     img.src = `/ring_file/${encodeURIComponent(ring.file)}`;
@@ -329,24 +338,28 @@ const TokenPresets = {
                         delBtn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
                         delBtn.onclick = async event => {
                             event.stopPropagation();
-                            const response = await fetch('/delete_ring', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ file: ring.file })
-                            });
-                            const data = await response.json();
-                            if (!response.ok || data.error) {
-                                toast(data.error || 'Не удалось удалить кольцо', true);
-                                return;
+                            try {
+                                const response = await fetch('/delete_ring', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ file: ring.file })
+                                });
+                                const data = await response.json();
+                                if (!response.ok || data.error) {
+                                    toast(data.error || 'Не удалось удалить кольцо', true);
+                                    return;
+                                }
+                                if (item.classList.contains('active')) {
+                                    state.ringImages = {};
+                                    state.activeRingMaskFile = null;
+                                    this.loadProtectionMask(null);
+                                    TokenCanvas.render();
+                                }
+                                this.loadRings();
+                                toast('Кольцо удалено');
+                            } catch (e) {
+                                toast('Не удалось удалить кольцо', true);
                             }
-                            if (item.classList.contains('active')) {
-                                state.ringImages = {};
-                                state.activeRingMaskFile = null;
-                                this.loadProtectionMask(null);
-                                TokenCanvas.render();
-                            }
-                            this.loadRings();
-                            toast('Кольцо удалено');
                         };
                         item.appendChild(delBtn);
                     }
@@ -356,7 +369,7 @@ const TokenPresets = {
                         this.loadSingleRing(ring.file, ring.mask_file);
                     };
                     container.appendChild(item);
-                    if (index === 0) this.loadSingleRing(ring.file, ring.mask_file);
+                    if (index === defaultIdx) this.loadSingleRing(ring.file, ring.mask_file);
                 });
             })
             .catch(() => {});
@@ -466,7 +479,7 @@ const TokenPresets = {
                 urlManager.revoke('ring-' + size);
                 const url = urlManager.create(blob, 'ring-' + size);
                 img.onload = () => { state.ringImages[size] = img; resolve(img); };
-                img.onerror = () => resolve(null);
+                img.onerror = () => { urlManager.revoke('ring-' + size); resolve(null); };
                 img.src = url;
             }).catch(() => resolve(null));
         });

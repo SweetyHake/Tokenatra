@@ -268,7 +268,9 @@ const PortraitGenerator = {
         const img = this.getImage();
         if (img) {
             const maxDim = Math.max(img.width, img.height);
-            this.imageScale = this.SIZE / maxDim;
+            // Клампим в диапазон слайдера 10-500%, иначе мелкие картинки
+            // дают масштаб вне слайдера: UI и рендер расходятся
+            this.imageScale = clamp(this.SIZE / maxDim, 0.1, 5);
         } else {
             this.imageScale = 1;
         }
@@ -303,7 +305,7 @@ const PortraitGenerator = {
 
     async save() {
         const out = this.renderForSave();
-        const fileName = (state.tokenFileName || 'token').trim() + '.webp';
+        const fileName = ((state.tokenFileName || 'token').trim() || 'token') + '.webp';
         const blob = await new Promise(resolve => out.toBlob(resolve, 'image/webp', 0.95));
 
         if (this.quickSaveEnabled && this.saveFolder) {

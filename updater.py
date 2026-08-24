@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import platform
 import sys
 import tempfile
 import time
@@ -183,6 +184,40 @@ def _find_exe_asset(assets):
     return bare_asset
 
 
+def _unix_asset_ext():
+    return ".dmg" if sys.platform == "darwin" else ".appimage"
+
+
+def _find_unix_asset(assets):
+    """Лучший ассет для macOS (.dmg) / Linux (.AppImage) под текущую архитектуру.
+    Имена ассетов строятся из `uname -m`: x86_64 везде, но ARM-мак сообщает 'arm64',
+    а Linux CI — 'aarch64', поэтому проверяем оба варианта суффикса."""
+    ext = _unix_asset_ext()
+    machine = platform.machine().lower()
+    arches = ("arm64", "aarch64") if machine in ("arm64", "aarch64") else ("x86_64",)
+    exact, fallback = None, None
+    for asset in assets:
+        lower = asset.get("name", "").lower()
+        if not lower.endswith(ext) or APP_NAME.lower() not in lower:
+            continue
+        if any(f"_{a}." in lower for a in arches):
+            exact = asset.get("browser_download_url")
+            break
+        if fallback is None:
+            fallback = asset.get("browser_download_url")
+    return exact or fallback
+
+
+def _expected_update_extension():
+    if sys.platform == "win32":
+        return ".exe"
+    if sys.platform == "darwin":
+        return ".dmg"
+    if sys.platform.startswith("linux"):
+        return ".appimage"
+    return None
+
+
 def check_for_updates(force=False):
     try:
         if not GITHUB_REPO:
@@ -212,11 +247,13 @@ def check_for_updates(force=False):
 
         if sys.platform == "win32":
             url = _find_exe_asset(assets)
+        elif sys.platform in ("darwin", "linux"):
+            # macOS качает DMG, Linux — AppImage своей архитектуры
+            url = _find_unix_asset(assets)
         else:
-            # Unix packages have different formats and must not be passed to
-            # the Windows .exe downloader or replacement script.
-            url = data.get("html_url", _releases_url())
+            url = None
         if not url:
+            # Подходящего ассета нет — ведём пользователя на страницу релиза
             url = data.get("html_url", _releases_url())
 
         _touch_throttle_file()
@@ -230,9 +267,9 @@ def check_for_updates(force=False):
 
 
 def download_update():
-    if sys.platform != "win32":
+    if not sys.platform.startswith(("win", "darwin", "linux")):
         _state.complete_download(
-            error="Автоматическая установка обновлений пока поддерживается только в Windows"
+            error="Автоматическая установка обновлений не поддерживается на этой платформе"
         )
         return
     try:
@@ -247,15 +284,28 @@ def download_update():
             raise ValueError("No download URL")
 
         clean = url.split("?")[0]
-        if not clean.endswith(".exe"):
+        expected_ext = _expected_update_extension()
+        lower = clean.lower()
+        if expected_ext == ".exe" and not lower.endswith(".exe"):
             _state.set_download_active(False)
             raise ValueError("Автообновление недоступно: нет exe-файла приложения. Скачайте установщик вручную с GitHub Releases")
+        if expected_ext != ".exe" and not (lower.endswith(expected_ext or "\0")):
+            _state.set_download_active(False)
+            raise ValueError(
+                f"В релизе нет подходящего файла ({expected_ext}) для этой платформы. "
+                "Скачайте вручную с GitHub Releases"
+            )
 
-        kind = "installer" if ("setup" in Path(clean).name.lower() or "installer" in Path(clean).name.lower()) else "bare"
+        if sys.platform == "win32":
+            kind = "installer" if ("setup" in Path(clean).name.lower() or "installer" in Path(clean).name.lower()) else "bare"
+        elif sys.platform == "darwin":
+            kind = "dmg"
+        else:
+            kind = "appimage"
         _state.set_download_kind(kind)
 
         upd_dir = _update_dir()
-        dest = upd_dir / "Tokenatra_update.exe"
+        dest = upd_dir / ("Tokenatra_update" + expected_ext)
         # Удаляем только чужие/старые файлы обновлений, не трогая текущий dest
         for old in upd_dir.glob("Tokenatra_update*"):
             try:

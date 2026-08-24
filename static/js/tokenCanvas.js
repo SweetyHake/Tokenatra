@@ -24,7 +24,7 @@ var TokenCanvas = {
     // не должна штамповать точки одного режима кистью другого
     _workerQueues: { pink: [], image: [] },
     _workerBatchTimer: null,
-    _workerBrushSent: {},
+    _lastBrushSent: null,
 
     _strokeDirtyRect: null,
     _strokeFullDirty: false,
@@ -105,15 +105,11 @@ var TokenCanvas = {
     },
 
     _initWorker: function() {
-        if (this._workerUrl) {
-            URL.revokeObjectURL(this._workerUrl);
-            this._workerUrl = null;
-        }
         try {
             var workerUrl = '/static/js/eraserWorker.js';
             if (window.__APP_VERSION) workerUrl += '?v=' + window.__APP_VERSION;
             this._worker = new Worker(workerUrl);
-            this._workerBrushSent = {};
+            this._lastBrushSent = null;
             this._workerQueues.pink = [];
             this._workerQueues.image = [];
             this._workerInFlight = 0;
@@ -241,8 +237,11 @@ var TokenCanvas = {
         }
     },
 
-    _ensureWorkerBrush: function(brushCanvas, key) {
-        if (!this._worker || this._workerBrushSent[key] === brushCanvas) return;
+    _ensureWorkerBrush: function(brushCanvas) {
+        // В воркере ОДИН слот кисти (self._brush), поэтому кэш отправки тоже
+        // один общий: при чередовании розовый/изображение кисть обязана
+        // пересылаться, иначе штрихи уйдут кистью чужого режима.
+        if (!this._worker || this._lastBrushSent === brushCanvas) return;
         // Свежий getImageData на каждую отправку: буфер передаётся воркеру
         // (detach), закэшированный ImageData повторно использовать нельзя
         var brushCtx = brushCanvas.getContext('2d');
@@ -253,7 +252,7 @@ var TokenCanvas = {
             brushWidth: brushCanvas.width,
             brushHeight: brushCanvas.height
         }, [buf]);
-        this._workerBrushSent[key] = brushCanvas;
+        this._lastBrushSent = brushCanvas;
     },
 
     _strokeBrushRadius: function(pink) {
@@ -284,7 +283,7 @@ var TokenCanvas = {
 
         var brush = pink ? this.eraserBrush : this._getImageBrush();
         if (!brush) { this._workerInFlight--; return; }
-        this._ensureWorkerBrush(brush.canvas, mode);
+        this._ensureWorkerBrush(brush.canvas);
 
         var mw = maskCanvas.width;
         var mh = maskCanvas.height;
@@ -445,7 +444,7 @@ var TokenCanvas = {
         this.eraserBrush = { canvas: brush, size: scaledRadius, fullSize: brushSize };
         this._imageBrushCache = null;
         this._imageBrushCacheSize = -1;
-        this._workerBrushSent = {};
+        this._lastBrushSent = null;
     },
 
     _getImageBrush: function() {
@@ -480,7 +479,7 @@ var TokenCanvas = {
 
         this._imageBrushCache = { canvas: brush, size: brushRadiusInImagePx, fullSize: brushSize };
         this._imageBrushCacheSize = effectiveScale;
-        this._workerBrushSent.image = null;
+        this._lastBrushSent = null;
         return this._imageBrushCache;
     },
 
@@ -888,9 +887,10 @@ var TokenCanvas = {
                 tempCtx.imageSmoothingEnabled = true;
                 tempCtx.imageSmoothingQuality = strokeQuality;
 
-                if (ringImage) {
-                    tempCtx.drawImage(ringImage, ringOffset * k, ringOffset * k, ringSize * k, ringSize * k);
-                }
+                // Кольцо сюда НЕ рисуем: ниже цельноканвасный destination-in
+                // вырезал бы его по розовой маске, тогда как кольцо — базовая
+                // подложка на this.ctx (см. выше) и в экспорте renderForSave
+                // маскируется только изображение, но не кольцо.
 
                 tempCtx.save();
                 tempCtx.translate(cx * k, cy * k);
@@ -959,7 +959,6 @@ var TokenCanvas = {
         var gapLen = 12 * (size / s3);
 
         var scaleMode = state.saveScaleMode || 'auto';
-        var qualityBase = state.saveQuality || 512;
         var activeScale;
         if (scaleMode === 'auto') {
             var imgMaxDim = state.userImage ? Math.max(state.userImage.width, state.userImage.height) : 0;
@@ -1687,16 +1686,24 @@ var TokenCanvas = {
             self.hideEraserCursor();
         };
 
+        // Идентификатор указателя, захватившего активный жест (панорама/
+        // перетаскивание/стирание). Второй палец или стилус игнорируются,
+        // пока жест не завершён — иначе их события порождают ложные штрихи.
+        self._activePointerId = null;
+
         target.onpointerdown = function(e) {
             self._rectDirty = true;
             if (!state.userImage) return;
+            if (self._activePointerId !== null && e.pointerId !== self._activePointerId) return;
             if (e.button === 1 || e.button === 2) {
                 e.preventDefault();
+                self._activePointerId = e.pointerId;
                 beginPan(e);
                 return;
             }
             if (e.button === 0 && e.altKey) {
                 e.preventDefault();
+                self._activePointerId = e.pointerId;
                 beginPan(e);
                 return;
             }
@@ -1704,17 +1711,20 @@ var TokenCanvas = {
             var pos = self.getCanvasPos(e);
             if (state.currentTool === 'move') {
                 state.isDragging = true;
+                self._activePointerId = e.pointerId;
                 var sc = self.internalSize / 1024;
                 state.dragStart = { x: pos.x / sc - state.imageX, y: pos.y / sc - state.imageY };
                 state.dragStartPos = { x: state.imageX, y: state.imageY };
             } else if (state.currentTool === 'eraser' || state.currentTool === 'mask') {
                 // Тач не имеет shift — восстановление только мышью/пером
+                self._activePointerId = e.pointerId;
                 self.startErasing(pos, e.shiftKey);
             }
         };
 
         target.onpointermove = function(e) {
             if ((state.currentTool === 'eraser' || state.currentTool === 'mask') && !state.isPanning) self.updateEraserCursor(e);
+            if (self._activePointerId !== null && e.pointerId !== self._activePointerId) return;
             if (state.isPanning) {
                 var pdx = (e.clientX - state.panStart.x) / state.viewZoom;
                 var pdy = (e.clientY - state.panStart.y) / state.viewZoom;
@@ -1748,6 +1758,8 @@ var TokenCanvas = {
         };
 
         target.onpointerup = function(e) {
+            if (self._activePointerId !== null && e.pointerId !== self._activePointerId) return;
+            self._activePointerId = null;
             if (state.isPanning) {
                 state.isPanning = false;
                 target.style.cursor = '';
@@ -1765,7 +1777,9 @@ var TokenCanvas = {
         };
 
         // Жест прерван системой (жест ОС, входящий звонок стилуса и т.п.)
-        target.onpointercancel = function() {
+        target.onpointercancel = function(e) {
+            if (self._activePointerId !== null && e.pointerId !== self._activePointerId) return;
+            self._activePointerId = null;
             if (state.isPanning) {
                 state.isPanning = false;
                 target.style.cursor = '';
@@ -1783,7 +1797,7 @@ var TokenCanvas = {
         target.onwheel = function(e) {
             e.preventDefault();
             if (!state.userImage) return;
-            if (e.ctrlKey) {
+            if (e.ctrlKey || e.metaKey) {
                 var canvasRect = self.canvas.getBoundingClientRect();
                 var mouseX = e.clientX - canvasRect.left - canvasRect.width / 2;
                 var mouseY = e.clientY - canvasRect.top - canvasRect.height / 2;
@@ -1996,7 +2010,11 @@ var TokenCanvas = {
         this._strokeChanged = false;
         this._maskGen++;
     },
-    resetMask: function() {
+    // Сброс несброшенных штрихов + инкремент генерации маски. Обязателен при
+    // ЛЮБОЙ полной перезаписи маски в обход ластика (undo/redo, сброс, пресет,
+    // заливка после удаления фона): иначе устаревшие пачки из полёта пройдут
+    // ген-проверку и втаптывают до-перезаписные штрихи в свежую маску.
+    _invalidatePendingStrokes: function() {
         this._workerQueues.pink = [];
         this._workerQueues.image = [];
         if (this._workerBatchTimer) clearTimeout(this._workerBatchTimer);
@@ -2006,6 +2024,10 @@ var TokenCanvas = {
         this._strokeFullDirty = false;
         this._strokeChanged = false;
         this._maskGen++;
+    },
+    resetMask: function() {
+        if (!state.maskCanvas) return;
+        this._invalidatePendingStrokes();
         var maskCtx = state.maskCanvas.getContext('2d');
         maskCtx.globalCompositeOperation = 'source-over';
         maskCtx.fillStyle = 'white';
@@ -2102,15 +2124,7 @@ var TokenCanvas = {
     
     resetImageMask: function() {
         if (!state.imageMaskCanvas) return;
-        this._workerQueues.pink = [];
-        this._workerQueues.image = [];
-        if (this._workerBatchTimer) clearTimeout(this._workerBatchTimer);
-        this._workerBatchTimer = null;
-        // _workerInFlight не трогаем: ответы в полёте декрементируют сами
-        this._strokeDirtyRect = null;
-        this._strokeFullDirty = false;
-        this._strokeChanged = false;
-        this._maskGen++;
+        this._invalidatePendingStrokes();
         var ctx = state.imageMaskCanvas.getContext('2d');
         ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = 'white';

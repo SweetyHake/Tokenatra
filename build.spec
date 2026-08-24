@@ -1,12 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 from pathlib import Path
-from version import APP_NAME, MODEL_FILE
+from version import APP_NAME, MODEL_FILE, __version__
 from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 is_windows = sys.platform == 'win32'
 is_macos = sys.platform == 'darwin'
+
+# macOS: .icns генерируется из logo.png в build-unix.sh
+icns_path = 'icon.icns' if is_macos else None
+if icns_path and not Path(icns_path).exists():
+    icns_path = None
 
 imageio_ffmpeg_datas = []
 try:
@@ -83,7 +88,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version='version_info.txt' if is_windows else None,
-    icon='icon.ico' if is_windows else None,
+    icon='icon.ico' if is_windows else icns_path,
 )
 
 if is_macos:
@@ -93,11 +98,12 @@ if is_macos:
         a.zipfiles,
         a.datas,
         name=f'{APP_NAME}.app',
-        icon=None,
+        icon=icns_path,
         bundle_identifier='com.sweetyhake.tokenatra',
         info_plist={
             'CFBundleName': APP_NAME,
             'CFBundleDisplayName': APP_NAME,
+            'CFBundleShortVersionString': __version__,
             'NSHighResolutionCapable': True,
         },
     )

@@ -200,6 +200,18 @@ def folder_to_webp(folder_path: str):
 
 def _notify(message: str):
     try:
+        if sys.platform == 'darwin':
+            escaped = message.replace('\\', '\\\\').replace('"', '\\"')
+            subprocess.Popen(
+                ['osascript', '-e', f'display notification "{escaped}" with title "Tokenatra"']
+            )
+            return
+        if sys.platform.startswith('linux'):
+            try:
+                subprocess.Popen(['notify-send', '-a', 'Tokenatra', message])
+            except FileNotFoundError:
+                pass
+            return
         subprocess.Popen(
             [
                 'powershell', '-WindowStyle', 'Hidden', '-Command',

@@ -21,19 +21,25 @@ build.bat                 # PyInstaller only (portable folder)
 PyInstaller output: `dist/Tokenatra/Tokenatra.exe`
 Installer output: `dist/installer/Tokenatra_Setup_v*.exe`
 
-### GitHub Releases: только установщик
+### GitHub Releases: ассеты по платформам
 
-В релизы загружается ТОЛЬКО `Tokenatra_Setup_v*.exe`. Голый `dist/Tokenatra/Tokenatra.exe` (~9 МБ) — это тонкий загрузчик PyInstaller без папки `_internal` (его нельзя качать отдельно, без `_internal` он не запустится). Если снова понадобится портативная версия — заливать ZIP всей папки `dist/Tokenatra/`.
+Релиз содержит: `Tokenatra_Setup_v*.exe` (Windows), `Tokenatra_<ver>_arm64.dmg` / `_x86_64.dmg` (macOS), `Tokenatra_<ver>_x86_64.AppImage` + `.tar.gz` (Linux). Все собирает CI (`build-release.yml`); имена ассетов значимы — updater ищет файл по суффиксу архитектуры.
 
-ВНИМАНИЕ: автообновление (`updater.py:_find_exe_asset`) пропускает установщики (имена с "setup"/"installer") — их нельзя копировать поверх exe приложения. Пока в релизе один ассет (установщик), в приложении показывается «доступна новая версия» со ссылкой на GitHub, автоскачивание недоступно. Если вернётся автообновление — нужен ассет с именем `Tokenatra.exe` (без "setup"), либо доработка апдейтера под установщик (`/SILENT`).
+Автообновление работает на всех трёх платформах:
+- **Windows**: качает Setup-установщик (приоритет в `_find_exe_asset`) — тихая установка через bat.
+- **macOS**: качает DMG своей архитектуры; `/apply_update` пишет `_update.sh`, который после закрытия приложения монтирует образ, подменяет .app (с бэкапом на время подмены) и перезапускает. Запуск из /Volumes или вне .app → отказ с подсказкой.
+- **Linux**: качает AppImage; атомарный `os.replace` поверх работающего файла + перезапуск. Работает только из AppImage ($APPIMAGE).
+
+Голый `dist/Tokenatra/Tokenatra.exe` — тонкий загрузчик без `_internal`; отдельно не публиковать.
 
 ### Публикация релиза (пошагово)
 
 Версии по схеме `год.мажор.фикс` (2026 → `26.x.y`), тег `v26.x.y`.
 
-1. **Бамп версии** в двух местах:
-   - `version.py` → `__version__ = "26.x.y"`
-   - `installer.iss:5` → `#define MyAppVersion "26.x.y"` (имя установщика = `Tokenatra_Setup_v26.x.y.exe`)
+> **CI:** пуш тега `v*` запускает `.github/workflows/build-release.yml` — он сам собирает все платформы и прикладывает ассеты к релизу: `Tokenatra_Setup_v*.exe` (Windows), `Tokenatra_*.dmg` (macOS), `Tokenatra_*_x86_64.AppImage` + `.tar.gz` (Linux). Ручные шаги 4-5 ниже нужны только если CI недоступен.
+
+1. **Бамп версии**:
+   - `version.py` → `__version__ = "26.x.y"` (имя установщика = `Tokenatra_Setup_v26.x.y.exe`; CI передаёт версию в Inno через `/DMyAppVersion=…`, в installer.iss остаётся только fallback)
 2. **Коммит и пуш** в `main`:
    ```
    git add -A
@@ -78,9 +84,8 @@ iscc installer.iss
 
 ## Dependencies
 
-`start.bat` auto-installs: `onnxruntime-directml`, `numpy`, `Pillow`, `flask`, `pywebview`, `psutil`, `imageio-ffmpeg`
-
-No `requirements.txt` — the batch file is the source of truth.
+Единый `requirements.txt` — источник правды для `start.bat`, `start.sh` и CI.
+Маркеры окружения ставят `onnxruntime-directml` только в Windows; в macOS/Linux — обычный `onnxruntime`.
 
 ## Version & updates
 

@@ -2,7 +2,10 @@
 ; Install Inno Setup from https://jrsoftware.org/isdl.php first
 
 #define MyAppName "Tokenatra"
-#define MyAppVersion "26.1.4"
+#ifndef MyAppVersion
+; Fallback для локальной сборки без /DMyAppVersion; CI передаёт версию из version.py
+#define MyAppVersion "26.1.5"
+#endif
 #define MyAppPublisher "SweetyHake"
 #define MyAppURL "https://github.com/SweetyHake/Tokenatra"
 #define MyAppExeName "Tokenatra.exe"

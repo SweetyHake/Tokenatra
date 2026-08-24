@@ -58,14 +58,14 @@
                 <div class="ctx-scroll">
                     <div class="editor-section editor-source-section">
                         <div class="file-row" id="tokenDropzone">
-                            <button class="ghost-btn" id="fileOpenBtn" data-tooltip="Открыть файл (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>Открыть</button>
+                            <button class="ghost-btn" id="fileOpenBtn" data-hotkey-hint data-tooltip="Открыть файл (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>Открыть</button>
                             <span class="file-row-name" id="dropzoneLabel">Файл не выбран</span>
                         </div>
                         <input type="file" id="tokenFileInput" accept="image/*">
                         <div class="nav-arrows" id="navArrows" style="display:none">
-                            <button class="nav-arrow-btn" id="navPrev" data-tooltip="Предыдущий файл (Ctrl+Left)">&#9664;</button>
+                            <button class="nav-arrow-btn" id="navPrev" data-hotkey-hint data-tooltip="Предыдущий файл (Ctrl+Left)">&#9664;</button>
                             <input type="text" id="tokenFileName" class="nav-filename-input" placeholder="token">
-                            <button class="nav-arrow-btn" id="navNext" data-tooltip="Следующий файл (Ctrl+Right)">&#9654;</button>
+                            <button class="nav-arrow-btn" id="navNext" data-hotkey-hint data-tooltip="Следующий файл (Ctrl+Right)">&#9654;</button>
                             <span class="nav-arrow-info" id="navInfo"></span>
                         </div>
                     </div>
@@ -146,8 +146,8 @@
             <div class="resize-handle" id="leftPanelHandle"></div>
             <div class="canvas-area">
                 <div class="canvas-undo-bar" id="undoBar" style="display:none;">
-                    <button class="undo-btn" id="undoBtn" data-tooltip="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M3 10h13a4 4 0 0 1 0 8H9"/><polyline points="7 6 3 10 7 14"/></svg></button>
-                    <button class="undo-btn" id="redoBtn" data-tooltip="Повторить (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M21 10H8a4 4 0 0 0 0 8h7"/><polyline points="17 6 21 10 17 14"/></svg></button>
+                    <button class="undo-btn" id="undoBtn" data-hotkey-hint data-tooltip="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M3 10h13a4 4 0 0 1 0 8H9"/><polyline points="7 6 3 10 7 14"/></svg></button>
+                    <button class="undo-btn" id="redoBtn" data-hotkey-hint data-tooltip="Повторить (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M21 10H8a4 4 0 0 0 0 8h7"/><polyline points="17 6 21 10 17 14"/></svg></button>
                 </div>
                 <div class="zoom-indicator" id="zoomIndicator">100%</div>
                 <div class="token-canvas-wrapper" id="canvasWrapper">
@@ -157,7 +157,7 @@
                         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32"/></svg>
                         <p>Загрузите изображение</p>
                         <span>Перетащите файл сюда или вставьте из буфера</span>
-                        <span class="overlay-kbd">Ctrl+O</span>
+                        <span class="overlay-kbd" data-hotkey-hint>Ctrl+O</span>
                     </div>
                 </div>
                 <div class="zoom-controls" id="zoomControls">
@@ -602,6 +602,20 @@
                         </p>
                     </header>
 
+                    <div class="about-device-info" aria-label="Устройство обработки">
+                        <span class="about-device-icon">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>
+                        </span>
+                        <span class="about-device-copy">
+                            <span class="about-device-label">Обработка</span>
+                            <span class="about-device-caption">Устройство для удаления фона</span>
+                        </span>
+                        <span class="about-device-value">
+                            <span id="aboutDeviceValue">—</span>
+                            <span class="about-device-badge"></span>
+                        </span>
+                    </div>
+
                     <section class="about-feature-grid" aria-label="Возможности">
                         <div class="about-feature-card">
                             <span class="about-feature-icon">
@@ -624,7 +638,7 @@
                             <strong>Настройка композиции</strong>
                             <span>Масштабируйте, перемещайте и поворачивайте изображение, а также включайте пример, чтобы создание токенов было еще удобнее.</span>
                         </div>
-                        <div class="about-feature-card">
+                        <div class="about-feature-card" data-windows-only>
                             <span class="about-feature-icon">
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
                             </span>
