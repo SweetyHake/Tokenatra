@@ -31,14 +31,15 @@ python3 -m PyInstaller build.spec --noconfirm --clean
 # поэтому вырезаем из бандла всё glib-семейство — иначе смешивание версий
 # роняет загрузку WebKit (undefined symbol / cannot open).
 if [ "$UNAME_S" = "Linux" ]; then
-    cd dist/Tokenatra/_internal
-    for pat in libglib-2.0 libgobject-2.0 libgio-2.0 libgmodule-2.0 \
-               libgirepository-1.0 libffi libpcre2-8 \
-               libgtk-3 libgdk libatk libpango libgdk_pixbuf \
-               libharfbuzz libcairo; do
-        rm -f ${pat}*.so* 2>/dev/null
-    done
-    cd ../..
+    (
+        cd dist/Tokenatra/_internal || exit 0
+        for pat in libglib-2.0 libgobject-2.0 libgio-2.0 libgmodule-2.0 \
+                   libgirepository-1.0 libffi libpcre2-8 \
+                   libgtk-3 libgdk libatk libpango libgdk_pixbuf \
+                   libharfbuzz libcairo; do
+            rm -f ${pat}*.so* 2>/dev/null
+        done
+    )
 fi
 
 if [ "$UNAME_S" = "Darwin" ]; then
