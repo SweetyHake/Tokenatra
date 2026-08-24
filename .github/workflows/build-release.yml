@@ -51,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tokenatra-windows
-          path: dist/installer/Tokenatra_Setup_v*.exe
+          path: dist/installer/Tokenatra_v*_windows_x86_64_setup.exe
           if-no-files-found: error
 
   linux:
@@ -83,15 +83,17 @@ jobs:
         run: bash build-unix.sh
 
       - name: Create portable archive
-        run: tar -C dist -czf "dist/Tokenatra-linux-x86_64.tar.gz" Tokenatra
+        run: |
+          VER="$(python3 -c 'from version import __version__; print(__version__)')"
+          tar -C dist -czf "dist/Tokenatra_v${VER}_linux_x86_64.tar.gz" Tokenatra
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: tokenatra-linux-x86_64
           path: |
-            dist/Tokenatra_*_x86_64.AppImage
-            dist/Tokenatra-linux-x86_64.tar.gz
+            dist/Tokenatra_v*_linux_x86_64.AppImage
+            dist/Tokenatra_v*_linux_x86_64.tar.gz
           if-no-files-found: error
 
   macos:

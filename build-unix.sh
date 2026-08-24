@@ -38,7 +38,7 @@ fi
 if [ "$UNAME_S" = "Darwin" ] && [ -d dist/Tokenatra.app ]; then
     APP_ARCH="$(uname -m)"
     APP_VERSION="$(python3 -c 'from version import __version__; print(__version__)')"
-    DMG_PATH="dist/Tokenatra_${APP_VERSION}_${APP_ARCH}.dmg"
+    DMG_PATH="dist/Tokenatra_v${APP_VERSION}_macos_${APP_ARCH}.dmg"
     DMG_STAGING="dist/dmg_staging"
     rm -f "$DMG_PATH"
     rm -rf "$DMG_STAGING"
@@ -58,7 +58,7 @@ fi
 if [ "$UNAME_S" = "Linux" ] && [ -d dist/Tokenatra ]; then
     APP_ARCH="$(uname -m)"
     APP_VERSION="$(python3 -c 'from version import __version__; print(__version__)')"
-    APPIMAGE_PATH="dist/Tokenatra_${APP_VERSION}_${APP_ARCH}.AppImage"
+    APPIMAGE_PATH="dist/Tokenatra_v${APP_VERSION}_linux_${APP_ARCH}.AppImage"
     APPDIR="dist/Tokenatra.AppDir"
     CACHE_DIR="${HOME}/.cache/tokenatra-build"
     TOOL="$CACHE_DIR/appimagetool-${APP_ARCH}.AppImage"

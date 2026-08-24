@@ -23,7 +23,7 @@ Installer output: `dist/installer/Tokenatra_Setup_v*.exe`
 
 ### GitHub Releases: ассеты по платформам
 
-Релиз содержит: `Tokenatra_Setup_v*.exe` (Windows), `Tokenatra_<ver>_arm64.dmg` / `_x86_64.dmg` (macOS), `Tokenatra_<ver>_x86_64.AppImage` + `.tar.gz` (Linux). Все собирает CI (`build-release.yml`); имена ассетов значимы — updater ищет файл по суффиксу архитектуры.
+Релиз содержит: `Tokenatra_v<ver>_windows_x86_64_setup.exe` (Windows), `Tokenatra_v<ver>_macos_arm64.dmg` / `_x86_64.dmg` (macOS), `Tokenatra_v<ver>_linux_x86_64.AppImage` + `.tar.gz` (Linux). Все собирает CI (`build-release.yml`); имена ассетов значимы — updater ищет файл по суффиксу платформы и архитектуры (`setup`, `_macos_arm64.`, `_linux_x86_64.`).
 
 Автообновление работает на всех трёх платформах:
 - **Windows**: качает Setup-установщик (приоритет в `_find_exe_asset`) — тихая установка через bat.
@@ -36,7 +36,7 @@ Installer output: `dist/installer/Tokenatra_Setup_v*.exe`
 
 Версии по схеме `год.мажор.фикс` (2026 → `26.x.y`), тег `v26.x.y`.
 
-> **CI:** пуш тега `v*` запускает `.github/workflows/build-release.yml` — он сам собирает все платформы и прикладывает ассеты к релизу: `Tokenatra_Setup_v*.exe` (Windows), `Tokenatra_*.dmg` (macOS), `Tokenatra_*_x86_64.AppImage` + `.tar.gz` (Linux). Ручные шаги 4-5 ниже нужны только если CI недоступен.
+> **CI:** пуш тега `v*` запускает `.github/workflows/build-release.yml` — он сам собирает все платформы и прикладывает ассеты к релизу: `Tokenatra_v*.exe` (Windows), `Tokenatra_v*_macos_*.dmg`, `Tokenatra_v*_linux_*.AppImage/.tar.gz`. Ручные шаги 4-5 ниже нужны только если CI недоступен.
 
 1. **Бамп версии**:
    - `version.py` → `__version__ = "26.x.y"` (имя установщика = `Tokenatra_Setup_v26.x.y.exe`; CI передаёт версию в Inno через `/DMyAppVersion=…`, в installer.iss остаётся только fallback)
