@@ -45,6 +45,7 @@ a = Analysis(
         'psutil',
         'imageio_ffmpeg',
         'tkinter',
+        *(['gi'] if not is_windows else []),
     ],
     hookspath=[],
     hooksconfig={},
