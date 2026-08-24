@@ -76,12 +76,16 @@ if [ "$UNAME_S" = "Linux" ] && [ -d dist/Tokenatra ]; then
     cat > "$APPDIR/AppRun" << 'APPRUN_EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
-# Typelib'ы из бандла (hook-gi + наши WebKit/Soup) приоритетнее системных.
+# Изолируем typelib'ы бандлом: системные (напр. WebKit2-4.1) несовместимы
+# с вшитой GLib и ломают загрузку — pywebview сам откатится на наш WebKit2-4.0.
 for d in "$HERE/usr/opt/Tokenatra/_internal/gi_typelibs" \
          "$HERE/usr/opt/Tokenatra/gi_typelibs"; do
-    [ -d "$d" ] && GI_TYPELIB_PATH="$d${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
+    if [ -d "$d" ]; then
+        GI_TYPELIB_PATH="$d"
+        export GI_TYPELIB_PATH
+        break
+    fi
 done
-export GI_TYPELIB_PATH
 exec "$HERE/usr/opt/Tokenatra/Tokenatra" "$@"
 APPRUN_EOF
     chmod +x "$APPDIR/AppRun"
