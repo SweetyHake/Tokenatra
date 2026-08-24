@@ -76,9 +76,9 @@ if [ "$UNAME_S" = "Linux" ] && [ -d dist/Tokenatra ]; then
     cat > "$APPDIR/AppRun" << 'APPRUN_EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
-# Typelib'ы, собранные PyInstaller-хуком gi (если есть), приоритетнее системных.
-for d in "$HERE/usr/opt/Tokenatra/_internal/girepository-1.0" \
-         "$HERE/usr/opt/Tokenatra/girepository-1.0"; do
+# Typelib'ы из бандла (hook-gi + наши WebKit/Soup) приоритетнее системных.
+for d in "$HERE/usr/opt/Tokenatra/_internal/gi_typelibs" \
+         "$HERE/usr/opt/Tokenatra/gi_typelibs"; do
     [ -d "$d" ] && GI_TYPELIB_PATH="$d${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
 done
 export GI_TYPELIB_PATH

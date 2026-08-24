@@ -19,6 +19,17 @@ try:
 except ImportError:
     pass
 
+# Linux: хук gi собирает только базовые typelib'ы — добавляем WebKit/Soup вручную.
+gi_datas = []
+if not is_windows and not is_macos:
+    _gir = Path('/usr/lib/x86_64-linux-gnu/girepository-1.0')
+    if not _gir.is_dir():
+        _gir = Path('/usr/lib/girepository-1.0')
+    for _name in ('WebKit2-4.0', 'WebKit2WebExtension-4.0', 'Soup-2.4', 'Soup-3.0'):
+        _p = _gir / f'{_name}.typelib'
+        if _p.is_file():
+            gi_datas.append((str(_p), 'gi_typelibs'))
+
 a = Analysis(
     ['app.py', 'updater.py', 'context_menu_helper.py'],
     pathex=[],
@@ -34,6 +45,7 @@ a = Analysis(
         ('token_rings', 'token_rings'),
         ('presets', 'presets'),
         *imageio_ffmpeg_datas,
+        *gi_datas,
     ],
     hiddenimports=[
         'PIL', 'PIL._tkinter_finder',
