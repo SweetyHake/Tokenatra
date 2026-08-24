@@ -33,7 +33,7 @@ if [ "$UNAME_S" = "Linux" ]; then
     GIR_DIR="/usr/lib/x86_64-linux-gnu/girepository-1.0"
     [ -d "$GIR_DIR" ] || GIR_DIR="/usr/lib/girepository-1.0"
     mkdir -p dist/Tokenatra/_internal/gi_typelibs
-    for t in WebKit2-4.0 WebKit2WebExtension-4.0 Soup-2.4 Soup-3.0; do
+    for t in WebKit2-4.0 WebKit2WebExtension-4.0 JavaScriptCore-4.0 Soup-2.4 Soup-3.0; do
         if [ -f "$GIR_DIR/$t.typelib" ]; then
             cp -f "$GIR_DIR/$t.typelib" dist/Tokenatra/_internal/gi_typelibs/
         fi
