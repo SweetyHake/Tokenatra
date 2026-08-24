@@ -61,7 +61,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=(['hooks/pyi_rth_webkit40.py'] if not is_windows and not is_macos else []),
+    runtime_hooks=[],
     excludes=[
         'matplotlib', 'scipy', 'pandas', 'sympy',
         'tkinter.test',
