@@ -4,6 +4,13 @@ import sys
 
 from platform_utils import terminate_process
 
+# WSLg и части виртуалок: Wayland-бэкенд GTK и композитор WebKit могут
+# оставить окно невидимым. Принудительный X11 + мягкий рендеринг лечат.
+if sys.platform != 'win32':
+    os.environ.setdefault('GDK_BACKEND', 'x11')
+    os.environ.setdefault('WEBKIT_DISABLE_COMPOSITING_MODE', '1')
+    os.environ.setdefault('WEBKIT_DISABLE_DMABUF_RENDERER', '1')
+
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tiff', '.tif'}
 MEDIA_EXTENSIONS = {
     '.mp3', '.wav', '.m4a', '.flac', '.aac', '.wma', '.opus', '.ogg',
@@ -380,7 +387,9 @@ def main():
         resizable=True,
         text_select=False,
         frameless=False,
-        hidden=True,
+        # Windows: прячем до настройки тайтлбара/иконки; на Linux/macOS
+        # событие loaded у GTK/Cocoa ненадёжно — создаём окно сразу видимым.
+        hidden=(sys.platform == 'win32'),
         js_api=WindowApi(),
     )
 
