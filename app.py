@@ -8,10 +8,10 @@ from platform_utils import terminate_process
 # оставить окно невидимым. Принудительный X11 + мягкий рендеринг лечат.
 if sys.platform != 'win32':
     os.environ.setdefault('GDK_BACKEND', 'x11')
-    os.environ.setdefault('WEBKIT_DISABLE_COMPOSITING_MODE', '1')
-    os.environ.setdefault('WEBKIT_DISABLE_DMABUF_RENDERER', '1')
-    # Тёмная GTK-тема: нативные попапы select, диалоги и меню в цвет приложения
     os.environ.setdefault('GTK_THEME', 'Adwaita-dark')
+    # ВНИМАНИЕ: не отключать композитинг WebKit (WEBKIT_DISABLE_COMPOSITING_MODE)
+    # — без него hover-анимации и тултипы перерисовывают весь кадр,
+    # что выглядит как дрожание окна (особенно в VM и при масштабе 2x).
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tiff', '.tif'}
 MEDIA_EXTENSIONS = {
@@ -390,6 +390,33 @@ def main():
             _window.destroy()
         def toggle_fullscreen(self):
             _window.toggle_fullscreen()
+        def resize_edge(self, edge=''):
+            # Linux/macOS frameless: нативный ресайз за края (гладкий, через WM)
+            if sys.platform == 'win32':
+                return
+            native = getattr(_window, 'native', None)
+            if native is None:
+                return
+            try:
+                from gi.repository import Gdk, Gtk
+                with open('/home/ubuntu/resize_debug.log', 'a') as f:
+                    f.write(f'called edge={edge}\n')
+                edges = {
+                    'n': Gdk.WindowEdge.EDGE_NORTH, 's': Gdk.WindowEdge.EDGE_SOUTH,
+                    'e': Gdk.WindowEdge.EDGE_EAST, 'w': Gdk.WindowEdge.EDGE_WEST,
+                    'ne': Gdk.WindowEdge.EDGE_NORTH_EAST, 'nw': Gdk.WindowEdge.EDGE_NORTH_WEST,
+                    'se': Gdk.WindowEdge.EDGE_SOUTH_EAST, 'sw': Gdk.WindowEdge.EDGE_SOUTH_WEST,
+                }
+                gedge = edges.get((edge or '').lower())
+                if gedge is None:
+                    return
+                display = Gdk.Display.get_default()
+                seat = display.get_default_seat()
+                pointer = seat.get_pointer()
+                _, rx, ry = pointer.get_position()
+                native.begin_resize_drag(gedge, 1, int(rx), int(ry), Gtk.get_current_event_time())
+            except Exception:
+                pass
 
     window = webview.create_window(
         title='Tokenatra',

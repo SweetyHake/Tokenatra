@@ -466,6 +466,52 @@ function initWindowControls() {
     }
 }
 
+// Linux/macOS frameless: растягивание за края через GTK begin_resize_drag
+function initFramelessResize() {
+    if (IS_WINDOWS) return;
+    const band = 6;
+    const cursors = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
+        ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize' };
+    let edge = '';
+    document.addEventListener('mousemove', e => {
+        if (document.documentElement.classList.contains('is-maximized')) {
+            if (edge) { edge = ''; document.body.style.cursor = ''; }
+            return;
+        }
+        const n = e.clientY <= band, s = e.clientY >= innerHeight - band;
+        const w = e.clientX <= band, ee = e.clientX >= innerWidth - band;
+        edge = (n && w) ? 'nw' : (n && ee) ? 'ne' : (s && w) ? 'sw' : (s && ee) ? 'se'
+            : n ? 'n' : s ? 's' : w ? 'w' : ee ? 'e' : '';
+        document.body.style.cursor = edge ? cursors[edge] : '';
+    });
+    document.addEventListener('mousedown', e => {
+        if (!edge || e.button !== 0) return;
+        if (e.target.closest('.tb-nav, .window-controls, button, input, select')) return;
+        e.preventDefault();
+        fetch('/version?dbg=edge:' + edge + ':' + (!!getApi()));
+        const api = getApi();
+        if (api?.resizeEdge) api.resizeEdge(edge);
+    });
+}
+
+// Страховка от залипшего drag pywebview: если mouseup произошёл вне страницы
+// (нативный попап, край экрана) — слушатели mousemove остаются навсегда и окно
+// «дрожит», следуя за мышью. Разжимаем по первому движению без кнопок или blur.
+(function initDragGuard() {
+    let lmb = false;
+    const release = () => {
+        if (!lmb) return;
+        lmb = false;
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    };
+    document.addEventListener('mousedown', e => { if (e.button === 0) lmb = true; }, true);
+    document.addEventListener('mouseup', () => { lmb = false; }, true);
+    document.addEventListener('mousemove', e => {
+        if (lmb && e.buttons === 0) release();
+    }, true);
+    window.addEventListener('blur', release);
+})();
+
 function initEdgeResize() {
     // WebView2 consumes the border hit-test, so resize the native parent window
     // while the pointer is held on the outer client-area edge.
@@ -883,6 +929,7 @@ initTabs();
     initFileToolModes();
     initWindowControls();
     initEdgeResize();
+    initFramelessResize();
     initZoomControls();
     initGlobalShortcuts();
     initPasteHandler();
