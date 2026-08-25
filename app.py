@@ -393,33 +393,16 @@ def main():
             _window.destroy()
         def toggle_fullscreen(self):
             _window.toggle_fullscreen()
-        def resize_edge(self, edge=''):
-            # Linux/macOS frameless: нативный ресайз за края (гладкий, через WM)
-            if sys.platform == 'win32':
-                return
-            native = getattr(_window, 'native', None)
-            if native is None:
-                return
-            try:
-                from gi.repository import Gdk, Gtk
-                with open('/home/ubuntu/resize_debug.log', 'a') as f:
-                    f.write(f'called edge={edge}\n')
-                edges = {
-                    'n': Gdk.WindowEdge.EDGE_NORTH, 's': Gdk.WindowEdge.EDGE_SOUTH,
-                    'e': Gdk.WindowEdge.EDGE_EAST, 'w': Gdk.WindowEdge.EDGE_WEST,
-                    'ne': Gdk.WindowEdge.EDGE_NORTH_EAST, 'nw': Gdk.WindowEdge.EDGE_NORTH_WEST,
-                    'se': Gdk.WindowEdge.EDGE_SOUTH_EAST, 'sw': Gdk.WindowEdge.EDGE_SOUTH_WEST,
-                }
-                gedge = edges.get((edge or '').lower())
-                if gedge is None:
-                    return
-                display = Gdk.Display.get_default()
-                seat = display.get_default_seat()
-                pointer = seat.get_pointer()
-                _, rx, ry = pointer.get_position()
-                native.begin_resize_drag(gedge, 1, int(rx), int(ry), Gtk.get_current_event_time())
-            except Exception:
-                pass
+
+    # Linux/macOS: имя программы до старта GTK → WM_CLASS, док и меню
+    # показывают «Tokenatra» с логотипом, а не «app.py» с обобщённой иконкой
+    if sys.platform != 'win32':
+        try:
+            from gi.repository import GLib
+            GLib.set_prgname('Tokenatra')
+            GLib.set_application_name('Tokenatra')
+        except Exception:
+            pass
 
     window = webview.create_window(
         title='Tokenatra',
