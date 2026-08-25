@@ -10,6 +10,8 @@ if sys.platform != 'win32':
     os.environ.setdefault('GDK_BACKEND', 'x11')
     os.environ.setdefault('WEBKIT_DISABLE_COMPOSITING_MODE', '1')
     os.environ.setdefault('WEBKIT_DISABLE_DMABUF_RENDERER', '1')
+    # Тёмная GTK-тема: нативные попапы select, диалоги и меню в цвет приложения
+    os.environ.setdefault('GTK_THEME', 'Adwaita-dark')
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tiff', '.tif'}
 MEDIA_EXTENSIONS = {
