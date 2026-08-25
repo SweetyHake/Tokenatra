@@ -121,9 +121,9 @@ textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
     padding: 0 var(--sp-2); flex-shrink: 0; user-select: none; z-index: 200;
 }
 
-/* Native frame (macOS/Linux): системный тайтлбар ОС, кастомный скрыт —
-   контент заполняет окно целиком (layout построен на flex, других отступов нет) */
-body.native-frame .title-bar { display: none; }
+/* Native frame (macOS/Linux): системные кнопки окна не нужны, но панель с
+   вкладками навигации остаётся — это единственный способ переключать разделы */
+body.native-frame .window-controls { display: none; }
 
 .tb-brand {
     display: flex; align-items: center; gap: var(--sp-3);
