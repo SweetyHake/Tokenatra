@@ -368,6 +368,17 @@ def main():
 
     class WindowApi:
         def minimize(self):
+            # GTK/mutter: iconify у maximized-окна игнорируется — сначала unmaximize
+            if sys.platform != 'win32':
+                native = getattr(_window, 'native', None)
+                if native is not None and hasattr(native, 'unmaximize'):
+                    try:
+                        if native.is_maximized():
+                            native.unmaximize()
+                        native.iconify()
+                        return
+                    except Exception:
+                        pass
             _window.minimize()
         def maximize(self):
             _window.maximize()
