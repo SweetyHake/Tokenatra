@@ -1419,24 +1419,36 @@ def window_resize_begin():
     edge = str((request.get_json(silent=True) or {}).get('edge', '')).lower()
     if not edge or len(edge) > 2 or any(c not in 'nsew' for c in edge):
         return jsonify({'ok': False, 'error': 'bad edge'}), 400
-    try:
-        bx, by = native.get_position()
-        bw, bh = native.get_size()
-    except Exception:
-        return jsonify({'ok': False, 'error': 'geometry failed'}), 500
+    # GTK/X вызовы только в главном потоке: базовую геометрию захватываем там же
     _resize_state.clear()
     _resize_state.update({
-        'native': native, 'x': bx, 'y': by, 'w': bw, 'h': bh,
+        'native': native, 'edge': edge,
         'west': 'w' in edge, 'north': 'n' in edge,
         'east': 'e' in edge, 'south': 's' in edge,
+        'base': None,
     })
+    from gi.repository import GLib
+    GLib.idle_add(_capture_resize_base, native)
     return jsonify({'ok': True})
+
+
+def _capture_resize_base(native):
+    st = _resize_state
+    if 'native' not in st or st.get('base'):
+        return False
+    try:
+        x, y = native.get_position()
+        w, h = native.get_size()
+        st.update({'x': x, 'y': y, 'w': w, 'h': h, 'base': True})
+    except Exception:
+        st.clear()
+    return False
 
 
 @app.route('/api/window/resize_move', methods=['POST'])
 def window_resize_move():
     st = _resize_state
-    if not st or 'native' not in st:
+    if not st or 'native' not in st or not st.get('base'):
         return jsonify({'ok': True})
     data = request.get_json(silent=True) or {}
     try:
