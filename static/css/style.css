@@ -121,9 +121,8 @@ textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
     padding: 0 var(--sp-2); flex-shrink: 0; user-select: none; z-index: 200;
 }
 
-/* Native frame (macOS/Linux): системные кнопки окна не нужны, но панель с
-   вкладками навигации остаётся — это единственный способ переключать разделы */
-body.native-frame .window-controls { display: none; }
+/* Frameless (macOS/Linux): собственный тайтлбар — единый вид с Windows,
+   кнопки окна и перетаскивание обрабатываются через pywebview-drag-region */
 
 .tb-brand {
     display: flex; align-items: center; gap: var(--sp-3);

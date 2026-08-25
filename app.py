@@ -386,7 +386,9 @@ def main():
         min_size=(800, 600),
         resizable=True,
         text_select=False,
-        frameless=False,
+        # Windows: своя frameless-реализация через Win32-хуки ниже;
+        # Linux/macOS: frameless pywebview — единый тайтлбар с кнопками окна.
+        frameless=(sys.platform != 'win32'),
         # Windows: прячем до настройки тайтлбара/иконки; на Linux/macOS
         # событие loaded у GTK/Cocoa ненадёжно — создаём окно сразу видимым.
         hidden=(sys.platform == 'win32'),

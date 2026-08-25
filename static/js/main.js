@@ -406,11 +406,6 @@ function initResizeHandles() {
 }
 
 function initWindowControls() {
-    if (!IS_WINDOWS) {
-        // macOS/Linux: системная рамка окна, кастомный тайтлбар скрыт через body.native-frame
-        document.body.classList.add('native-frame');
-        return;
-    }
     const flask = (action) => fetch('/api/window/' + action, { method: 'POST' }).catch(() => {});
     const api = window.pywebview?.api;
 
@@ -450,15 +445,21 @@ function initWindowControls() {
         maxBtn?.click();
     });
 
-    $('titleBar')?.addEventListener('mousedown', e => {
-        if (e.target.closest('.tb-nav, .window-controls')) return;
-        flask('move');
-    });
+    // Перетаскивание окна: Windows — через Win32 (flask('move')),
+    // Linux/macOS — класс pywebview-drag-region на тайтлбаре.
+    if (IS_WINDOWS) {
+        $('titleBar')?.addEventListener('mousedown', e => {
+            if (e.target.closest('.tb-nav, .window-controls')) return;
+            flask('move');
+        });
+    }
 }
 
 function initEdgeResize() {
     // WebView2 consumes the border hit-test, so resize the native parent window
     // while the pointer is held on the outer client-area edge.
+    // Windows-only: на Linux/macOS ресайз frameless-окна делает pywebview.
+    if (!IS_WINDOWS) return;
     const band = 6;
     const bodyStyle = document.body.style;
     const getEdges = (x, y) => ({
