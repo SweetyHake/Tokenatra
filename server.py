@@ -1393,6 +1393,68 @@ def window_action(action):
         return jsonify({'ok': False, 'error': str(e)})
 
 
+_resize_state = {}
+
+
+def _apply_frameless_resize(native, base, dx, dy):
+    west, north = base['west'], base['north']
+    east, south = base['east'], base['south']
+    nx = base['x'] + (dx if west else 0)
+    ny = base['y'] + (dy if north else 0)
+    nw = base['w'] + (dx if east else -dx if west else 0)
+    nh = base['h'] + (dy if south else -dy if north else 0)
+    native.move(max(0, int(nx)), max(0, int(ny)))
+    native.resize(max(400, int(nw)), max(300, int(nh)))
+
+
+@app.route('/api/window/resize_begin', methods=['POST'])
+def window_resize_begin():
+    """Linux/macOS frameless: старт интерактивного ресайза за край."""
+    if sys.platform == 'win32':
+        return jsonify({'ok': False}), 501
+    win = getattr(current_app, 'window_ref', None)
+    native = getattr(win, 'native', None)
+    if native is None:
+        return jsonify({'ok': False, 'error': 'no window'})
+    edge = str((request.get_json(silent=True) or {}).get('edge', '')).lower()
+    if not edge or len(edge) > 2 or any(c not in 'nsew' for c in edge):
+        return jsonify({'ok': False, 'error': 'bad edge'}), 400
+    try:
+        bx, by = native.get_position()
+        bw, bh = native.get_size()
+    except Exception:
+        return jsonify({'ok': False, 'error': 'geometry failed'}), 500
+    _resize_state.clear()
+    _resize_state.update({
+        'native': native, 'x': bx, 'y': by, 'w': bw, 'h': bh,
+        'west': 'w' in edge, 'north': 'n' in edge,
+        'east': 'e' in edge, 'south': 's' in edge,
+    })
+    return jsonify({'ok': True})
+
+
+@app.route('/api/window/resize_move', methods=['POST'])
+def window_resize_move():
+    st = _resize_state
+    if not st or 'native' not in st:
+        return jsonify({'ok': True})
+    data = request.get_json(silent=True) or {}
+    try:
+        dx, dy = int(data.get('dx', 0)), int(data.get('dy', 0))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False}), 400
+    from gi.repository import GLib
+    native = st['native']
+    GLib.idle_add(_apply_frameless_resize, native, dict(st), dx, dy)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/window/resize_end', methods=['POST'])
+def window_resize_end():
+    _resize_state.clear()
+    return jsonify({'ok': True})
+
+
 @app.route('/api/window/resize_start', methods=['POST'])
 def window_resize_start():
     """Resize the parent window when WebView2 owns the client-area hit-test."""
