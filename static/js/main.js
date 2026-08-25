@@ -409,9 +409,19 @@ function initWindowControls() {
     const flask = (action) => fetch('/api/window/' + action, { method: 'POST' }).catch(() => {});
     const api = window.pywebview?.api;
 
-    $('wcMinimize')?.addEventListener('click', () => {
+    const doMinimize = () => {
         if (api && api.minimize) api.minimize();
         else flask('minimize');
+    };
+    // GTK/mutter игнорирует iconify у maximized-окна — сначала снимаем разворот
+    $('wcMinimize')?.addEventListener('click', () => {
+        if (document.documentElement.classList.contains('is-maximized')) {
+            if (api && api.restore) api.restore();
+            else flask('restore');
+            setTimeout(doMinimize, 150);
+        } else {
+            doMinimize();
+        }
     });
     $('wcClose')?.addEventListener('click', () => {
         if (api && api.destroy) api.destroy();
