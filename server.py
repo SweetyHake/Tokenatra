@@ -1396,17 +1396,6 @@ def window_action(action):
 _resize_state = {}
 
 
-def _apply_frameless_resize(native, base, dx, dy):
-    west, north = base['west'], base['north']
-    east, south = base['east'], base['south']
-    nx = base['x'] + (dx if west else 0)
-    ny = base['y'] + (dy if north else 0)
-    nw = base['w'] + (dx if east else -dx if west else 0)
-    nh = base['h'] + (dy if south else -dy if north else 0)
-    native.move(max(0, int(nx)), max(0, int(ny)))
-    native.resize(max(400, int(nw)), max(300, int(nh)))
-
-
 @app.route('/api/window/resize_begin', methods=['POST'])
 def window_resize_begin():
     """Linux/macOS frameless: старт интерактивного ресайза за край."""
