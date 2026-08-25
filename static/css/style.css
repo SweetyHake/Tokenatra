@@ -122,8 +122,9 @@ textarea:focus-visible { outline: none; box-shadow: var(--focus-ring); }
     padding: 0 var(--sp-2); flex-shrink: 0; user-select: none; z-index: 200;
 }
 
-/* Frameless (macOS/Linux): собственный тайтлбар — единый вид с Windows,
-   кнопки окна и перетаскивание обрабатываются через pywebview-drag-region */
+/* Native frame (macOS/Linux): нативные декорации окна — системные кнопки
+   и ресайз; из нашей панели скрываем только дублирующие кнопки окна */
+body.native-frame .window-controls { display: none; }
 
 .tb-brand {
     display: flex; align-items: center; gap: var(--sp-3);

@@ -9,6 +9,9 @@ from platform_utils import terminate_process
 if sys.platform != 'win32':
     os.environ.setdefault('GDK_BACKEND', 'x11')
     os.environ.setdefault('GTK_THEME', 'Adwaita-dark')
+    # DMABUF-рендерер WebKitGTK на виртуальных видеокартах даёт дрожание
+    # контента при анимациях — отключаем, композитинг остаётся включённым.
+    os.environ.setdefault('WEBKIT_DISABLE_DMABUF_RENDERER', '1')
     # ВНИМАНИЕ: не отключать композитинг WebKit (WEBKIT_DISABLE_COMPOSITING_MODE)
     # — без него hover-анимации и тултипы перерисовывают весь кадр,
     # что выглядит как дрожание окна (особенно в VM и при масштабе 2x).
@@ -426,12 +429,10 @@ def main():
         min_size=(800, 600),
         resizable=True,
         text_select=False,
-        # Windows: своя frameless-реализация через Win32-хуки ниже;
-        # Linux/macOS: frameless pywebview — единый тайтлбар с кнопками окна.
-        frameless=(sys.platform != 'win32'),
-        # Иначе (дефолт True) frameless-окно таскается за ЛКМ в любой точке —
-        # оставляем перетаскивание только за pywebview-drag-region (тайтлбар).
-        easy_drag=False,
+        # Windows: своя frameless-реализация (Win32-хуки ниже) с кастомным
+        # тайтлбаром; Linux/macOS — нативные декорации: системные кнопки,
+        # нативные ресайз/перемещение/сворачивание (надёжнее кастома).
+        frameless=False,
         # Windows: прячем до настройки тайтлбара/иконки; на Linux/macOS
         # событие loaded у GTK/Cocoa ненадёжно — создаём окно сразу видимым.
         hidden=(sys.platform == 'win32'),

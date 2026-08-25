@@ -406,6 +406,12 @@ function initResizeHandles() {
 }
 
 function initWindowControls() {
+    if (!IS_WINDOWS) {
+        // macOS/Linux: нативная рамка окна (системные кнопки, ресайз,
+        // перемещение); наша панель остаётся только с вкладками навигации.
+        document.body.classList.add('native-frame');
+        return;
+    }
     const flask = (action) => fetch('/api/window/' + action, { method: 'POST' }).catch(() => {});
     // Мост pywebview появляется асинхронно — читаем на каждый клик, не кэшируем
     const getApi = () => window.pywebview?.api;
@@ -467,55 +473,6 @@ function initWindowControls() {
 }
 
 // Linux/macOS frameless: растягивание за края через GTK begin_resize_drag
-// Linux/macOS frameless: ресайз за края — дельты указателя шлёт JS,
-// применение геометрии — сервер в главном потоке (GTK).
-function initFramelessResize() {
-    if (IS_WINDOWS) return;
-    const band = 6;
-    const cursors = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
-        ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize' };
-    let edge = '';
-    let resizing = false;
-    let startX = 0, startY = 0;
-    let lastSent = 0;
-    const post = (url, body) => fetch(url, { method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {}) }).catch(() => {});
-
-    document.addEventListener('mousemove', e => {
-        const maximized = document.documentElement.classList.contains('is-maximized');
-        const n = e.clientY <= band, s = e.clientY >= innerHeight - band;
-        const w = e.clientX <= band, ee = e.clientX >= innerWidth - band;
-        edge = maximized ? '' : (n && w) ? 'nw' : (n && ee) ? 'ne' : (s && w) ? 'sw'
-            : (s && ee) ? 'se' : n ? 'n' : s ? 's' : w ? 'w' : ee ? 'e' : '';
-        document.body.style.cursor = edge ? cursors[edge] : '';
-        if (resizing) {
-            const now = performance.now();
-            if (now - lastSent >= 16) {
-                lastSent = now;
-                post('/api/window/resize_move', { dx: e.screenX - startX, dy: e.screenY - startY });
-            }
-        }
-    });
-
-    document.addEventListener('mousedown', e => {
-        if (!edge || e.button !== 0) return;
-        if (e.target.closest('.tb-nav, .window-controls, button, input, select')) return;
-        e.preventDefault();
-        startX = e.screenX; startY = e.screenY;
-        resizing = true;
-        post('/api/window/resize_begin', { edge });
-    }, true);
-
-    const finish = () => {
-        if (!resizing) return;
-        resizing = false;
-        post('/api/window/resize_end');
-    };
-    document.addEventListener('mouseup', finish, true);
-    window.addEventListener('blur', finish);
-}
-
 function initEdgeResize() {
     // WebView2 consumes the border hit-test, so resize the native parent window
     // while the pointer is held on the outer client-area edge.
@@ -933,7 +890,6 @@ initTabs();
     initFileToolModes();
     initWindowControls();
     initEdgeResize();
-    initFramelessResize();
     initZoomControls();
     initGlobalShortcuts();
     initPasteHandler();
