@@ -389,6 +389,9 @@ def main():
         # Windows: своя frameless-реализация через Win32-хуки ниже;
         # Linux/macOS: frameless pywebview — единый тайтлбар с кнопками окна.
         frameless=(sys.platform != 'win32'),
+        # Иначе (дефолт True) frameless-окно таскается за ЛКМ в любой точке —
+        # оставляем перетаскивание только за pywebview-drag-region (тайтлбар).
+        easy_drag=False,
         # Windows: прячем до настройки тайтлбара/иконки; на Linux/macOS
         # событие loaded у GTK/Cocoa ненадёжно — создаём окно сразу видимым.
         hidden=(sys.platform == 'win32'),
