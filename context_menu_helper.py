@@ -34,6 +34,18 @@ def remove_bg(file_path: str):
         _notify('Tokenatra is not running. Open the app first.')
         sys.exit(1)
 
+    # Настройки удаления фона — те же, что выбраны в приложении
+    fmt, quality, edge_blur = 'webp', 90, 1
+    try:
+        cfg = urllib.request.urlopen(f'{BASE_URL}/config', timeout=3).read().decode()
+        import json
+        cfg = json.loads(cfg)
+        fmt = (cfg.get('remover') or {}).get('format', fmt)
+        quality = int((cfg.get('remover') or {}).get('quality', quality))
+        edge_blur = float(cfg.get('edgeBlur', edge_blur))
+    except Exception:
+        pass
+
     with open(file_path, 'rb') as f:
         file_data = f.read()
 
@@ -44,7 +56,11 @@ def remove_bg(file_path: str):
         f'Content-Type: application/octet-stream\r\n\r\n'
     ).encode() + file_data + (
         f'\r\n--{boundary}\r\n'
-        f'Content-Disposition: form-data; name="format"\r\n\r\nwebp'
+        f'Content-Disposition: form-data; name="format"\r\n\r\n{fmt}'
+        f'\r\n--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="quality"\r\n\r\n{quality}'
+        f'\r\n--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="edge_blur"\r\n\r\n{edge_blur}'
         f'\r\n--{boundary}--\r\n'
     ).encode()
 
