@@ -151,6 +151,10 @@ BUILTIN_RINGS = {
     'ag-stormsteel.webp': 'Штормовая сталь',
     'ag-wood-runic.png': 'Руническое дерево',
     'high-noon.webp': 'Ковбой (High Noon)',
+    'plague.webp': 'Чумной венок',
+    'purple-crystals.webp': 'Аметистовые кристаллы',
+    'theathre.webp': 'Театр',
+    'white-runic.webp': 'Белые руны',
 }
 PRESET_DIR = RESOURCE_DIR
 MODEL_DOWNLOAD_URL = os.environ.get('TOKENATRA_MODEL_URL', MODEL_DOWNLOAD_URL).strip()
