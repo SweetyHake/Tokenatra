@@ -256,6 +256,7 @@ const I18n = {
         'Красный обсидиан': 'Red Obsidian',
         'Штормовая сталь': 'Storm Steel',
         'Руническое дерево': 'Runic Wood',
+        'Ковбой (High Noon)': 'Cowboy (High Noon)',
         'Применено': 'Applied',
         'Пробел': 'Space',
         'Ошибка': 'Error',

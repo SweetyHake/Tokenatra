@@ -1,4 +1,5 @@
 import ctypes
+import ctypes.wintypes
 import os
 import sys
 
@@ -316,6 +317,14 @@ def main():
     if sys.platform == 'win32':
         _set_taskbar_identity()
         _setup_webview2_gpu()
+        # Тайтлбар на Windows двигается нашим Win32-хуком (см. _on_loaded).
+        # Встроенная обработка pywebview-drag-region в WebView2 конфликтует:
+        # pywebviewMoveWindow получает дельты от mousedown и передаёт их в
+        # window.move() как абсолютные координаты — окно дёргается и после
+        # отпускания ЛКМ «догоняет» курсор отложенными вызовами (прилипание).
+        # Подменяем селектор на несовпадающий: инъекция остаётся, но не
+        # срабатывает. На Linux/macOS класс на тайтлбаре работает как раньше.
+        webview.settings['DRAG_REGION_SELECTOR'] = '.pywebview-drag-region-disabled'
 
     if '--tune-gpu' in sys.argv:
         from server import cli_tune_gpu
@@ -509,6 +518,8 @@ def main():
                     _SetWindowLong = ctypes.windll.user32.SetWindowLongW
                     _SetWindowLong.restype = ctypes.c_long
 
+                _drag_state = {}
+
                 @WNDPROC
                 def _hook(h, msg, wp, lp):
                     if msg == 0x0084 and not _IsZoomed(h):  # WM_NCHITTEST: native resize edges
@@ -550,12 +561,50 @@ def main():
                             return 0
                         except Exception:
                             pass
-                    if msg == 0x8001:  # WM_APP+1 — drag from Flask
+                    if msg == 0x8001:  # WM_APP+1 — начать перетаскивание из Flask
+                        # Без модального цикла SC_MOVE: WebView2 не отдаёт нам
+                        # отпускание ЛКМ, и окно «прилипало» до следующего клика.
+                        # Вместо этого сами берём SetCapture и тянем окно по
+                        # WM_MOUSEMOVE; WM_LBUTTONUP при нашем capture приходит
+                        # гарантированно и завершает перетаскивание.
                         try:
-                            ctypes.windll.user32.ReleaseCapture()
-                            ctypes.windll.user32.SendMessageW(h, 0x00A1, 2, 0)
+                            user32 = ctypes.windll.user32
+                            zoomed = _IsZoomed(h)
+                            swap = user32.GetSystemMetrics(23)  # SM_SWAPBUTTON
+                            vk_primary = 0x02 if swap else 0x01
+                            # Сообщение асинхронно после mousedown: если основная
+                            # кнопка уже отпущена — клик, перетаскивание не начинаем.
+                            if not zoomed and user32.GetAsyncKeyState(vk_primary) & 0x8000:
+                                pt = ctypes.wintypes.POINT()
+                                rect = ctypes.wintypes.RECT()
+                                if user32.GetCursorPos(ctypes.byref(pt)) and _GetWindowRect(h, ctypes.byref(rect)):
+                                    _drag_state['dx'] = pt.x - rect.left
+                                    _drag_state['dy'] = pt.y - rect.top
+                                    user32.ReleaseCapture()
+                                    user32.SetCapture(h)
                         except Exception:
                             pass
+                        return 0
+                    if msg == 0x0200 and _drag_state:  # WM_MOUSEMOVE — тянем окно
+                        try:
+                            pt = ctypes.wintypes.POINT()
+                            if ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+                                ctypes.windll.user32.SetWindowPos(
+                                    h, 0, pt.x - _drag_state['dx'], pt.y - _drag_state['dy'],
+                                    0, 0, 0x0001 | 0x0004 | 0x0010)  # NOSIZE|NOZORDER|NOACTIVATE
+                        except Exception:
+                            pass
+                        return 0
+                    if msg == 0x0202:  # WM_LBUTTONUP
+                        if _drag_state:
+                            _drag_state.clear()
+                            try:
+                                ctypes.windll.user32.ReleaseCapture()
+                            except Exception:
+                                pass
+                        return 0
+                    if msg == 0x0208 and _drag_state:  # WM_CAPTURECHANGED — capture потерян
+                        _drag_state.clear()
                         return 0
                     return _CallWindowProc(orig, h, msg, wp, lp)
 

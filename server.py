@@ -150,6 +150,7 @@ BUILTIN_RINGS = {
     'ag-obsidian-red.webp': 'Красный обсидиан',
     'ag-stormsteel.webp': 'Штормовая сталь',
     'ag-wood-runic.png': 'Руническое дерево',
+    'high-noon.webp': 'Ковбой (High Noon)',
 }
 PRESET_DIR = RESOURCE_DIR
 MODEL_DOWNLOAD_URL = os.environ.get('TOKENATRA_MODEL_URL', MODEL_DOWNLOAD_URL).strip()

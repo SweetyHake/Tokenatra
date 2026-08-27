@@ -15,7 +15,11 @@ function escapeHtml(s) {
 }
 
 function applyHotkeyHints() {
-    var toMac = function(s) { return s.replaceAll('Ctrl + ', '⌘').replaceAll('Ctrl+', '⌘'); };
+    // Подмену Ctrl→⌘ делаем только на macOS; на Windows/Linux остаётся Ctrl.
+    var toPlatform = function(s) {
+        if (!IS_MAC) return s;
+        return s.replaceAll('Ctrl + ', '⌘').replaceAll('Ctrl+', '⌘');
+    };
     var translate = function(src) {
         var res = typeof I18n !== 'undefined' ? I18n.t(src) : src;
         if (res === src) {
@@ -31,13 +35,13 @@ function applyHotkeyHints() {
             var cur = el.getAttribute(attr);
             if (!cur) return;
             if (cur.indexOf('Ctrl') !== -1 || !el._hintBase[attr]) el._hintBase[attr] = cur;
-            var out = toMac(translate(el._hintBase[attr]));
+            var out = toPlatform(translate(el._hintBase[attr]));
             if (el.getAttribute(attr) !== out) el.setAttribute(attr, out);
         });
         if (!el.firstElementChild && el.textContent) {
             var txt = el.textContent;
             if (txt.indexOf('Ctrl') !== -1 || !el._hintBase.text) el._hintBase.text = txt;
-            var outT = toMac(translate(el._hintBase.text));
+            var outT = toPlatform(translate(el._hintBase.text));
             if (txt !== outT) el.textContent = outT;
         }
     });

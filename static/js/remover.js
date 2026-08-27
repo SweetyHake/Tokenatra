@@ -500,12 +500,20 @@ const Remover = {
         const data = state.results.get(id);
         if (!data) { toast('Результат не найден', true); return; }
         const file = new File([data.blob], data.name, { type: data.blob.type });
-        document.querySelectorAll('.nav-btn').forEach(function(b) { b.classList.remove('active'); });
-        document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
-        var tokenTab = document.querySelector('.nav-btn[data-mode="token"]');
-        if (tokenTab) tokenTab.classList.add('active');
-        var tokenPanel = $('tokenPanel');
-        if (tokenPanel) tokenPanel.classList.add('active');
+        // Как в initTabs(): классы + aria-hidden + inert — иначе tokenPanel
+        // с классом .active остаётся visibility:hidden (CSS .panel[aria-hidden=true])
+        document.querySelectorAll('.nav-btn[data-mode]').forEach(function(t) {
+            t.classList.toggle('active', t.dataset.mode === 'token');
+            t.setAttribute('aria-selected', String(t.dataset.mode === 'token'));
+        });
+        document.querySelectorAll('.panel').forEach(function(p) {
+            const active = p.id === 'tokenPanel';
+            p.classList.toggle('active', active);
+            p.setAttribute('aria-hidden', String(!active));
+            p.inert = !active;
+        });
+        var panel = $('tokenPanel');
+        if (panel) panel.focus?.({ preventScroll: true });
         TokenCanvas.loadImage(file);
         toast('Открыто в редакторе');
     },

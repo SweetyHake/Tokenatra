@@ -466,6 +466,7 @@ function initWindowControls() {
     // Linux/macOS — класс pywebview-drag-region на тайтлбаре.
     if (IS_WINDOWS) {
         $('titleBar')?.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
             if (e.target.closest('.tb-nav, .window-controls')) return;
             flask('move');
         });
