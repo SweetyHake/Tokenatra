@@ -138,6 +138,9 @@ const TokenPresets = {
             .then(r => r.json())
             .then(presets => {
                 state.eraserPresets = [];
+                // Список изменился — индексный кэш оверлея и выделение невалидны
+                state.currentPreset = -1;
+                this._overlayCache = null;
                 const loads = presets.map((preset, index) => {
                     return fetch(`/preset_file/${encodeURIComponent(preset.file)}`)
                         .then(r => r.blob())
@@ -150,7 +153,9 @@ const TokenPresets = {
                         canvas: this.processMaskImage(img, CONFIG.SCALE_SIZES[1]),
                         rawImg: img,
                         name: preset.name,
-                        file: preset.file
+                        file: preset.file,
+                        builtin: !!preset.builtin,
+                        thumbUrl: null
                     };
                     resolve();
                 };
@@ -163,6 +168,79 @@ const TokenPresets = {
                 Promise.all(loads).then(() => this.updateButtons());
             })
             .catch(() => {});
+    },
+
+    // Превью пресета — уменьшенная копия маски (белая форма на прозрачном).
+    // dataURL кэшируется на объекте пресета: сетка перерисовывается часто,
+    // а toDataURL на 1536²-канвасе дорогой
+    _getPresetThumb(preset) {
+        if (preset.thumbUrl) return preset.thumbUrl;
+        const thumbSize = 96;
+        const thumb = document.createElement('canvas');
+        thumb.width = thumbSize;
+        thumb.height = thumbSize;
+        const tCtx = thumb.getContext('2d');
+        tCtx.imageSmoothingEnabled = true;
+        tCtx.imageSmoothingQuality = 'high';
+        tCtx.drawImage(preset.canvas, 0, 0, thumbSize, thumbSize);
+        preset.thumbUrl = thumb.toDataURL('image/png');
+        return preset.thumbUrl;
+    },
+
+    // «+» в заголовке «Пресеты масок»: снимок текущей розовой маски (1024px —
+    // лёгкий файл, форма маски не детализирована выше) уходит на сервер
+    async saveCurrentPreset() {
+        if (!state.userImage || !state.maskCanvas) {
+            toast('Сначала загрузите изображение', true);
+            return;
+        }
+        const btn = $('addPresetBtn');
+        if (btn) btn.disabled = true;
+        try {
+            const snapSize = 1024;
+            const snap = document.createElement('canvas');
+            snap.width = snapSize;
+            snap.height = snapSize;
+            const sCtx = snap.getContext('2d');
+            sCtx.imageSmoothingEnabled = true;
+            sCtx.imageSmoothingQuality = 'high';
+            sCtx.drawImage(state.maskCanvas, 0, 0, state.maskCanvas.width, state.maskCanvas.height, 0, 0, snapSize, snapSize);
+            const blob = await new Promise(resolve => snap.toBlob(resolve, 'image/png'));
+            if (!blob) throw new Error('Не удалось закодировать маску');
+
+            const fd = new FormData();
+            fd.append('image', blob, 'mask.png');
+            const res = await fetch('/add_preset', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || 'Не удалось сохранить пресет');
+
+            await this.loadPresets();
+            toast('Пресет «' + data.name + '» сохранён');
+        } catch (error) {
+            toast(error.message || 'Не удалось сохранить пресет', true);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    },
+
+    async deletePreset(preset) {
+        if (!preset || preset.builtin) return;
+        try {
+            const res = await fetch('/delete_preset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file: preset.file })
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                toast(data.error || 'Не удалось удалить пресет', true);
+                return;
+            }
+            await this.loadPresets();
+            toast('Пресет удалён');
+        } catch (e) {
+            toast('Не удалось удалить пресет', true);
+        }
     },
 
     _buildPresetOverlay(presetIndex) {
@@ -184,12 +262,14 @@ const TokenPresets = {
         const sd = srcData.data;
         const od = outData.data;
 
+        // Розовым подсвечивается область, где маска ОСТАНЕТСЯ (совпадает
+        // с миниатюрой: белая форма = маска), а не то, что будет вырезано
         for (let i = 0; i < sd.length; i += 4) {
-            const isErased = sd[i+3] < 128;
-            od[i]   = isErased ? 255 : 0;
-            od[i+1] = isErased ? 80  : 0;
-            od[i+2] = isErased ? 160 : 0;
-            od[i+3] = isErased ? 200 : 0;
+            const hasMask = sd[i+3] >= 128;
+            od[i]   = hasMask ? 255 : 0;
+            od[i+1] = hasMask ? 80  : 0;
+            od[i+2] = hasMask ? 160 : 0;
+            od[i+3] = hasMask ? 200 : 0;
         }
 
         ctx.putImageData(outData, 0, 0);
@@ -205,6 +285,9 @@ const TokenPresets = {
     showPresetOverlay(presetIndex) {
         const preset = state.eraserPresets[presetIndex];
         if (!preset || !preset.canvas) return;
+        // Без изображения токена превью маски не имеет смысла — раньше
+        // оверлей рисовался поверх пустого канваса
+        if (!state.userImage || !state.maskCanvas) return;
         state.presetOverlayCanvas = this._buildPresetOverlay(presetIndex);
         state.presetOverlayActive = true;
         const el = $('presetOverlay');
@@ -248,21 +331,43 @@ const TokenPresets = {
 
         if (state.eraserPresets.length === 0) {
             const empty = document.createElement('div');
-            empty.style.cssText = 'font-size:11px;color:var(--text-muted);padding:4px 0;';
-            empty.textContent = 'Нет пресетов в папке presets/';
+            empty.className = 'preset-empty';
+            empty.textContent = I18n.t('Нет пресетов');
             container.appendChild(empty);
             return;
         }
 
         state.eraserPresets.forEach((preset, index) => {
-            if (!preset) return;
-            const btn = document.createElement('button');
-            btn.className = 'preset-btn' + (state.currentPreset === index ? ' active' : '');
-            btn.textContent = preset.name;
-            btn.onclick = () => this.apply(index);
-            btn.addEventListener('mouseenter', () => this.showPresetOverlay(index));
-            btn.addEventListener('mouseleave', () => this.hidePresetOverlay());
-            container.appendChild(btn);
+            if (!preset || !preset.canvas) return;
+            const item = document.createElement('div');
+            item.className = 'preset-thumb' + (state.currentPreset === index ? ' active' : '');
+            item.dataset.tooltip = preset.name;
+
+            const img = document.createElement('img');
+            img.src = this._getPresetThumb(preset);
+            img.alt = preset.name;
+            item.appendChild(img);
+
+            // Крестик удаления — только у пресетов, созданных кнопкой «+»
+            // (встроенные лежат в ресурсах приложения и защищены от записи)
+            if (!preset.builtin) {
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'ring-del-btn preset-del-btn';
+                delBtn.dataset.tooltip = I18n.t('Удалить пресет');
+                delBtn.setAttribute('aria-label', I18n.t('Удалить пресет') + ' ' + preset.name);
+                delBtn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+                delBtn.onclick = event => {
+                    event.stopPropagation();
+                    this.deletePreset(preset);
+                };
+                item.appendChild(delBtn);
+            }
+
+            item.onclick = () => this.apply(index);
+            item.addEventListener('mouseenter', () => this.showPresetOverlay(index));
+            item.addEventListener('mouseleave', () => this.hidePresetOverlay());
+            container.appendChild(item);
         });
     },
 

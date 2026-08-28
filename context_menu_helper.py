@@ -82,8 +82,25 @@ def remove_bg(file_path: str):
                 _notify(f'Ошибка сервера: {err}')
                 sys.exit(1)
             result_data = resp.read()
-        out_path = file_path.with_suffix('.webp')
-        out_path.write_bytes(result_data)
+        # Расширение должно соответствовать выбранному в настройках формату,
+        # иначе PNG-байты лягут в файл .webp (файл «с артефактами»/не открывается)
+        ext_map = {'webp': 'webp', 'png': 'png', 'jpg': 'jpg', 'avif': 'avif'}
+        out_path = file_path.with_suffix('.' + ext_map.get(fmt, 'webp'))
+        # Атомарная запись: временный файл + os.replace, чтобы обрыв посреди
+        # записи не оставил битый файл (при совпадении имён — поверх оригинала)
+        temp_fd, temp_path = tempfile.mkstemp(
+            dir=str(file_path.parent), suffix=out_path.suffix)
+        os.close(temp_fd)
+        try:
+            with open(temp_path, 'wb') as out:
+                out.write(result_data)
+            os.replace(temp_path, str(out_path))
+        except Exception:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
     except Exception:
         sys.exit(1)
 
@@ -197,12 +214,11 @@ def folder_to_webp(folder_path: str):
 
     for f in files:
         try:
-            image = Image.open(f)
-            out_path = f.with_suffix('.webp')
-            buf = io.BytesIO()
-            image.save(buf, format='WEBP', quality=90)
-            out_path.write_bytes(buf.getvalue())
-            image.close()
+            with Image.open(f) as image:
+                out_path = f.with_suffix('.webp')
+                buf = io.BytesIO()
+                image.save(buf, format='WEBP', quality=90)
+                out_path.write_bytes(buf.getvalue())
             f.unlink()
             converted += 1
         except Exception:

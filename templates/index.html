@@ -70,26 +70,47 @@
                         </div>
                     </div>
                     <div class="ctx-divider"></div>
-                    <div class="ctx-subtitle">
-                        <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                        Пресеты масок
+                    <div class="accordion-header" id="presetsAccordion" role="button" tabindex="0" aria-expanded="true" aria-controls="presetBody">
+                        <div class="accordion-header-left">
+                            <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                            Пресеты масок
+                        </div>
+                        <div class="accordion-header-right">
+                            <button class="ring-add-btn preset-add-btn" id="addPresetBtn" type="button" data-tooltip="Сохранить текущую маску как пресет" aria-label="Добавить пресет"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                            <span class="accordion-arrow open">▶</span>
+                        </div>
                     </div>
-                    <div class="preset-buttons" id="presetButtons"></div>
-                    <div class="ctx-divider"></div>
-                    <div class="ctx-subtitle">
-                        <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                        Параметры холста
-                    </div>
-                    <div class="display-options">
-                        <label class="display-option"><input type="checkbox" id="protectionEnabledCheck"><span>Область защиты</span></label>
-                        <label class="display-option"><input type="checkbox" id="showZonesCheck"><span>Отображать маску</span></label>
-                        <label class="display-option"><input type="checkbox" id="showBordersCheck"><span>Отображать границы</span></label>
+                    <div class="accordion-body preset-body open" id="presetBody">
+                        <div class="preset-grid" id="presetButtons"></div>
                     </div>
                     <div class="ctx-divider"></div>
-                    <div class="ctx-subtitle">
-                        <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                        Действия
+                    <div class="accordion-header" id="canvasOptionsAccordion" role="button" tabindex="0" aria-expanded="true" aria-controls="canvasOptionsBody">
+                        <div class="accordion-header-left">
+                            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            Параметры холста
+                        </div>
+                        <div class="accordion-header-right">
+                            <span class="accordion-arrow open">▶</span>
+                        </div>
                     </div>
+                    <div class="accordion-body open" id="canvasOptionsBody">
+                        <div class="display-options">
+                            <label class="display-option"><input type="checkbox" id="protectionEnabledCheck"><span>Область защиты</span></label>
+                            <label class="display-option"><input type="checkbox" id="showZonesCheck"><span>Отображать маску</span></label>
+                            <label class="display-option"><input type="checkbox" id="showBordersCheck"><span>Отображать границы</span></label>
+                        </div>
+                    </div>
+                    <div class="ctx-divider"></div>
+                    <div class="accordion-header" id="actionsAccordion" role="button" tabindex="0" aria-expanded="true" aria-controls="actionsBody">
+                        <div class="accordion-header-left">
+                            <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            Действия
+                        </div>
+                        <div class="accordion-header-right">
+                            <span class="accordion-arrow open">▶</span>
+                        </div>
+                    </div>
+                    <div class="accordion-body open" id="actionsBody">
                     <div class="tool-bar editor-tool-bar">
                         <button class="tool-icon-btn" id="removeBgBtn"><svg viewBox="0 0 24 24"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg><span>Вырезать фон</span><kbd>R</kbd></button>
                         <div class="tool-mode-group">
@@ -105,19 +126,23 @@
                         <span class="slider-unit">px</span>
                         <button class="link-btn" id="resetEraserBtn"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Сброс</button>
                     </div>
+                    </div>
                     <div class="ctx-divider"></div>
-                    <div class="accordion-header transform-header">
+                    <div class="accordion-header transform-header" id="transformAccordion" role="button" tabindex="0" aria-expanded="true" aria-controls="transformBody">
                         <div class="accordion-header-left">
                             <svg viewBox="0 0 24 24"><path d="M8 3H3v5M3 3l6 6M16 3h5v5M21 3l-6 6M8 21H3v-5M3 21l6-6M16 21h5v-5M21 21l-6-6"/></svg>
                             Трансформация
                         </div>
                         <div class="accordion-header-right">
                             <button class="accordion-reset-btn" id="resetTransformBtn" data-tooltip="Сбросить трансформацию" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                            <span class="accordion-arrow open">▶</span>
                         </div>
                     </div>
-                    <div class="transform-row">
-                        <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="scaleSlider" min="10" max="300" step="1" value="100"><input type="number" id="scaleInput" class="slider-number" value="100" min="10" max="300"><span class="slider-unit">%</span></div>
-                        <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="rotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="rotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
+                    <div class="accordion-body open" id="transformBody">
+                        <div class="transform-row">
+                            <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="scaleSlider" min="10" max="300" step="1" value="100"><input type="number" id="scaleInput" class="slider-number" value="100" min="10" max="300"><span class="slider-unit">%</span></div>
+                            <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="rotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="rotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
+                        </div>
                     </div>
                     <div class="ctx-divider"></div>
                     <div class="accordion-header" id="exampleAccordion" role="button" tabindex="0" aria-expanded="false" aria-controls="exampleSettings">
@@ -171,11 +196,22 @@
             <div class="context-panel context-panel-right">
                 <div class="ctx-scroll">
 
-                        <div class="ctx-subtitle"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg><span>Кольцо</span><button class="ring-add-btn" id="addRingBtn" type="button" data-tooltip="Добавить кольцо" aria-label="Добавить кольцо"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button></div>
-                        <div class="ring-carousel">
-                            <div class="ring-track" id="ringSelectorList"></div>
+                        <div class="accordion-header" id="ringAccordion" role="button" tabindex="0" aria-expanded="true" aria-controls="ringBody">
+                            <div class="accordion-header-left">
+                                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+                                Кольцо
+                            </div>
+                            <div class="accordion-header-right">
+                                <button class="ring-add-btn" id="addRingBtn" type="button" data-tooltip="Добавить кольцо" aria-label="Добавить кольцо"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                <span class="accordion-arrow open">▶</span>
+                            </div>
                         </div>
-                        <div class="ring-counter" id="ringCounter" style="display:none;"></div>
+                        <div class="accordion-body open" id="ringBody">
+                            <div class="ring-carousel">
+                                <div class="ring-track" id="ringSelectorList"></div>
+                            </div>
+                            <div class="ring-counter" id="ringCounter" style="display:none;"></div>
+                        </div>
 
                         <div class="ctx-divider"></div>
 
@@ -247,10 +283,16 @@
                         <div class="ctx-divider"></div>
 
                         <div class="editor-export-section">
-                        <div class="ctx-subtitle">
-                            <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                            Экспорт
+                        <div class="accordion-header" id="exportAccordion" role="button" tabindex="0" aria-expanded="true" aria-controls="exportBody">
+                            <div class="accordion-header-left">
+                                <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                Экспорт
+                            </div>
+                            <div class="accordion-header-right">
+                                <span class="accordion-arrow open">▶</span>
+                            </div>
                         </div>
+                        <div class="accordion-body open" id="exportBody">
                         <div class="field-row"><span class="field-row-label">Размер:</span><select class="compact-select" id="saveQualitySelect"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select></div>
                         <div class="field-row"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="saveScaleSelect"><option value="auto" selected>Авто</option><option value="1">×1</option><option value="2">×2</option><option value="3">×3</option></select></div>
                         <div class="save-info-hint save-info-hint-flush" id="saveInfoHint">Масштаб подбирается автоматически по размеру изображения на холсте</div>
@@ -266,6 +308,7 @@
                         <button class="save-action primary" id="saveWithRing" disabled><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>С кольцом</button>
                         <button class="save-action secondary" id="saveWithoutRing" disabled><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>Без кольца</button>
                      </div>
+                        </div>
                         </div>
 
                 </div>

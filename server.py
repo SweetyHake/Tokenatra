@@ -141,6 +141,10 @@ MODELS_DIR = USER_DATA_DIR / "models"
 # пользовательские — в LOCALAPPDATA (куда разрешена запись).
 BUILTIN_RING_DIR = RESOURCE_DIR / "token_rings"
 RING_DIR = USER_DATA_DIR / "token_rings"
+# Пресеты масок: встроенные (preset1..3) — в ресурсах приложения,
+# пользовательские («+» в панели «Пресеты масок») — в каталоге пользователя.
+BUILTIN_PRESET_DIR = RESOURCE_DIR / "presets"
+USER_PRESET_DIR = USER_DATA_DIR / "presets"
 MASK_PATH = RESOURCE_DIR / "mask.png"
 
 # Встроенные кольца: имя файла (casefold) → отображаемое имя.
@@ -928,7 +932,21 @@ def remove_background(image, edge_blur=1):
     print(f"  [RAM] старт обработки: {mem():.0f} МБ | размер входа: {image.size}")
 
     if image.mode != 'RGB':
-        image = image.convert('RGB')
+        # Альфу нельзя просто выбросить: convert('RGB') оставляет RGB
+        # прозрачных пикселей нетронутым (обычно чёрный) — по краям объекта
+        # появляется тёмная кайма. Редактор перед отправкой кладёт картинку
+        # на белый фон (canvas), тот же результат даёт композитинг здесь —
+        # путь через контекстное меню/CLI становится идентичен приложению.
+        has_alpha = image.mode in ('RGBA', 'LA', 'PA') or (
+            image.mode == 'P' and 'transparency' in image.info)
+        if has_alpha:
+            rgba = image.convert('RGBA')
+            white = Image.new('RGB', rgba.size, (255, 255, 255))
+            white.paste(rgba, mask=rgba.getchannel('A'))
+            image = white
+            del rgba
+        else:
+            image = image.convert('RGB')
 
     img_resized = image.resize((1024, 1024), Image.LANCZOS)
     print(f"  [RAM] после resize: {mem():.0f} МБ")
@@ -1070,7 +1088,7 @@ def save_image(image, format_type, quality=90):
         mime = 'image/gif'
     elif format_type == 'tiff':
         if image.mode == 'RGBA':
-            image = image.convert('RGBA')
+            image = image.convert('RGB')
         elif image.mode not in ('RGB', 'L'):
             image = image.convert('RGB')
         image.save(buffer, format='TIFF')
@@ -1541,33 +1559,109 @@ def window_resize_start():
 @app.route('/presets_list')
 def presets_list():
     extensions = {'.png', '.webp', '.jpg', '.jpeg'}
-    preset_dir = RESOURCE_DIR / 'presets'
-    if not preset_dir.exists():
-        try:
-            # Read-only установка (Program Files) — просто отдаём пустой список
-            preset_dir.mkdir(exist_ok=True)
-        except OSError:
-            return jsonify([])
     presets = []
-    for f in sorted(preset_dir.iterdir()):
-        if f.is_file() and f.suffix.lower() in extensions:
-            presets.append({'name': f.stem, 'file': f.name})
+
+    # Встроенные пресеты (read-only в установленной сборке)
+    builtin_dir = BUILTIN_PRESET_DIR
+    if builtin_dir.exists():
+        for f in sorted(builtin_dir.iterdir()):
+            if f.is_file() and f.suffix.lower() in extensions:
+                presets.append({'name': f.stem, 'file': f.name, 'builtin': True})
+
+    # Пользовательские — сверху списка, новые первыми
+    user_items = []
+    if USER_PRESET_DIR.exists():
+        for f in USER_PRESET_DIR.iterdir():
+            if f.is_file() and f.suffix.lower() in extensions:
+                try:
+                    added_at = f.stat().st_ctime_ns
+                except OSError:
+                    added_at = 0
+                user_items.append((added_at, f.name, f))
+    for _, _, f in sorted(user_items, key=lambda item: (-item[0], item[1])):
+        presets.append({'name': f.stem, 'file': f.name, 'builtin': False})
     return jsonify(presets)
 
 
 @app.route('/preset_file/<filename>')
 def preset_file(filename):
     safe = Path(filename).name
-    preset_dir = RESOURCE_DIR / 'presets'
-    path = preset_dir / safe
-    if not path.exists() or not path.is_file():
-        return jsonify({'error': 'Not found'}), 404
-    ext = path.suffix.lower()
-    mime_map = {'.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.avif': 'image/avif'}
-    mime = mime_map.get(ext, 'image/octet-stream')
-    response = send_file(str(path), mimetype=mime)
-    response.headers['Cache-Control'] = 'public, max-age=86400'
-    return response
+    for base_dir in (USER_PRESET_DIR, BUILTIN_PRESET_DIR):
+        path = base_dir / safe
+        if path.is_file():
+            ext = path.suffix.lower()
+            mime_map = {'.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.avif': 'image/avif'}
+            mime = mime_map.get(ext, 'image/octet-stream')
+            response = send_file(str(path), mimetype=mime)
+            response.headers['Cache-Control'] = 'public, max-age=86400'
+            return response
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.route('/add_preset', methods=['POST'])
+def add_preset():
+    """Сохранить текущую маску редактора как пользовательский пресет."""
+    image_file = request.files.get('image')
+    if not image_file or not image_file.filename:
+        return jsonify({'error': 'Нет данных маски'}), 400
+    try:
+        image_file.stream.seek(0)
+        with Image.open(image_file.stream) as image:
+            image.verify()
+        image_file.stream.seek(0)
+    except Exception:
+        return jsonify({'error': 'Файл не является корректным изображением'}), 400
+
+    try:
+        USER_PRESET_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        app.logger.error('preset mkdir error', exc_info=True)
+        return jsonify({'error': 'Не удалось создать папку пресетов'}), 500
+
+    # Имя «Пресет N» по первому свободному номеру (как у колец — санитизация
+    # имени не нужна: русские буквы допустимы в alnum-проверке add_ring)
+    num = 1
+    while (USER_PRESET_DIR / f'Пресет {num}.png').exists():
+        num += 1
+    target = USER_PRESET_DIR / f'Пресет {num}.png'
+
+    try:
+        image_file.save(str(target))
+    except Exception:
+        app.logger.error('preset save error', exc_info=True)
+        return jsonify({'error': 'Не удалось сохранить пресет'}), 500
+
+    return jsonify({'ok': True, 'name': target.stem, 'file': target.name})
+
+
+@app.route('/delete_preset', methods=['POST'])
+def delete_preset():
+    """Удалить пользовательский пресет (встроенные лежат в ресурсах и не трогаются)."""
+    filename = (request.get_json(silent=True) or {}).get('file') or ''
+    safe = Path(filename).name
+    if not safe or '/' in filename or '\\' in filename:
+        return jsonify({'error': 'Некорректное имя файла'}), 400
+
+    path = USER_PRESET_DIR / safe
+    if not path.is_file():
+        return jsonify({'error': 'Пресет не найден'}), 404
+
+    try:
+        # На Windows файл может быть на мгновение занят (антивирус, только что
+        # закрытая отдача в браузер) — короткий retry вместо ошибки пользователю
+        import time as _time
+        for attempt in range(3):
+            try:
+                path.unlink()
+                break
+            except PermissionError:
+                if attempt == 2:
+                    raise
+                _time.sleep(0.15)
+    except Exception:
+        app.logger.error('preset delete error', exc_info=True)
+        return jsonify({'error': 'Не удалось удалить пресет'}), 500
+    return jsonify({'ok': True})
 
 
 @app.route('/device')

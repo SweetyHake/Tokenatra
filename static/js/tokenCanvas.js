@@ -723,7 +723,6 @@ var TokenCanvas = {
         if (!this.ctx) return;
         var size = this.internalSize;
         var scale = size / 1024;
-        var s3 = CONFIG.SCALE_SIZES[3];
 
         if (!state.userImage) {
             var overlay = $('canvasOverlay');
@@ -739,39 +738,21 @@ var TokenCanvas = {
         if (areaEl) areaEl.classList.remove('no-image');
 
         var erasing = this._isErasing;
-        // Во время штриха достаточно medium: на больших регионах апскейл
-        // high в разы дороже, разница на экране неотличима. Финальный кадр
-        // и экспорт всегда рендерятся с high
-        var strokeQuality = erasing ? 'medium' : 'high';
-        // Режим производительности (канвас 1×, 1536px) рисует штрих пониженным
-        // превью и растягивает на канвас — быстрее, но мягче. В режимах
-        // «баланс»/«качество» штрих рендерится на полном разрешении без апскейла.
-        var perf = erasing && state.canvasScale === 1;
+        // Все кадры — в том числе инкрементальные патчи во время штриха —
+        // рендерятся с одним качеством сэмплинга 'high'. Смешение medium/high
+        // давало видимое расхождение пикселей патча с окружением, которое
+        // исчезало на финальном кадре после отпускания кнопки («артефакты
+        // ластика»). Стоимость ограничена размером грязного региона — полный
+        // канвас во время штриха не перерисовывается.
         // Во время штриха канвас уже содержит актуальный кадр: перерисовываем
         // только грязный регион кисти. Полный кадр нужен лишь в начале штриха
-        // (сброс оверлеев) и после него.
+        // и после него.
         var dirtyOnly = erasing && !this._strokeFullDirty;
         if (dirtyOnly && !this._strokeDirtyRect) {
             // Ничего не изменилось — канвас уже актуален, кадр не нужен
             var ov = $('canvasOverlay');
             if (ov) ov.style.display = 'none';
             return;
-        }
-
-        var k = 1;
-        var drawSize = size;
-        var previewCanvas = null;
-        if (perf) {
-            var dispSide = parseFloat(this.canvas.style.width);
-            if (!dispSide || !isFinite(dispSide)) dispSide = 800;
-            drawSize = Math.min(size, Math.max(128, Math.round(dispSide * state.viewZoom)));
-            k = drawSize / size;
-            if (!this._erasePreviewCanvas || this._erasePreviewCanvas.width !== drawSize) {
-                this._erasePreviewCanvas = document.createElement('canvas');
-                this._erasePreviewCanvas.width = drawSize;
-                this._erasePreviewCanvas.height = drawSize;
-            }
-            previewCanvas = this._erasePreviewCanvas;
         }
 
         if (!dirtyOnly) this.ctx.clearRect(0, 0, size, size);
@@ -798,8 +779,10 @@ var TokenCanvas = {
             var cy = size / 2 + state.imageY * scale;
 
             if (dirtyOnly) {
-                // Инкрементальный кадр: только область кисти
-                var dr = this._strokeDirtyRect;
+                // Инкрементальный кадр: только область кисти. Прямоугольник —
+                // целочисленный: дробный rect даёт субпиксельную выборку маски
+                // и шов на границе патча, исчезающий на финальном кадре
+                var dr = this._roundDirtyRect(this._strokeDirtyRect);
                 this._strokeDirtyRect = null;
                 // Кольцо не должно маскироваться: как в полном кадре, это базовая
                 // подложка под изображением (destination-in патча стирало бы его так же,
@@ -815,77 +798,70 @@ var TokenCanvas = {
                 }
                 cctx.restore();
 
-                if (perf) {
-                    // Превью: перерисовываем грязный регион в пониженном
-                    // разрешении и растягиваем обратно (быстрее, но мягче)
-                    var pc = previewCanvas;
-                    var pctx = pc.getContext('2d');
-                    var sx = dr.x * k, sy = dr.y * k, sw = dr.w * k, sh = dr.h * k;
-                    pctx.save();
-                    pctx.beginPath();
-                    pctx.rect(sx, sy, sw, sh);
-                    pctx.clip();
-                    pctx.clearRect(sx, sy, sw, sh);
-                    pctx.translate(cx * k, cy * k);
-                    pctx.rotate(state.imageRotation * Math.PI / 180);
-                    pctx.drawImage(this._compositedImageCache, -w * k / 2, -h * k / 2, w * k, h * k);
-                    pctx.restore();
-                    pctx.save();
-                    pctx.beginPath();
-                    pctx.rect(sx, sy, sw, sh);
-                    pctx.clip();
-                    pctx.globalCompositeOperation = 'destination-in';
-                    pctx.drawImage(state.maskCanvas, dr.x, dr.y, dr.w, dr.h, sx, sy, sw, sh);
-                    pctx.globalCompositeOperation = 'source-over';
-                    pctx.restore();
-                    this.ctx.imageSmoothingEnabled = true;
-                    this.ctx.imageSmoothingQuality = strokeQuality;
-                    this.ctx.drawImage(pc, sx, sy, sw, sh, dr.x, dr.y, dr.w, dr.h);
-                } else {
-                    // Полное разрешение: изображение с маской собираем в offscreen-
-                    // канвасе и кладём поверх базового слоя кольца, чтобы
-                    // destination-in маски не стирал кольцо в грязном регионе
-                    var tctx = this._tempCtx;
-                    tctx.imageSmoothingEnabled = true;
-                    tctx.imageSmoothingQuality = strokeQuality;
-                    tctx.save();
-                    tctx.beginPath();
-                    tctx.rect(dr.x, dr.y, dr.w, dr.h);
-                    tctx.clip();
-                    tctx.clearRect(dr.x, dr.y, dr.w, dr.h);
-                    tctx.translate(cx, cy);
-                    tctx.rotate(state.imageRotation * Math.PI / 180);
-                    tctx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
-                    tctx.restore();
-                    tctx.save();
-                    tctx.beginPath();
-                    tctx.rect(dr.x, dr.y, dr.w, dr.h);
-                    tctx.clip();
-                    tctx.globalCompositeOperation = 'destination-in';
-                    tctx.drawImage(state.maskCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
-                    tctx.globalCompositeOperation = 'source-over';
-                    tctx.restore();
+                // Изображение с маской собираем в offscreen-канвасе и кладём
+                // поверх базового слоя кольца, чтобы destination-in маски
+                // не стирал кольцо в грязном регионе. Патч пиксель-в-пиксель
+                // совпадает с финальным кадром (тот же путь, то же качество)
+                var tctx = this._tempCtx;
+                tctx.imageSmoothingEnabled = true;
+                tctx.imageSmoothingQuality = 'high';
+                tctx.save();
+                tctx.beginPath();
+                tctx.rect(dr.x, dr.y, dr.w, dr.h);
+                tctx.clip();
+                tctx.clearRect(dr.x, dr.y, dr.w, dr.h);
+                tctx.translate(cx, cy);
+                tctx.rotate(state.imageRotation * Math.PI / 180);
+                tctx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
+                tctx.restore();
+                tctx.save();
+                tctx.beginPath();
+                tctx.rect(dr.x, dr.y, dr.w, dr.h);
+                tctx.clip();
+                tctx.globalCompositeOperation = 'destination-in';
+                tctx.drawImage(state.maskCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
+                tctx.globalCompositeOperation = 'source-over';
+                tctx.restore();
 
+                cctx.save();
+                cctx.beginPath();
+                cctx.rect(dr.x, dr.y, dr.w, dr.h);
+                cctx.clip();
+                cctx.imageSmoothingEnabled = true;
+                cctx.imageSmoothingQuality = 'high';
+                cctx.drawImage(this._tempCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
+                cctx.restore();
+
+                // Статичные оверлеи (зоны стирания, защита, границы, пример)
+                // обязаны переживать патч: раньше он стирал их в зоне штриха,
+                // и они «моргали» до финального кадра
+                if (state.showErasedZones && this._zonesCanvas) {
                     cctx.save();
                     cctx.beginPath();
                     cctx.rect(dr.x, dr.y, dr.w, dr.h);
                     cctx.clip();
-                    cctx.imageSmoothingEnabled = true;
-                    cctx.imageSmoothingQuality = strokeQuality;
-                    cctx.drawImage(this._tempCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
+                    cctx.drawImage(this._zonesCanvas, 0, 0);
                     cctx.restore();
                 }
-
-                // Маска стирает Пример в грязном регионе — перерисовываем его поверх патча
                 if (state.userImage && state.exampleEnabled && state.exampleImage) {
                     this._drawExampleOverlay(size, dr);
                 }
+                if (state.showProtectionMask && (state.erasableCanvas || state.protectionAlpha)) {
+                    this._renderProtectionMaskOverlay(size, dr);
+                }
+                if (state.showScaleBorders) {
+                    cctx.save();
+                    cctx.beginPath();
+                    cctx.rect(dr.x, dr.y, dr.w, dr.h);
+                    cctx.clip();
+                    this._drawScaleBorders(size);
+                    cctx.restore();
+                }
             } else {
-                var tc = perf ? previewCanvas : this._tempCanvas;
-                var tempCtx = tc.getContext('2d');
-                tempCtx.clearRect(0, 0, drawSize, drawSize);
+                var tempCtx = this._tempCtx;
+                tempCtx.clearRect(0, 0, size, size);
                 tempCtx.imageSmoothingEnabled = true;
-                tempCtx.imageSmoothingQuality = strokeQuality;
+                tempCtx.imageSmoothingQuality = 'high';
 
                 // Кольцо сюда НЕ рисуем: ниже цельноканвасный destination-in
                 // вырезал бы его по розовой маске, тогда как кольцо — базовая
@@ -893,29 +869,34 @@ var TokenCanvas = {
                 // маскируется только изображение, но не кольцо.
 
                 tempCtx.save();
-                tempCtx.translate(cx * k, cy * k);
+                tempCtx.translate(cx, cy);
                 tempCtx.rotate(state.imageRotation * Math.PI / 180);
-                tempCtx.drawImage(this._compositedImageCache, -w * k / 2, -h * k / 2, w * k, h * k);
+                tempCtx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
                 tempCtx.restore();
 
                 tempCtx.globalCompositeOperation = 'destination-in';
-                tempCtx.drawImage(state.maskCanvas, 0, 0, size, size, 0, 0, drawSize, drawSize);
+                tempCtx.drawImage(state.maskCanvas, 0, 0, size, size, 0, 0, size, size);
                 tempCtx.globalCompositeOperation = 'source-over';
 
-                // Полный кадр: в конце штриха или обычный рендер — без апскейла,
-                // в режиме производительности — превью с растяжением
+                // Полный кадр: в конце штриха или обычный рендер
                 this._strokeFullDirty = false;
                 this._strokeDirtyRect = null;
 
                 if (erasing) {
+                    // Кадр в начале штриха: оверлей зон рисуем из кэша без
+                    // пересборки (зоны меняются штрихом — пересборка на каждый
+                    // кадр дорога, актуализируется на финальном кадре)
                     this.ctx.imageSmoothingEnabled = true;
-                    this.ctx.imageSmoothingQuality = strokeQuality;
-                    this.ctx.drawImage(tc, 0, 0, drawSize, drawSize, 0, 0, size, size);
+                    this.ctx.imageSmoothingQuality = 'high';
+                    this.ctx.drawImage(this._tempCanvas, 0, 0);
+                    if (state.showErasedZones && this._zonesCanvas) {
+                        this.ctx.drawImage(this._zonesCanvas, 0, 0);
+                    }
                 } else {
                     if (state.effectsEnabled && state.dropShadowEnabled) {
                         if (this._shadowDirty || !this._shadowCache) {
                             // Кэш тени — пониженное разрешение; экспорт не затронут
-                            this._shadowCache = createDropShadow(tc, true);
+                            this._shadowCache = createDropShadow(this._tempCanvas, true);
                             this._shadowDirty = false;
                         }
                         if (this._shadowCache) {
@@ -923,7 +904,7 @@ var TokenCanvas = {
                         }
                     }
 
-                    this.ctx.drawImage(tc, 0, 0);
+                    this.ctx.drawImage(this._tempCanvas, 0, 0);
 
                     if (state.showErasedZones) {
                         this._renderErasedZonesCached(size, scale, w, h, cx, cy);
@@ -951,55 +932,70 @@ var TokenCanvas = {
             this.ctx.globalAlpha = 1;
         }
 
-        if (!erasing && state.showProtectionMask && state.erasableCanvas) {
+        // Оверлей защиты статичен во время штриха (маска защиты не меняется
+        // стиранием) — рисуем и во время штриха, иначе он «моргает»
+        if (state.showProtectionMask && state.erasableCanvas) {
             this._renderProtectionMaskOverlay(size);
         }
 
-        var dashLen = 20 * (size / s3);
-        var gapLen = 12 * (size / s3);
-
-        var scaleMode = state.saveScaleMode || 'auto';
-        var activeScale;
-        if (scaleMode === 'auto') {
-            var imgMaxDim = state.userImage ? Math.max(state.userImage.width, state.userImage.height) : 0;
-            var internalSize = this.internalSize;
-            var sc = internalSize / 1024;
-            var maxDisplayPx = CONFIG.SCALE_SIZES[1] * sc;
-            if (imgMaxDim > 0) {
-                var dispScale = state.imageScale || 1;
-                var displayW = imgMaxDim * dispScale * scale;
-                if (displayW <= maxDisplayPx) activeScale = 1;
-                else if (displayW <= maxDisplayPx * 2) activeScale = 2;
-                else activeScale = 3;
-            } else { activeScale = 1; }
-        } else {
-            activeScale = parseInt(scaleMode) || 1;
-        }
-
         if (state.showScaleBorders) {
-            this.ctx.save();
-            this.ctx.setLineDash([dashLen, gapLen]);
-            this.ctx.lineWidth = 6 * (size / s3);
-
-            // Области экспорта 1×/2×/3× во внутренних пикселях канваса:
-            // центр m/3 канваса (в экспорте 1×=1/3, 2×=2/3, 3×=весь канвас).
-            var b1 = Math.round(size / 3);
-            var off1 = (size - b1) / 2;
-            this.ctx.strokeStyle = activeScale === 1 ? 'rgba(255,200,0,1)' : 'rgba(255,200,0,0.25)';
-            this.ctx.strokeRect(off1, off1, b1, b1);
-
-            var b2 = Math.round(size * 2 / 3);
-            var off2 = (size - b2) / 2;
-            this.ctx.strokeStyle = activeScale === 2 ? 'rgba(100,200,255,1)' : 'rgba(100,200,255,0.25)';
-            this.ctx.strokeRect(off2, off2, b2, b2);
-
-            this.ctx.strokeStyle = activeScale === 3 ? 'rgba(100,255,140,1)' : 'rgba(100,255,140,0.25)';
-            this.ctx.strokeRect(3, 3, size - 6, size - 6);
-            this.ctx.restore();
+            this._drawScaleBorders(size);
         }
 
         var overlay = $('canvasOverlay');
         if (overlay) overlay.style.display = state.userImage ? 'none' : 'flex';
+    },
+
+    // Целочисленный прямоугольник грязного региона: floor по левому-верхнему,
+    // ceil по правому-нижнему — дробные координаты дают субпиксельную выборку
+    // маски и видимый шов патча, исчезающий на финальном кадре
+    _roundDirtyRect: function(r) {
+        if (!r) return null;
+        var x = Math.floor(r.x);
+        var y = Math.floor(r.y);
+        var x2 = Math.ceil(r.x + r.w);
+        var y2 = Math.ceil(r.y + r.h);
+        return { x: x, y: y, w: x2 - x, h: y2 - y };
+    },
+
+    _activeExportScale: function(size, scale) {
+        var scaleMode = state.saveScaleMode || 'auto';
+        if (scaleMode !== 'auto') return parseInt(scaleMode) || 1;
+        var imgMaxDim = state.userImage ? Math.max(state.userImage.width, state.userImage.height) : 0;
+        var maxDisplayPx = CONFIG.SCALE_SIZES[1] * scale;
+        if (imgMaxDim > 0) {
+            var displayW = imgMaxDim * (state.imageScale || 1) * scale;
+            if (displayW <= maxDisplayPx) return 1;
+            if (displayW <= maxDisplayPx * 2) return 2;
+            return 3;
+        }
+        return 1;
+    },
+
+    _drawScaleBorders: function(size) {
+        var s3 = CONFIG.SCALE_SIZES[3];
+        var scale = size / 1024;
+        var activeScale = this._activeExportScale(size, scale);
+
+        this.ctx.save();
+        this.ctx.setLineDash([20 * (size / s3), 12 * (size / s3)]);
+        this.ctx.lineWidth = 6 * (size / s3);
+
+        // Области экспорта 1×/2×/3× во внутренних пикселях канваса:
+        // центр m/3 канваса (в экспорте 1×=1/3, 2×=2/3, 3×=весь канвас).
+        var b1 = Math.round(size / 3);
+        var off1 = (size - b1) / 2;
+        this.ctx.strokeStyle = activeScale === 1 ? 'rgba(255,200,0,1)' : 'rgba(255,200,0,0.25)';
+        this.ctx.strokeRect(off1, off1, b1, b1);
+
+        var b2 = Math.round(size * 2 / 3);
+        var off2 = (size - b2) / 2;
+        this.ctx.strokeStyle = activeScale === 2 ? 'rgba(100,200,255,1)' : 'rgba(100,200,255,0.25)';
+        this.ctx.strokeRect(off2, off2, b2, b2);
+
+        this.ctx.strokeStyle = activeScale === 3 ? 'rgba(100,255,140,1)' : 'rgba(100,255,140,0.25)';
+        this.ctx.strokeRect(3, 3, size - 6, size - 6);
+        this.ctx.restore();
     },
 
     _ensureHelperCanvases: function(size) {
@@ -1029,18 +1025,22 @@ var TokenCanvas = {
             zCtx.clearRect(0, 0, size, size);
 
             if (state.imageMaskCanvas) {
-                if (this._zoneHelpersDirty || !this._zoneInvImgMask || this._zoneInvImgMask.width !== state.imageMaskCanvas.width) {
-                    if (!this._zoneInvImgMask || this._zoneInvImgMask.width !== state.imageMaskCanvas.width) {
-                        this._zoneInvImgMask = document.createElement('canvas');
-                        this._zoneInvImgMask.width = state.imageMaskCanvas.width;
-                        this._zoneInvImgMask.height = state.imageMaskCanvas.height;
-                    }
-                    var invImgCtx = this._zoneInvImgMask.getContext('2d');
-                    invImgCtx.fillStyle = 'white';
-                    invImgCtx.fillRect(0, 0, this._zoneInvImgMask.width, this._zoneInvImgMask.height);
-                    invImgCtx.globalCompositeOperation = 'destination-out';
-                    invImgCtx.drawImage(state.imageMaskCanvas, 0, 0);
+                // Хелперы переиспользуются между перестройками: обязательно
+                // сбрасываем composite (после прошлого кадра тут остаётся
+                // destination-out/in и fillRect работает как очистка) и
+                // очищаем канвасы, иначе оверлей зон пропадает/замирает
+                if (!this._zoneInvImgMask || this._zoneInvImgMask.width !== state.imageMaskCanvas.width) {
+                    this._zoneInvImgMask = document.createElement('canvas');
+                    this._zoneInvImgMask.width = state.imageMaskCanvas.width;
+                    this._zoneInvImgMask.height = state.imageMaskCanvas.height;
                 }
+                var invImgCtx = this._zoneInvImgMask.getContext('2d');
+                invImgCtx.globalCompositeOperation = 'source-over';
+                invImgCtx.clearRect(0, 0, this._zoneInvImgMask.width, this._zoneInvImgMask.height);
+                invImgCtx.fillStyle = 'white';
+                invImgCtx.fillRect(0, 0, this._zoneInvImgMask.width, this._zoneInvImgMask.height);
+                invImgCtx.globalCompositeOperation = 'destination-out';
+                invImgCtx.drawImage(state.imageMaskCanvas, 0, 0);
 
                 zCtx.save();
                 zCtx.fillStyle = 'rgba(80, 160, 255, 0.5)';
@@ -1049,10 +1049,14 @@ var TokenCanvas = {
                 zCtx.globalCompositeOperation = 'source-over';
 
                 var bCtx = this._zoneBlueTemp.getContext('2d');
+                bCtx.globalCompositeOperation = 'source-over';
+                bCtx.clearRect(0, 0, size, size);
                 bCtx.fillStyle = 'rgba(80, 160, 255, 0.5)';
                 bCtx.fillRect(0, 0, size, size);
 
                 var isCtx = this._zoneInvScaled.getContext('2d');
+                isCtx.globalCompositeOperation = 'source-over';
+                isCtx.clearRect(0, 0, size, size);
                 isCtx.save();
                 isCtx.translate(cx, cy);
                 isCtx.rotate(state.imageRotation * Math.PI / 180);
@@ -1067,12 +1071,16 @@ var TokenCanvas = {
             }
 
             var invCtx = this._zoneInvMask.getContext('2d');
+            invCtx.globalCompositeOperation = 'source-over';
+            invCtx.clearRect(0, 0, size, size);
             invCtx.fillStyle = 'white';
             invCtx.fillRect(0, 0, size, size);
             invCtx.globalCompositeOperation = 'destination-out';
             invCtx.drawImage(state.maskCanvas, 0, 0);
 
             var pCtx = this._zonePinkLayer.getContext('2d');
+            pCtx.globalCompositeOperation = 'source-over';
+            pCtx.clearRect(0, 0, size, size);
             pCtx.fillStyle = 'rgba(255, 80, 160, 0.5)';
             pCtx.fillRect(0, 0, size, size);
             pCtx.globalCompositeOperation = 'destination-in';
@@ -2064,7 +2072,7 @@ var TokenCanvas = {
         this.ctx.restore();
     },
 
-    _renderProtectionMaskOverlay: function(size) {
+    _renderProtectionMaskOverlay: function(size, clipRect) {
         if (!state.erasableCanvas && !state.protectionAlpha) return;
 
         var internalSize = this.internalSize;
@@ -2119,7 +2127,14 @@ var TokenCanvas = {
             oCtx.putImageData(oData, 0, 0);
             this._protectionOverlayDirty = false;
         }
+        this.ctx.save();
+        if (clipRect) {
+            this.ctx.beginPath();
+            this.ctx.rect(clipRect.x, clipRect.y, clipRect.w, clipRect.h);
+            this.ctx.clip();
+        }
         this.ctx.drawImage(this._protectionOverlayCache, 0, 0, overlaySize, overlaySize, 0, 0, size, size);
+        this.ctx.restore();
     },
     
     resetImageMask: function() {

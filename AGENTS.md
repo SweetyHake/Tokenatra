@@ -153,9 +153,11 @@ External models (`.gitignore`d):
 | `/pick_folder` GET | Native folder picker via tkinter. |
 | `/save_to_folder` POST | Write file to a given folder path. |
 | `/config` GET/POST | Reads/writes `config.json` in BASE_DIR (`.gitignore`d). |
-| `/presets_list` | Reads from `presets/` subfolder (not BASE_DIR root). |
-| `/preset_file/<filename>` | Serves from `presets/` subfolder. |
-| `/process` POST | Background removal. Accepts `image` (file), `format` (webp/png/jpg), `quality` (int 10-100), `edge_blur` (float 0-10). |
+| `/presets_list` | Встроенные пресеты из `RESOURCE_DIR/presets` (`builtin: true`) + пользовательские из `USER_DATA_DIR/presets` (новые сверху, `builtin: false`). |
+| `/preset_file/<filename>` | Сначала ищет в пользовательском каталоге пресетов, затем во встроенном. |
+| `/add_preset` POST | Сохраняет текущую маску как PNG-пресет в `USER_DATA_DIR/presets` (multipart `image`), имя авто «Пресет N». |
+| `/delete_preset` POST | Удаляет ТОЛЬКО пользовательский пресет (встроенные в ресурсах недоступны для записи). |
+| `/process` POST | Background removal. Accepts `image` (file), `format` (webp/png/jpg), `quality` (int 10-100), `edge_blur` (float 0-10). Изображения с альфой предварительно композитятся на белый фон (иначе тёмная кайма по краям). |
 
 ## New features (v2 integration)
 

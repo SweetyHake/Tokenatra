@@ -438,25 +438,35 @@ const TokenEditor = {
     },
 
     setupAccordions() {
-        function toggle(headerId, bodyId, arrowId, onOpen) {
+        // prefKey — ключ в config.uiCollapsed для запоминания состояния блока
+        function toggle(headerId, bodyId, arrowId, onOpen, prefKey) {
             var header = $(headerId);
             var body = $(bodyId);
-            var arrow = $(arrowId);
+            var arrow = arrowId ? $(arrowId) : header.querySelector('.accordion-arrow');
             if (!header || !body) return;
-            var setOpen = function(isOpen) {
+            var setOpen = function(isOpen, skipPersist) {
                 body.classList.toggle('open', isOpen);
                 body.inert = !isOpen;
                 header.setAttribute('aria-expanded', String(isOpen));
                 if (arrow) arrow.classList.toggle('open', isOpen);
+                if (prefKey && AppConfig.setUiCollapsed && !skipPersist) {
+                    AppConfig.setUiCollapsed(prefKey, !isOpen);
+                }
                 if (isOpen) {
                     if (onOpen) onOpen();
                     setTimeout(function() { body.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
                 }
             };
             body.inert = !body.classList.contains('open');
+            // Восстановление сохранённого состояния (в разметке все новые
+            // блоки по умолчанию раскрыты)
+            if (prefKey && AppConfig.uiCollapsed && AppConfig.uiCollapsed[prefKey]) {
+                setOpen(false, true);
+            }
             header.onclick = function(e) {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') return;
-                if (e.target.closest('.accordion-reset-btn')) return;
+                // Кнопки в заголовке («+», сброс, чекбокс) не сворачивают блок
+                if (e.target.closest('button')) return;
                 setOpen(!body.classList.contains('open'));
             };
             header.onkeydown = function(e) {
@@ -474,6 +484,15 @@ const TokenEditor = {
             }
         });
         toggle('exampleAccordion', 'exampleSettings', 'exampleArrow');
+        toggle('presetsAccordion', 'presetBody', null, null, 'presets');
+        toggle('canvasOptionsAccordion', 'canvasOptionsBody', null, null, 'canvasOptions');
+        toggle('actionsAccordion', 'actionsBody', null, null, 'actions');
+        toggle('transformAccordion', 'transformBody', null, null, 'transform');
+        toggle('ringAccordion', 'ringBody', null, null, 'ring');
+        toggle('exportAccordion', 'exportBody', null, null, 'export');
+
+        const addPresetBtn = $('addPresetBtn');
+        if (addPresetBtn) addPresetBtn.onclick = () => TokenPresets.saveCurrentPreset();
     },
 
     setupCheckboxes() {

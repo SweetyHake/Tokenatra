@@ -577,29 +577,26 @@ input[type="file"] { display: none; }
 .slider-unit { font-size: 10px; color: var(--text-muted); min-width: 12px; }
 
 /* ── Presets ────────────────────────────────────────────────── */
-.preset-buttons { display: flex; flex-direction: column; gap: 3px; }
-.preset-btn {
-    display: flex; align-items: center; gap: 8px;
-    width: 100%; padding: 6px 8px;
-    background: var(--bg-input); border: 1px solid var(--border);
-    border-radius: var(--r-sm); color: var(--text-secondary);
-    font-size: var(--fs-xs); text-align: left; cursor: pointer;
+/* Сетка превью масок — по аналогии с кольцами: миниатюра формы маски,
+   крестик удаления у пользовательских пресетов */
+.preset-grid {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px; padding: 2px 0;
+}
+.preset-thumb {
+    position: relative; width: 100%; aspect-ratio: 1;
+    border-radius: var(--r-sm); border: 2px solid var(--border);
+    background: repeating-conic-gradient(var(--checker-1) 0% 25%, var(--checker-2) 0% 50%) 0 0 / 10px 10px;
+    cursor: pointer; overflow: visible;
+    display: flex; align-items: center; justify-content: center;
     transition: all var(--dur-fast) var(--ease-out);
 }
-.preset-btn::before {
-    content: ''; width: 18px; height: 18px; flex-shrink: 0;
-    border-radius: var(--r-xs); background: var(--bg-section);
-    border: 1px solid var(--border-light);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: var(--fw-bold); line-height: 1;
-    color: transparent;
-}
-.preset-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-light); }
-.preset-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); box-shadow: inset 3px 0 0 var(--accent), 0 0 0 1px var(--accent-glow); }
-.preset-btn.active::before {
-    content: '✓'; background: var(--accent); border-color: var(--accent);
-    color: #fff;
-}
+.preset-thumb img { width: 100%; height: 100%; object-fit: contain; border-radius: calc(var(--r-sm) - 2px); }
+.preset-thumb:hover { border-color: var(--border-light); transform: scale(1.06); }
+.preset-thumb.active { border-color: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+.preset-thumb:hover .ring-del-btn { display: inline-flex; }
+.preset-empty { font-size: 10px; color: var(--text-muted); padding: 4px 0; }
+.preset-add-btn:disabled { opacity: 0.5; cursor: wait; }
 
 /* ── Field row ──────────────────────────────────────────────── */
 .field-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

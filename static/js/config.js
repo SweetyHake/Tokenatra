@@ -90,6 +90,7 @@ const AppConfig = {
             protectionEnabled: true,
             quickSaveEnabled: false,
             portraitQuickSaveEnabled: false,
+            uiCollapsed: {},
             panelWidths: {
                 left: 320,
                 right: 320
@@ -139,6 +140,7 @@ const AppConfig = {
                     : !!saved.protectionEnabled,
                 quickSaveEnabled: !!saved.quickSaveEnabled,
                 portraitQuickSaveEnabled: !!saved.portraitQuickSaveEnabled,
+                uiCollapsed: { ...(saved.uiCollapsed || {}) },
                 panelWidths: { ...def.panelWidths, ...(saved.panelWidths || {}) }
             };
         } catch {
@@ -216,6 +218,11 @@ get colorCorrectionEnabled() { return this._data.colorCorrectionEnabled; },
     get converter() { return this._data.converter; },
     get saveSettings() { return this._data.saveSettings; },
     get panelWidths() { return this._data.panelWidths; },
+    get uiCollapsed() { return this._data.uiCollapsed; },
+    setUiCollapsed(key, collapsed) {
+        this._data.uiCollapsed[key] = !!collapsed;
+        this.save();
+    },
     setRemover(key, val) { this._data.remover[key] = val; this.save(); },
     setConverter(key, val) { this._data.converter[key] = val; this.save(); },
     setSaveSetting(key, val) { this._data.saveSettings[key] = val; this.save(); },
