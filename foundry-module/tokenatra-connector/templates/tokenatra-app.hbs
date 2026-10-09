@@ -1,0 +1,50 @@
+<div class="tkc-root">
+  <div class="tkc-frame-wrap{{#unless connected}} tkc-hidden{{/unless}}">
+    {{#if connected}}
+    <iframe class="tkc-frame" title="Tokenatra"></iframe>
+    {{/if}}
+  </div>
+  {{#unless connected}}
+  <div class="tkc-help">
+    <i class="fa-solid {{#if isAuth}}fa-key{{else if isOld}}fa-clock-rotate-left{{else}}fa-plug-circle-xmark{{/if}} tkc-help-icon"></i>
+    <h2>
+      {{#if isAuth}}{{localize 'TKC.HelpTitleAuth'}}
+      {{else if isOld}}{{localize 'TKC.HelpTitleOld'}}
+      {{else}}{{localize 'TKC.HelpTitleOffline'}}{{/if}}
+    </h2>
+    {{#if isAuth}}
+    <p>{{localize 'TKC.HelpTextAuth'}}</p>
+    {{else if isOld}}
+    <p>{{localize 'TKC.HelpTextOld'}} {{oldVersion}} &rarr; 26.4</p>
+    {{else}}
+    <p>{{localize 'TKC.HelpTextOffline'}}</p>
+    {{/if}}
+    {{#if isAuth}}
+    <ul class="tkc-help-steps">
+      <li>{{localize 'TKC.HelpAuthStep1'}}</li>
+      <li>{{localize 'TKC.HelpAuthStep2'}}</li>
+    </ul>
+    {{else}}
+    <ul class="tkc-help-steps">
+      <li>{{localize 'TKC.HelpStep1'}}</li>
+      <li>{{localize 'TKC.HelpStep2'}}</li>
+      <li>{{localize 'TKC.HelpStep3'}}</li>
+    </ul>
+    {{/if}}
+    <div class="tkc-help-actions">
+      <button type="button" class="tkc-btn" data-action="retry">
+        <i class="fa-solid fa-rotate"></i> {{localize 'TKC.Retry'}}
+      </button>
+      {{#unless isAuth}}
+      <a class="tkc-btn tkc-btn--ghost" href="https://github.com/SweetyHake/Tokenatra/releases"
+         target="_blank" rel="noopener">
+        <i class="fa-solid fa-download"></i> {{localize 'TKC.DownloadApp'}}
+      </a>
+      {{/unless}}
+      <button type="button" class="tkc-btn tkc-btn--ghost" data-action="closeWindow">
+        <i class="fa-solid fa-xmark"></i> {{localize 'TKC.Close'}}
+      </button>
+    </div>
+  </div>
+  {{/unless}}
+</div>

@@ -1,0 +1,3 @@
+/* tokenatra-connector — единая точка входа стилей модуля */
+@import url('./tokenatra/_variables.css');
+@import url('./tokenatra/_base.css');

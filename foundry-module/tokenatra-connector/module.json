@@ -1,0 +1,46 @@
+{
+  "id": "tokenatra-connector",
+  "title": "Tokenatra Connector",
+  "description": "Tokenatra studio inside Foundry: remove backgrounds and craft tokens in a single window. Requires the Tokenatra desktop app running on the same machine (keep it in the system tray).",
+  "version": "1.0.1",
+  "authors": [
+    {
+      "name": "SweetyHake",
+      "url": "https://github.com/SweetyHake"
+    }
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14",
+    "maximum": "14"
+  },
+  "esmodules": [
+    "src/main.js"
+  ],
+  "styles": [
+    "styles/tokenatra.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    },
+    {
+      "lang": "ru",
+      "name": "Русский",
+      "path": "lang/ru.json"
+    }
+  ],
+  "readme": "README.md",
+  "url": "https://github.com/SweetyHake/Tokenatra",
+  "manifest": "https://raw.githubusercontent.com/SweetyHake/Tokenatra/main/foundry-module/tokenatra-connector/module.json",
+  "download": "https://github.com/SweetyHake/Tokenatra/releases/latest/download/tokenatra-connector.zip",
+  "license": "MIT",
+  "media": [
+    {
+      "type": "icon",
+      "url": "modules/tokenatra-connector/icons/tokenatra.svg"
+    }
+  ]
+}

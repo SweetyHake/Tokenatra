@@ -1,0 +1,102 @@
+{
+  "rings": [
+    {
+      "name": "Красный обсидиан",
+      "file": "ag-obsidian-red.webp",
+      "mime": "image/webp",
+      "builtin": true,
+      "mask_file": null,
+      "added_at": 0,
+      "thumb": "thumbs/ag-obsidian-red.webp"
+    },
+    {
+      "name": "Штормовая сталь",
+      "file": "ag-stormsteel.webp",
+      "mime": "image/webp",
+      "builtin": true,
+      "mask_file": null,
+      "added_at": 0,
+      "thumb": "thumbs/ag-stormsteel.webp"
+    },
+    {
+      "name": "Руническое дерево",
+      "file": "ag-wood-runic.png",
+      "mime": "image/png",
+      "builtin": true,
+      "mask_file": null,
+      "added_at": 0,
+      "thumb": "thumbs/ag-wood-runic.webp"
+    },
+    {
+      "name": "Ковбой (High Noon)",
+      "file": "high-noon.webp",
+      "mime": "image/webp",
+      "builtin": true,
+      "mask_file": "high-noon.mask.png",
+      "added_at": 0,
+      "thumb": "thumbs/high-noon.webp"
+    },
+    {
+      "name": "Чумной венок",
+      "file": "plague.webp",
+      "mime": "image/webp",
+      "builtin": true,
+      "mask_file": null,
+      "added_at": 0,
+      "thumb": "thumbs/plague.webp"
+    },
+    {
+      "name": "Аметистовые кристаллы",
+      "file": "purple-crystals.webp",
+      "mime": "image/webp",
+      "builtin": true,
+      "mask_file": null,
+      "added_at": 0,
+      "thumb": "thumbs/purple-crystals.webp"
+    },
+    {
+      "name": "Сталь",
+      "file": "steel.webp",
+      "mime": "image/webp",
+      "builtin": true,
+      "mask_file": null,
+      "added_at": 0,
+      "thumb": "thumbs/steel.webp"
+    },
+    {
+      "name": "Театр",
+      "file": "theathre.webp",
+      "mime": "image/webp",
+      "builtin": true,
+      "mask_file": null,
+      "added_at": 0,
+      "thumb": "thumbs/theathre.webp"
+    },
+    {
+      "name": "Белые руны",
+      "file": "white-runic.webp",
+      "mime": "image/webp",
+      "builtin": true,
+      "mask_file": null,
+      "added_at": 0,
+      "thumb": "thumbs/white-runic.webp"
+    }
+  ],
+  "presets": [
+    {
+      "name": "preset1",
+      "file": "preset1.png",
+      "builtin": true
+    },
+    {
+      "name": "preset2",
+      "file": "preset2.png",
+      "builtin": true
+    },
+    {
+      "name": "preset3",
+      "file": "preset3.png",
+      "builtin": true
+    }
+  ]
+}

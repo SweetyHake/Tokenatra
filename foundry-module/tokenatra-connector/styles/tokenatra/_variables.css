@@ -1,0 +1,52 @@
+/* ====== Токены Tokenatra Connector ====== */
+/* Тёмная тема — по умолчанию; интерактивный акцент берём из ядра,
+   чтобы уважать кастомные темы Foundry */
+
+:root {
+  --tkc-bg-primary: rgba(11, 10, 19, 0.9);
+  --tkc-bg-surface: #302831;
+  --tkc-bg-tertiary: #0B0A13;
+  --tkc-surface-hover: #302c2a;
+  --tkc-color-border: #3d3835;
+  --tkc-color-border-soft: #2a2724;
+  --tkc-color-text: #d0b8a3;
+  --tkc-color-text-secondary: #9f8475;
+  --tkc-color-text-emphatic: #e6d3bf;
+  --tkc-accent: var(--color-border-highlight, #ff6400);
+  --tkc-selected-bg: rgba(255, 128, 0, 0.15);
+  --tkc-color-ok: #50cd67;
+  --tkc-color-error: #e93a3a;
+
+  --tkc-radius-sm: 3px;
+  --tkc-radius-md: 6px;
+
+  --tkc-space-xs: 4px;
+  --tkc-space-sm: 8px;
+  --tkc-space-md: 12px;
+
+  --tkc-font-size-sm: 0.75rem;
+  --tkc-font-size-md: 0.85rem;
+  --tkc-font-size-lg: 1rem;
+  --tkc-font-size-xl: 1.15rem;
+
+  --tkc-scrollbar-track: #241f28;
+  --tkc-scrollbar-thumb: #463d49;
+  --tkc-scrollbar-thumb-hover: #564b5a;
+}
+
+/* Светлая тема */
+[data-theme="light"] .tkc-window.application,
+.theme-light .tkc-window.application {
+  --tkc-bg-primary: rgba(240, 234, 226, 0.95);
+  --tkc-bg-surface: #e8e0d4;
+  --tkc-bg-tertiary: #f5f0e8;
+  --tkc-surface-hover: #ddd2c2;
+  --tkc-color-border: #b3a48f;
+  --tkc-color-border-soft: #c9bda9;
+  --tkc-color-text: #4a3f35;
+  --tkc-color-text-secondary: #7a6a5c;
+  --tkc-color-text-emphatic: #33291f;
+  --tkc-scrollbar-track: #e0d7c9;
+  --tkc-scrollbar-thumb: #b8a892;
+  --tkc-scrollbar-thumb-hover: #a3917a;
+}

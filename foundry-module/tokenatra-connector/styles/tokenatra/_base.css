@@ -1,0 +1,286 @@
+/* ====== Брендовая иконка Tokenatra (вместо fa) ====== */
+/* Логотип-маска под currentColor: красится в цвет текста контекста */
+i.tkc-icon,
+.tkc-icon {
+  display: inline-block;
+  /* FA-иконки занимают по ширине натуральный глиф ~0.8em (замер по
+     контекст-меню: FA 11-12px при em 15px). Бокс 0.9em — визуальный размер
+     глифа, margin-right -0.1em возвращает занятую в строке ширину к 0.8em,
+     чтобы текст стоял на одной колонке с соседними FA-строками */
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: -0.1em;
+  flex-shrink: 0;
+  vertical-align: -0.125em;
+  background-color: currentColor;
+  /* Рисунок в SVG нормализован под полный viewBox — маска contain рендерит
+     глиф ровно в размер элемента */
+  -webkit-mask: url('../../icons/tokenatra.svg') no-repeat center / contain;
+  mask: url('../../icons/tokenatra.svg') no-repeat center / contain;
+}
+
+/* В контекст-меню глиф 1.3x: бокс равен визуальному размеру (0.9em × 1.3),
+   БЕЗ transform — глиф не выходит за бокс, поэтому отступы строки совпадают
+   с FA-пунктами (padding 8px и margin-right 8px из foundry2.css применяются
+   к боксу напрямую); высота строки (хитбокс) не меняется */
+.context-item .tkc-icon,
+#context-menu .tkc-icon {
+  width: 1.17em;
+  height: 1.17em;
+}
+
+/* ====== Хром окна и содержимое ====== */
+
+/* Перетаскивание за тайтлбар: гасим выделение текста и курсор —
+   иначе при быстром драге выделяется контент и окно «дёргается» */
+body.tkc-dragging,
+body.tkc-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.tkc-window {
+  border-radius: var(--tkc-radius-md);
+  overflow: hidden;
+  border: none;
+  box-shadow: 0 0 14px rgba(0, 0, 0, 0.55);
+}
+
+.tkc-window.application {
+  background: var(--tkc-bg-primary);
+}
+
+/* standard-form на корне даёт flex-gap → прозрачная полоса между хедером и контентом */
+.tkc-window.standard-form {
+  gap: 0;
+}
+
+/* Стандартную шапку Foundry скрываем: окном управляет тайтлбар Tokenatra
+   внутри iframe (drag — через postMessage, ✕ — tokenatra:window close) */
+.tkc-window .window-header {
+  display: none;
+}
+
+/* заголовок по центру, позади кнопок управления */
+.tkc-window .window-header .window-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
+  background: transparent;
+  font-size: var(--tkc-font-size-xl);
+  margin: 0;
+  padding: 0;
+  z-index: 0;
+}
+
+.tkc-window .window-header .header-control,
+.tkc-window .window-header button {
+  position: relative;
+  z-index: 1;
+}
+
+/* fa-иконка окна прижата к левому краю (FVTT 14: отдельный элемент хедера) */
+.tkc-window .window-header > i,
+.tkc-window .window-header .window-icon {
+  position: absolute;
+  left: var(--tkc-space-md);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tkc-window .window-content {
+  /* Стандартные отступы/рамки Foundry убираем: iframe встык к краям окна */
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: var(--tkc-bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  & button.active,
+  & button:focus {
+    outline: none;
+    box-shadow: none;
+  }
+}
+
+/* Клавиатурный фокус-ринг */
+.tkc-window *:focus-visible {
+  outline: 2px solid var(--tkc-accent);
+  outline-offset: 1px;
+}
+
+/* ====== Каркас: iframe + статус ====== */
+
+.tkc-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.tkc-frame-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: var(--tkc-bg-tertiary);
+}
+
+.tkc-frame-wrap.tkc-hidden {
+  display: none;
+}
+
+.tkc-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: var(--tkc-bg-tertiary);
+}
+
+/* ====== Экран «Tokenatra не запущена» ====== */
+
+.tkc-help {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--tkc-space-md);
+  padding: var(--tkc-space-md);
+  text-align: center;
+  color: var(--tkc-color-text);
+}
+
+.tkc-help-icon {
+  font-size: 3rem;
+  color: var(--tkc-color-text-secondary);
+}
+
+.tkc-help h2 {
+  font-size: var(--tkc-font-size-xl);
+  margin: 0;
+  color: var(--tkc-color-text-emphatic);
+  border: none;
+}
+
+.tkc-help p {
+  max-width: 28rem;
+  margin: 0;
+  color: var(--tkc-color-text-secondary);
+  font-size: var(--tkc-font-size-md);
+}
+
+.tkc-help-steps {
+  max-width: 28rem;
+  margin: 0;
+  padding: 0 var(--tkc-space-md);
+  list-style: none;
+  text-align: left;
+  color: var(--tkc-color-text-secondary);
+  font-size: var(--tkc-font-size-sm);
+}
+
+.tkc-help-steps li {
+  padding: var(--tkc-space-xs) 0;
+}
+
+.tkc-help-actions {
+  display: flex;
+  gap: var(--tkc-space-sm);
+}
+
+/* ====== Кнопки ====== */
+
+.tkc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--tkc-color-border);
+  border-radius: var(--tkc-radius-md);
+  background: var(--tkc-accent);
+  color: #fff;
+  font-size: var(--tkc-font-size-md);
+  cursor: pointer;
+  transition: filter 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.tkc-btn:hover { filter: brightness(1.1); }
+
+.tkc-btn--ghost {
+  background: transparent;
+  color: var(--tkc-color-text);
+  border-color: var(--tkc-color-border);
+  text-decoration: none;
+}
+
+.tkc-btn--ghost:hover {
+  background: var(--tkc-surface-hover);
+  color: var(--tkc-color-text-emphatic);
+}
+
+/* ====== Диалог экспорта ====== */
+
+.tkc-export-dialog {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--tkc-space-sm);
+  padding: var(--tkc-space-sm);
+}
+
+.tkc-export-dialog img {
+  width: 128px;
+  height: 128px;
+  object-fit: cover;
+  object-position: top center;
+  border-radius: var(--tkc-radius-md);
+  border: 1px solid var(--tkc-color-border);
+}
+
+.tkc-export-dialog p {
+  margin: 0;
+  color: var(--tkc-color-text-secondary);
+  font-size: var(--tkc-font-size-sm);
+  word-break: break-all;
+}
+
+/* ====== Скроллбары (скоуп — окна модуля) ====== */
+
+.tkc-window ::-webkit-scrollbar { width: 8px; height: 8px; }
+
+.tkc-window ::-webkit-scrollbar-track {
+  background: var(--tkc-scrollbar-track);
+  border-radius: var(--tkc-radius-sm);
+}
+
+.tkc-window ::-webkit-scrollbar-thumb {
+  background: var(--tkc-scrollbar-thumb);
+  border-radius: var(--tkc-radius-sm);
+}
+
+.tkc-window ::-webkit-scrollbar-thumb:hover {
+  background: var(--tkc-scrollbar-thumb-hover);
+}
+
+.tkc-window ::-webkit-scrollbar-corner {
+  background: var(--tkc-scrollbar-track);
+}
+
+.tkc-window,
+.tkc-window * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--tkc-scrollbar-thumb) var(--tkc-scrollbar-track);
+}
+
+/* ====== Состояние подключения в хроме окна ====== */
+/* Tokenatra не запущена: значок в тайтлбаре красный (иначе — брендовый
+   цвет заголовка окна через currentColor) */
+.tkc-window.tkc-offline .window-header .tkc-icon {
+  background-color: #e93a3a;
+}

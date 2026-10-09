@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>offline stub parent</title></head>
+<body style="background:#222;color:#eee;font-family:sans-serif">
+<h3>Offline stub parent (эмуляция модуля Foundry без запущенной Tokenatra)</h3>
+<iframe id="frame" style="width:1000px;height:640px;border:1px solid #555"></iframe>
+<pre id="log" style="color:#9f9;height:200px;overflow:auto"></pre>
+<script>
+var log = function(msg) {
+    var el = document.getElementById('log');
+    el.textContent += msg + '\n';
+    el.scrollTop = el.scrollHeight;
+};
+window.addEventListener('message', function(e) {
+    var d = e.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.type === 'tokenatra:hello') {
+        if (window.__ONLINE) {
+            log('hello -> conn host (ONLINE)');
+            e.source.postMessage({ type: 'tokenatra:conn', mode: 'host' }, '*');
+        } else {
+            log('hello -> conn none');
+            e.source.postMessage({ type: 'tokenatra:conn', mode: 'none' }, '*');
+        }
+    }
+    if (d.type === 'tokenatra:relay') {
+        log('relay: ' + d.action);
+        if (window.__ONLINE && (d.action === 'device' || d.action === 'health')) {
+            e.source.postMessage({
+                type: 'tokenatra:relay-result', relayId: d.relayId, ok: true,
+                result: { device: 'DirectML (stub GPU)', model_exists: true, model_loaded: false }
+            }, '*');
+            return;
+        }
+        if (window.__ONLINE && d.action === 'version') {
+            e.source.postMessage({
+                type: 'tokenatra:relay-result', relayId: d.relayId, ok: true,
+                result: { version: 'test', name: 'Tokenatra' }
+            }, '*');
+            return;
+        }
+        // GM-клиент есть, его Tokenatra выключена -> сетевой отказ
+        setTimeout(function() {
+            e.source.postMessage({
+                type: 'tokenatra:relay-result', relayId: d.relayId,
+                ok: false, error: 'Failed to fetch'
+            }, '*');
+        }, 150);
+    }
+    if (d.type === 'tokenatra:save') log('save to foundry: ' + d.filename + ' keys=[' + Object.keys(d).join(',') + '] origLen=' + (d.original ? d.original.length : 0) + ' foundryPath=' + (d.originalFoundryPath || '-') + ' hash=' + (d.originalHash || '-'));
+    if (d.type === 'tokenatra:error') log('studio error: ' + d.message);
+});
+document.getElementById('frame').src = '/modules/tokenatra-connector/studio/index.html';
+</script>
+</body>
+</html>
