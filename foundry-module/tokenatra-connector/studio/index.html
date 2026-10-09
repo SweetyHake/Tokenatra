@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>window.__STUDIO_VERSION__ = "1.0.1";window.__STUDIO_BUILT__ = true;window.__EMBED__ = { embed: true, parentOrigin: '' };document.documentElement.classList.add('embed');</script>
+    <script>window.__STUDIO_VERSION__ = "1.1.0";window.__STUDIO_BUILT__ = true;window.__EMBED__ = { embed: true, parentOrigin: '' };document.documentElement.classList.add('embed');</script>
     <base href="/modules/tokenatra-connector/studio/">
     <title>Tokenatra</title>
     <link rel="icon" href="./assets/logo.png" type="image/x-icon">
-    <link rel="stylesheet" href="./css/style.css?v=1.0.1">
+    <link rel="stylesheet" href="./css/style.css?v=1.1.0">
 </head>
 <body>
 <div class="eraser-cursor" id="eraserCursor">
@@ -160,10 +160,9 @@
                     <div class="accordion-body example-settings" id="exampleSettings">
                         <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="exampleOpacitySlider" min="0" max="100" step="1" value="50"><input type="number" class="slider-value" id="exampleOpacityVal" value="50" min="0" max="100" step="1"><span class="slider-unit">%</span></div>
                         <div class="field-row field-row-compact"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="exampleScaleSelect"><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option></select></div>
-                        <div class="field-row field-row-compact">
-                            <span class="field-row-label field-row-label-tiny">Файл:</span>
-                            <span id="exampleFileName" class="example-file-name">example.png</span>
-                            <button class="link-btn link-btn-tiny" id="exampleFileBtn">Файл</button>
+                        <div class="quick-save-folder-row example-file-row">
+                            <span id="exampleFileName" class="quick-save-folder-name">example.png</span>
+                            <button class="ghost-btn ghost-btn-compact-md" id="exampleFileBtn"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Файл</button>
                         </div>
                         <input type="file" id="exampleFileInput" accept="image/*">
                     </div>
@@ -266,6 +265,7 @@
                         </div>
                         <div class="accordion-body" id="portraitSettings">
                             <div class="portrait-canvas-wrap"><canvas id="portraitCanvas"></canvas></div>
+                            <div class="field-row portrait-variant-row"><div class="chip-switch" id="portraitVariantSwitch"><button type="button" class="chip-btn" data-variant="cutout" disabled data-tooltip="Сначала удалите фон">Без фона</button><button type="button" class="chip-btn active" data-variant="original">С фоном</button></div></div>
                             <div class="portrait-controls">
                                 <div class="field-row"><span class="field-row-label">Размер:</span><select class="compact-select" id="portraitSizeSelect"><option value="512">512px</option><option value="1024" selected>1024px</option><option value="2048">2048px</option><option value="4096">4096px</option></select></div>
                                 <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="portraitScaleSlider" min="10" max="500" step="1" value="100"><input type="number" id="portraitScaleInput" class="slider-number" value="100" min="10" max="500"><span class="slider-unit">%</span></div>
@@ -295,7 +295,7 @@
                         <div class="accordion-body open" id="exportBody">
                         <div class="field-row"><span class="field-row-label">Размер:</span><select class="compact-select" id="saveQualitySelect"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select></div>
                         <div class="field-row"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="saveScaleSelect"><option value="auto" selected>Авто</option><option value="1">×1</option><option value="2">×2</option><option value="3">×3</option></select></div>
-                        <div class="save-info-hint save-info-hint-flush" id="saveInfoHint">Масштаб подбирается автоматически по размеру изображения на холсте</div>
+                        <div class="save-info-hint save-info-hint-flush" id="saveInfoHint">Подбирается автоматически по размеру изображения на холсте</div>
                         <div class="toggle-row toggle-row-mt">
                             <label class="toggle-label"><input type="checkbox" id="quickSaveCheck"><span class="toggle-track"></span></label>
                             <span>Быстрое сохранение</span>
@@ -785,26 +785,26 @@
 <div class="toast" id="toast"></div>
 
 <script>
-    window.__APP_VERSION = '1.0.1';
+    window.__APP_VERSION = '1.1.0';
 </script>
-<script src="./js/tokenTransport.js?v=1.0.1"></script>
-    <script src="./js/config.js?v=1.0.1"></script>
-<script src="./js/state.js?v=1.0.1"></script>
-    <script src="./js/utils.js?v=1.0.1"></script>
-    <script src="./js/i18n.js?v=1.0.1"></script>
-<script src="./js/urlManager.js?v=1.0.1"></script>
-<script src="./js/tokenEffects.js?v=1.0.1"></script>
-<script src="./js/tokenHistory.js?v=1.0.1"></script>
-<script src="./js/tokenPresets.js?v=1.0.1"></script>
-<script src="./js/tokenCanvas.js?v=1.0.1"></script>
-<script src="./js/tokenEditor.js?v=1.0.1"></script>
-<script src="./js/portraitGenerator.js?v=1.0.1"></script>
-<script src="./js/hotkeySettings.js?v=1.0.1"></script>
-<script src="./js/remover.js?v=1.0.1"></script>
-<script src="./js/converter.js?v=1.0.1"></script>
-<script src="./js/tokenEmbed.js?v=1.0.1"></script>
-<script src="./js/main.js?v=1.0.1"></script>
-<script src="./js/tokenTray.js?v=1.0.1"></script>
+<script src="./js/tokenTransport.js?v=1.1.0"></script>
+    <script src="./js/config.js?v=1.1.0"></script>
+<script src="./js/state.js?v=1.1.0"></script>
+    <script src="./js/utils.js?v=1.1.0"></script>
+    <script src="./js/i18n.js?v=1.1.0"></script>
+<script src="./js/urlManager.js?v=1.1.0"></script>
+<script src="./js/tokenEffects.js?v=1.1.0"></script>
+<script src="./js/tokenHistory.js?v=1.1.0"></script>
+<script src="./js/tokenPresets.js?v=1.1.0"></script>
+<script src="./js/tokenCanvas.js?v=1.1.0"></script>
+<script src="./js/tokenEditor.js?v=1.1.0"></script>
+<script src="./js/portraitGenerator.js?v=1.1.0"></script>
+<script src="./js/hotkeySettings.js?v=1.1.0"></script>
+<script src="./js/remover.js?v=1.1.0"></script>
+<script src="./js/converter.js?v=1.1.0"></script>
+<script src="./js/tokenEmbed.js?v=1.1.0"></script>
+<script src="./js/main.js?v=1.1.0"></script>
+<script src="./js/tokenTray.js?v=1.1.0"></script>
 <script>
     document.getElementById('saveQualitySelect').addEventListener('change', function() {
         updateSaveHint(this.value, document.getElementById('saveScaleSelect').value);
@@ -822,7 +822,7 @@
         const eff = scale === 'auto' ? (window.TokenCanvas ? TokenCanvas.detectUsedScale() : 1) : parseInt(scale);
         const tag = '(' + I18n.t('Масштаб:') + ' ' + eff + ')';
         if (scale === 'auto') {
-            hint.textContent = I18n.t('Масштаб подбирается автоматически по размеру изображения на холсте') + ' ' + tag;
+            hint.textContent = I18n.t('Подбирается автоматически по размеру изображения на холсте') + ' ' + tag;
         } else {
             const s = parseInt(scale);
             hint.textContent = I18n.t(quality + 'px × ' + s + ' = ' + (quality * s) + 'px итоговый файл') + ' ' + tag;

@@ -651,6 +651,9 @@ html[lang="ru"] .settings-quality-row .toolbar-slider { flex-basis: 122px; width
 }
 
 .quick-save-folder-row { display: none; align-items: center; gap: 6px; margin-top: 2px; }
+/* Селектор файла примера: тот же вид, но не зависит от флага быстрого сохранения */
+.quick-save-folder-row.example-file-row,
+html.embed .quick-save-folder-row.example-file-row { display: flex; }
 .quick-save-folder-name { flex: 1; font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ================================================================
@@ -951,6 +954,19 @@ html[lang="ru"] .settings-quality-row .toolbar-slider { flex-basis: 122px; width
 }
 #portraitCanvas:active { cursor: grabbing; }
 .portrait-controls { display: flex; flex-direction: column; gap: 4px; }
+/* Чипы выбора варианта (портрет: Без фона / С фоном) */
+.portrait-variant-row { justify-content: center; margin-top: 4px; }
+.chip-switch { display: flex; gap: 4px; }
+.chip-btn {
+    padding: 3px 10px; font-size: var(--fs-xs); font-family: inherit;
+    color: var(--text-secondary); background: var(--bg-input);
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    cursor: pointer; outline: none;
+    transition: background .15s, color .15s, border-color .15s;
+}
+.chip-btn:hover:not(:disabled):not(.active) { border-color: var(--accent-dim); color: var(--text-primary); }
+.chip-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: var(--fw-medium); }
+.chip-btn:disabled { opacity: .45; cursor: not-allowed; }
 .portrait-folder-row { display: flex; align-items: center; gap: 6px; }
 .portrait-folder-name { flex: 1; font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1567,10 +1583,6 @@ html[lang="ru"] .settings-quality-row .toolbar-slider { flex-basis: 122px; width
 
 /* Example overlay: collapsible settings block */
 .example-settings { flex-direction: column; gap: 4px; margin-top: 4px; }
-.example-file-name {
-    flex: 1; font-size: 9px; color: var(--text-muted);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-}
 
 /* Tiny link button (used in example overlay) */
 .link-btn-tiny { font-size: 9px; }

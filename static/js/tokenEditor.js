@@ -333,6 +333,11 @@ const TokenEditor = {
                 state.backgroundRemoved = true;
                 state.showingOriginal = false;
 
+                // Вырез появился: разблокируем «Без фона» и переключаемся на него
+                if (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) {
+                    PortraitGenerator.setCutoutAvailable(true);
+                }
+
                 if (state.imageMaskCanvas) {
                     // Полная перезапись маски в обход ластика — сбрасываем
                     // несброшенные штрихи и инкрементируем ген (см. _invalidatePendingStrokes)

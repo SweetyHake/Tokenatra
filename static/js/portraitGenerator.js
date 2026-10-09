@@ -5,6 +5,7 @@ const PortraitGenerator = {
     DISPLAY_SIZE: 480,
     SIZES: [512, 1024, 2048, 4096],
     saveSize: null,
+    variant: 'original',
 
     imageX: 0,
     imageY: 0,
@@ -100,6 +101,15 @@ const PortraitGenerator = {
 
         const sizeSelect = $('portraitSizeSelect');
         if (sizeSelect) sizeSelect.onchange = e => { this.saveSize = parseInt(e.target.value); };
+
+        const variantSwitch = $('portraitVariantSwitch');
+        if (variantSwitch) {
+            variantSwitch.addEventListener('click', e => {
+                const btn = e.target.closest('.chip-btn');
+                if (!btn || btn.disabled) return;
+                this.setVariant(btn.dataset.variant);
+            });
+        }
 
         const qsCheck = $('portraitQuickSaveCheck');
         if (qsCheck) {
@@ -211,7 +221,34 @@ const PortraitGenerator = {
         c.addEventListener('contextmenu', e => e.preventDefault());
     },
 
+    setVariant(v) {
+        this.variant = v === 'original' ? 'original' : 'cutout';
+        const sw = $('portraitVariantSwitch');
+        if (sw) sw.querySelectorAll('.chip-btn').forEach(b => b.classList.toggle('active', b.dataset.variant === this.variant));
+        this.requestRender();
+    },
+
+    /** Доступность «Без фона»: вырез ещё не сделан — чип заблокирован,
+     *  активен «С фоном»; после удаления фона авто-переключаемся на вырез. */
+    setCutoutAvailable(has) {
+        const sw = $('portraitVariantSwitch');
+        if (!sw) return;
+        const cutoutBtn = sw.querySelector('[data-variant="cutout"]');
+        if (cutoutBtn) {
+            cutoutBtn.disabled = !has;
+            cutoutBtn.dataset.tooltip = has ? '' : (typeof I18n !== 'undefined' ? I18n.t('Сначала удалите фон') : 'Сначала удалите фон');
+        }
+        this.variant = has ? 'cutout' : 'original';
+        sw.querySelectorAll('.chip-btn').forEach(b => b.classList.toggle('active', b.dataset.variant === this.variant));
+        this.requestRender();
+    },
+
     getImage() {
+        // Вариант «С фоном» — исходник; вырез ещё не сделан —
+        // оба варианта показывают то, что есть
+        if (this.variant === 'original') {
+            return state.userImageOriginal || state.userImageWithoutBg || null;
+        }
         return state.userImageWithoutBg || state.userImageOriginal || null;
     },
 
@@ -310,6 +347,8 @@ const PortraitGenerator = {
         this.saveSize = this._autoSize();
         const sizeSelect = $('portraitSizeSelect');
         if (sizeSelect) sizeSelect.value = this.saveSize;
+        // Новое изображение: выреза ещё нет — «Без фона» недоступен
+        this.setCutoutAvailable(!!state.userImageWithoutBg);
         this.resetTransform();
     },
 
