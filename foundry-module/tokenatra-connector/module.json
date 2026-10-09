@@ -2,7 +2,7 @@
   "id": "tokenatra-connector",
   "title": "Tokenatra Connector",
   "description": "Tokenatra studio inside Foundry: remove backgrounds and craft tokens in a single window. Requires the Tokenatra desktop app running on the same machine (keep it in the system tray).",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "authors": [
     {
       "name": "SweetyHake",
