@@ -58,6 +58,8 @@ a = Analysis(
         'imageio_ffmpeg',
         'tkinter',
         *(['gi'] if not is_windows else []),
+        # Трей (только Windows): pystray подхватывается целиком
+        *(['pystray', 'pystray._win32'] if is_windows else []),
     ],
     hookspath=[],
     hooksconfig={},

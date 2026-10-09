@@ -99,6 +99,12 @@ Tokenatra готовит картинки персонажей для Foundry VT
 - Контекстное меню Windows: удалить фон, конвертировать в WebP, аудио — в OGG.
 - Проверка обновлений через GitHub Releases.
 - Быстрое сохранение в заранее выбранную папку.
+- **Сворачивание в трей** (Windows): закрытие окна прячет приложение в трей,
+  удаление фона остаётся доступным, а модель выгружается из памяти после
+  простоя (настраивается).
+- **Интеграция с Foundry VTT**: модуль `tokenatra-connector` запускает студию
+  прямо в окне Foundry и добавляет «удалить фон» в контекстное меню актёров
+  (см. [docs/FOUNDRY.md](docs/FOUNDRY.md)).
 
 ## Установка
 
@@ -120,15 +126,10 @@ Tokenatra готовит картинки персонажей для Foundry VT
 
 ### Запуск из исходников
 
-Нужны Python 3 и системный WebKit-бэкенд для pywebview. На Windows используйте `start.bat`:
+Нужны Python 3; на Linux — ещё и системный WebKit2GTK для pywebview. Установите зависимости и запустите:
 
 ```bat
-start.bat
-```
-
-С консолью и для диагностики:
-
-```bat
+pip install -r requirements.txt
 python app.py
 ```
 
@@ -254,7 +255,6 @@ Tokenatra/
 ├── presets/                # Пресеты масок
 ├── docs/screenshots/       # Скриншоты для документации
 ├── mask.png               # Маска защиты областей
-├── start.bat              # Установка зависимостей и запуск
 ├── build.bat              # Переносимая сборка
 └── build_installer.bat    # Сборка установщика
 ```
@@ -325,13 +325,14 @@ The installer skips the model because of its size. BiRefNet, RMBG-2.0, and IS-Ne
 
 ## Run from source
 
-Windows and Python 3 are required:
+Python 3 is required; on Linux, also the WebKit2GTK backend for pywebview. Install dependencies and run:
 
 ```bat
-start.bat
+pip install -r requirements.txt
+python app.py
 ```
 
-The script installs missing dependencies, rebuilds the PyInstaller app, and launches it without a console window. For debugging, use `python app.py`. To run the Flask server directly, use `python server.py` — the interface will be at `http://127.0.0.1:7878`.
+To run the Flask server directly, use `python server.py` — the interface will be at `http://127.0.0.1:7878`.
 
 ## CLI
 

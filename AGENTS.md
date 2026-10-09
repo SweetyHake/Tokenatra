@@ -3,12 +3,12 @@
 ## Commands
 
 ```bat
-start.bat              # auto-installs deps + launches desktop app (pywebview, no console)
-launch.vbs             # launches start.bat completely hidden (no window at all)
-python app.py          # launches with console (for debugging)
+pip install -r requirements.txt   # one-time setup
+python app.py          # desktop app from source (console visible — handy for debugging)
 python server.py       # standalone Flask on :7878 (no GUI window)
 python server.py --remove-bg <file>   # CLI: remove background, saves <stem>_nobg.webp
 python server.py --to-webp <file>     # CLI: convert to WebP, deletes original
+build_module.bat       # zip Foundry-модуля -> dist/module/tokenatra-connector.zip
 ```
 
 ## Build
@@ -81,10 +81,82 @@ iscc installer.iss
 - `token_rings/` — ring overlay images
 - `presets/` — preset mask images
 - `version.py` — version & repo config
+- `foundry-module/tokenatra-connector/` — исходники модуля Foundry VTT (в .exe НЕ бандлится; см. docs/FOUNDRY.md)
+
+## Трей и экономный режим (Windows, pystray)
+
+- Иконка трея живёт ВЕСЬ цикл приложения (как у Discord): `_tray.show()` зовётся
+  на старте `main()` до `webview.start()`; `show()` идемпотентен (живую иконку
+  не пересоздаёт, только обновляет тултип). Реальный выход — `_final_exit()`
+  (`_tray.hide()` + `_nuclear_exit()`): его вызывают ветки `_on_closing`,
+  `window.events.closed` и код после `webview.start()`; `_exit_tray_mode`
+  иконку больше НЕ убирает.
+- `close_to_tray` (config.json, default true) — ✕ прячет окно в трей
+  вместо выхода (тумблер в Настройках → «Трей и память»). ЕДИНСТВЕННЫЙ
+  `window.events.closing`-хендлер — `_on_closing`
+  в `app.py` (pywebview `Event.set()` выполняет всех подписчиков, а
+  `window.destroy()` тоже проходит через closing → нужен флаг `_force_quit`;
+  его же выставляет `/api/window/destroy` — путь автообновления).
+- `tray_idle_unload_min` (default 5, 0 = никогда) — в трее ONNX-сессия
+  выгружается после простоя (`server.unload_model()` под `SESSION_LOCK`),
+  первый `/process` платит прогрузку. Монитор-поток стартует лениво из
+  `set_tray_mode(True)` (только desktop-режим, не standalone `server.py`).
+- Эти два ключа — СЕРВЕРНЫЕ: их нет в `AppConfig._defaults()` (иначе embed-
+  снапшот затрёт), `/config POST` защищает их как `selected_model`.
+- Фронт: `tokenTray.js` (гасит rAF/кэши/таймеры по `visibilitychange`,
+  история режется до 10). `tray_manager.py`: остановленный pystray `Icon`
+  непригоден — после `hide()` `show()` строит иконку заново, живую не трогает.
+- Меню трея: «Открыть Tokenatra», чекбокс «Модель в памяти» (тумблер
+  load_session/unload_model в фоне, семафор `_model_busy` в app.py защищает
+  от двойного клика) и «Выход». Нативные диалоги следуют теме Windows:
+  `app.py:_enable_windows_dark_dialogs()` → `uxtheme!SetPreferredAppMode(AllowDark)`.
+
+## Интеграция с FoundryVTT (модуль-коннектор)
+
+- Каталог: `foundry-module/tokenatra-connector/`, установка по manifest URL
+  (raw main), zip — ассет релиза приложения (`releases/latest/download/
+  tokenatra-connector.zip`, CI job `release`). Версию module.json бампить
+  ТОЛЬКО в релизном коммите (манифест не должен анонсировать несуществующий zip).
+- Embed-режим: `/?embed=1&origin=<encoded>` → класс `html.embed` (ставится
+  инлайн-скриптом в head до рендера), мост `tokenEmbed.js` активен только при
+  валидном localhost-origin; протокол `connectorApi: 1` (`tokenatra:ping/pong/
+  ready/load/export`). Экспорт: `POST /embed_export` (блоб, id =
+  `secrets.token_urlsafe`, TTL 10 мин) → модуль забирает `GET /embed_export/
+  <id>` с CORS.
+- Гвард `_guard_localhost_only`: кросс-сайтово разрешены ТОЛЬКО роуты из
+  `CONNECTOR_ROUTES` (`/health`, `/process`, `/version`, `/device`,
+  `/models_list`, `/embed_export*`) и только Origin localhost-семейства
+  (любой порт). Остальные роуты — строго same-origin. На HTML-ответах всегда
+  `CSP frame-ancestors` ('none', для embed — localhost-семейство).
+- Hosted-студия (основной режим мультиплеера): игрокам отдаётся ЖИВОЙ UI
+  из Tokenatra ГМа — клиент ГМа собирает self-contained страницу с localhost
+  (relay.js: studio_meta/studio_chunk, инлайн CSS/JS + tokenTransport) и
+  шлёт чанками через сокет мира; app.js грузит её в srcdoc. Фолбэк при
+  офлайн-ГМе — статическая копия из модуля (`studio/`, `build_studio.py`,
+  вызывается из build_module.bat и CI; после правок static/ пересобирать).
+  Сетевой режим для модуля НЕ нужен.
+- Скорость открытия окна: сборка кешируется до перезапуска страницы
+  (app.js `fetchStudioHtml` с дедупом параллельных вызовов + `_studioCache`
+  на клиенте ГМа) и прогревается на `ready` (`prefetchStudio` в
+  requestIdleCallback). Рукопожатие `tokenatra:hello` (tokenTransport →
+  родитель, ответ `#sendConn`) устраняет гонку `tokenatra:conn`: без него
+  conn, отправленный до создания srcdoc-iframe, теряется и `/config`
+  подвисает на 3-с таймауте, уходя в localStorage. Миниатюры колец:
+  build_studio.py генерирует `thumbs/<stem>.webp` (144px) и кладёт `thumb`
+  в manifest; `loadRings` использует их только в hosted
+  (`__STUDIO_HOSTED__`), полное кольцо грузится лишь выбранное.
+- Сетевой режим (опти-ин, БЕЗ КЛЮЧЕЙ, для прямых HTTP-сценариев): `listen_host` = '0.0.0.0' (тумблер
+  «Разрешить подключения из сети», рестарт). Не-localhost запросы пускаются
+  только на `PUBLIC_PROXY_ROUTES`/`PUBLIC_OPEN_*` (статика UI; /config
+  НАМЕРЕННО исключён — утёк бы секретами). Опциональное ужесточение без UI:
+  `shared_secret` в config.json (модуль шлёт `X-Tokenatra-Key`; cookie
+  `tokenatra_key` ставится ответом `/?embed=1&key=…`). UI — карточка
+  «Доступ для игроков» + `/network_info` (только localhost).
+- Подробности и FAQ: docs/FOUNDRY.md.
 
 ## Dependencies
 
-Единый `requirements.txt` — источник правды для `start.bat`, `start.sh` и CI.
+Единый `requirements.txt` — источник правды для `start.sh` и CI.
 Маркеры окружения ставят `onnxruntime-directml` только в Windows; в macOS/Linux — обычный `onnxruntime`.
 
 ## Version & updates
@@ -102,6 +174,8 @@ iscc installer.iss
 - **Frontend**: Vanilla JS, global `state` object mutated directly by all modules
 - **Canvas**: internal size = `CONFIG.SCALE_SIZES[state.canvasScale]` (`{1:1536, 2:3072, 3:6144}`, **default 2 → 3072×3072 px**; варианты: 1536 «производительность», 3072 «баланс», 6144 «качество»), логические координаты в 1024 px пространстве (scale factor = 2×canvasScale). Масштаб меняется в Settings → Производительность → «Рабочий канвас» (`TokenCanvas.setCanvasScale()`, сохраняется в `config.json` как `canvasScale`). Экспорт НЕ зависит от рабочего масштаба: `renderForSave()` рендерит в `saveSettings.quality × 3` (независимый `coordScale`). Перф-инвариант: `getImageData`/`putImageData` по всему канвасу запрещены в горячих путях (тень — `source-in`, цветокоррекция — кэш `_getColorCorrectedImage()`, ластик — воркер).
 - **Ластик (воркер, протокол v2)**: воркер хранит **альфа-зеркала масок** (1 байт/px, `setMask`) и защиту (`setProtection`, `state.protectionAlpha`). Пачка несёт только штрихи (`Float64Array [cx,cy,drawX,drawY,flags]`) — ноль чтений маски на главном потоке; воркер сам считает регион и возвращает RGBA-патч (RGB=255). Пайплайн глубиной 2 (`_workerInFlight`). **Инвариант: любое изменение маски в обход ластика (undo/redo, resetMask/resetImageMask, пресет `TokenPresets.apply`, заливка при удалении фона, `createMask/createImageMask`) обязано вызвать `TokenCanvas._pushMaskToWorker(pink)`** — иначе воркер применит штрихи к устаревшему зеркалу. Точки в очереди не дропаются никогда (схлопывание близких). Ввод — Pointer Events + `getCoalescedEvents` (touch-action:none на `.canvas-area`). История — только альфа-снапшоты (`{a,w,h}`, ~1 МБ на маску).
+- **Тень при стирании**: на время штриха `effectsEnabled=false`, но кадр рисуется со **старым кэшем тени** (`_shadowCache`, и в полном кадре, и в инкрементальном патче) — перерасчёт только на отпускании (`stopErasing`), иначе токен «прыгает» в момент касания.
+- **«Отображать скрытое» + ластик**: пачка режима `image` несёт `ghostOverride: state.showHidden` — воркер снимает защиту там, где розовое зеркало прозрачно (скрытое содержимое режется сквозь защиту кольца); над видимым токеном (розовая маска непрозрачна) защита действует. Фолбэк `_fallbackBrushToImageMask` делает то же через `destination-in` маски в protSampler.
 
 ## Critical file: `server.py` gotchas
 
@@ -110,13 +184,17 @@ iscc installer.iss
 - Every `@app.route` must be declared exactly once with the decorator.
 - Models live in `BASE_DIR/models/` (`get_selected_model_path()`: config `selected_model` → первый `*.onnx`). При первом запуске `model.onnx` из `BASE_DIR` автоматически перемещается в `models/`.
 
-## JS load order (strict, from `index.html` lines 713-725)
+## JS load order (strict, from `index.html`)
 
 ```
 config.js → state.js → utils.js → i18n.js → urlManager.js → tokenEffects.js →
 tokenHistory.js → tokenPresets.js → tokenCanvas.js → tokenEditor.js →
-portraitGenerator.js → hotkeySettings.js → remover.js → main.js
+portraitGenerator.js → hotkeySettings.js → remover.js → converter.js →
+tokenEmbed.js → main.js → tokenTray.js
 ```
+
+`tokenEmbed.js` — мост Foundry (до main.js: слушает сообщения с DOMContentLoaded);
+`tokenTray.js` — экономный режим (после main.js: дергает TokenCanvas/TokenHistory).
 
 Breaking this order causes runtime errors because objects reference each other.
 
@@ -142,6 +220,7 @@ External models (`.gitignore`d):
 ### `model.onnx` требования
 
 - Вход: 1024×1024×3 RGB, ImageNet-нормализация (mean 0.485/0.456/0.406, std 0.229/0.224/0.225) — всё это делает `server.py` сам
+- **Исключение — BEN2** (имя файла содержит `ben`, рекомендуется `PramaLLC/BEN2`): официальный ONNX ждёт plain ToTensor 0..1 БЕЗ нормализации (см. `onnx_run.py` авторов) — `remove_background` нормализует по имени модели; плюс для BEN2 `refine_mask` идёт в gentle-режиме (без `^1.2`, без эрозии `MinFilter(3)`, отсечка 0.05 вместо 0.15) — жёсткий рефайн «съедает» тонкие детали по краям (клинки, рваные края)
 - Выход: одноканальная маска 1024×1024. Если выход уже в [0,1] (RMBG-2.0 `alphas` содержит sigmoid в графе) — sigmoid повторно НЕ применяется (`server.py` detect: `mask.min() >= 0 and mask.max() <= 1`); для сырых logits (BiRefNet) — применяется
 - Вход/выход могут быть объявлены как `dynamic` (напр. `[1,3,'height','width']`), но фактически модель может требовать ровно 1024×1024 (фикс. split в декодере)
 - Источник: HuggingFace, напр. `briaai/RMBG-2.0` (`onnx/model_fp16.onnx`, ~514 МБ) или `DanielLavric/BiRefNet-ONNX`
