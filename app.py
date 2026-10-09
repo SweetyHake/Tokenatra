@@ -4,6 +4,7 @@ import os
 import sys
 
 from platform_utils import terminate_process
+import tray_manager
 
 # WSLg и части виртуалок: Wayland-бэкенд GTK и композитор WebKit могут
 # оставить окно невидимым. Принудительный X11 + мягкий рендеринг лечат.
@@ -198,7 +199,11 @@ def _kill_process_on_port(port):
                 pass
         return
     try:
-        r = subprocess.run(['netstat', '-ano'], capture_output=True, text=True)
+        # CREATE_NO_WINDOW: иначе netstat/taskkill вспыхивают окном терминала
+        # при запуске windowed-приложения (освобождение порта 7878)
+        no_window = 0x08000000 if sys.platform == 'win32' else 0
+        r = subprocess.run(['netstat', '-ano'], capture_output=True, text=True,
+                           creationflags=no_window)
         target = f'127.0.0.1:{port}'
         for line in r.stdout.splitlines():
             if 'LISTENING' in line and target in line:
@@ -206,7 +211,8 @@ def _kill_process_on_port(port):
                 if pid and pid != '0':
                     import os as _os
                     if pid != str(_os.getpid()):
-                        subprocess.run(['taskkill', '/F', '/PID', pid], capture_output=True)
+                        subprocess.run(['taskkill', '/F', '/PID', pid], capture_output=True,
+                                       creationflags=no_window)
     except Exception:
         pass
 
@@ -222,6 +228,28 @@ def _set_taskbar_identity():
     а не под pythonw.exe/Python."""
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Tokenatra.App')
+    except Exception:
+        pass
+
+
+def _enable_windows_dark_dialogs():
+    """Нативные диалоги и меню (включая контекстное меню трея) следуют теме
+    Windows: uxtheme!SetPreferredAppMode(AllowDark) + FlushMenuThemes.
+    На текущих сборках Windows функции НЕ экспортируются по имени — только
+    по ординалам 135/136 (тот же приём, что у TrafficMonitor/Chromium)."""
+    try:
+        ux = ctypes.WinDLL('uxtheme')
+
+        def _resolve(name, ordinal, *argtypes):
+            try:
+                return ctypes.WINFUNCTYPE(ctypes.c_long, *argtypes)((name, ux))
+            except AttributeError:
+                return ctypes.WINFUNCTYPE(ctypes.c_long, *argtypes)((ordinal, ux))
+
+        set_pam = _resolve('SetPreferredAppMode', 135, ctypes.c_int)
+        flush = _resolve('FlushMenuThemes', 136)
+        set_pam(1)   # PAM_ALLOW = следовать системной теме
+        flush()
     except Exception:
         pass
 
@@ -309,7 +337,14 @@ def main():
     import threading
     import time
     import webview
-    from server import app, BASE_DIR, RESOURCE_DIR, USER_DATA_DIR
+    from server import (
+        app, BASE_DIR, RESOURCE_DIR, USER_DATA_DIR,
+        set_tray_mode, tray_settings,
+        model_loaded as server_model_loaded,
+        load_session as server_load_session,
+        unload_model as server_unload_model,
+        listen_host,
+    )
     from updater import start_background_tasks
 
     global PID_FILE
@@ -317,6 +352,7 @@ def main():
     if sys.platform == 'win32':
         _set_taskbar_identity()
         _setup_webview2_gpu()
+        _enable_windows_dark_dialogs()
         # Тайтлбар на Windows двигается нашим Win32-хуком (см. _on_loaded).
         # Встроенная обработка pywebview-drag-region в WebView2 конфликтует:
         # pywebviewMoveWindow получает дельты от mousedown и передаёт их в
@@ -354,6 +390,10 @@ def main():
 
     _kill_process_on_port(PORT)
 
+    # Остатки embed-экспорта прошлой сессии (TTL чистит только живой реестр)
+    from server import purge_embed_export_dir
+    purge_embed_export_dir()
+
     try:
         PID_FILE.write_text(str(_os.getpid()))
     except Exception:
@@ -366,7 +406,7 @@ def main():
     start_background_tasks(force=True, delay=15)
 
     flask_thread = threading.Thread(
-        target=lambda: app.run(host='127.0.0.1', port=PORT, debug=False, threaded=True, use_reloader=False),
+        target=lambda: app.run(host=listen_host(), port=PORT, debug=False, threaded=True, use_reloader=False),
         daemon=True
     )
     flask_thread.start()
@@ -399,9 +439,23 @@ def main():
         def restore(self):
             _window.restore()
         def destroy(self):
+            _force_quit.set()
             _window.destroy()
         def toggle_fullscreen(self):
             _window.toggle_fullscreen()
+        def hide_to_tray(self):
+            """Свернуть окно в системный трей (кнопка ✕). False — трей недоступен
+            или close_to_tray выключен (фронт тогда уходит в обычный выход)."""
+            if not tray_manager.available() or not tray_settings()['close_to_tray']:
+                return False
+            try:
+                _window.hide()
+            except Exception:
+                return False
+            return _enter_tray_mode()
+        def quit_app(self):
+            _force_quit.set()
+            _window.destroy()
 
     # Linux/macOS: имя программы до старта GTK → WM_CLASS, док и меню
     # показывают «Tokenatra» с логотипом, а не «app.py» с обобщённой иконкой
@@ -433,6 +487,113 @@ def main():
 
     _window = window
     app.window_ref = window
+
+    # ===== Системный трей и экономный режим =====
+
+    _force_quit = threading.Event()
+    app.force_quit_ref = _force_quit.set
+
+    # Тумблер «Модель в памяти» в меню трея: загрузка идёт в фоне (~7–10 с),
+    # защита от повторных кликов во время загрузки
+    _model_busy = threading.Semaphore(1)
+
+    def _toggle_model_from_tray():
+        if not _model_busy.acquire(blocking=False):
+            return
+
+        def _work():
+            try:
+                if server_model_loaded():
+                    server_unload_model()
+                else:
+                    server_load_session()
+            except Exception:
+                pass
+            finally:
+                _model_busy.release()
+
+        threading.Thread(target=_work, daemon=True, name='tray-model-toggle').start()
+
+    _tray = tray_manager.TrayController(
+        icon_path=str(RESOURCE_DIR / 'logo.png'),
+        on_open=lambda: _exit_tray_mode(),
+        on_quit=lambda: _quit_from_tray(),
+        is_model_loaded=server_model_loaded,
+        on_toggle_model=_toggle_model_from_tray,
+    )
+
+    # Тултип иконки трея — всегда просто «Tokenatra», без статуса модели
+    def _js_call(code):
+        # evaluate_js нельзя звать из UI-потока closing-хендлера (дедлок
+        # WinForms) — уводим в отдельный поток
+        threading.Thread(target=_js_call_sync, args=(code,), daemon=True).start()
+
+    def _js_call_sync(code):
+        time.sleep(0.4)
+        try:
+            window.evaluate_js(code)
+        except Exception:
+            pass
+
+    def _enter_tray_mode():
+        """Войти в режим трея. False — иконка не создалась (окно возвращено)."""
+        set_tray_mode(True)
+        if not _tray.show():
+            # Без иконки окно осталось бы недоступным — возвращаем его
+            set_tray_mode(False)
+            try:
+                window.show()
+            except Exception:
+                pass
+            return False
+        _js_call('window.TokenTray && window.TokenTray.enterIdle && window.TokenTray.enterIdle(true)')
+        return True
+
+    def _exit_tray_mode():
+        try:
+            window.show()
+        except Exception:
+            pass
+        set_tray_mode(False)
+        # иконка из трея не убирается — живёт весь цикл приложения
+        _js_call('window.TokenTray && window.TokenTray.exitIdle && window.TokenTray.exitIdle()')
+
+    def _quit_from_tray():
+        _force_quit.set()
+        _tray.hide()
+        _nuclear_exit()
+        try:
+            window.destroy()
+        except Exception:
+            pass
+
+    def _on_closing():
+        # ЕДИНСТВЕННЫЙ closing-хендлер: Event.set() выполняет всех подписчиков,
+        # параллельный _nuclear_exit ломал бы сворачивание в трей.
+        # destroy() (обновление/выход) тоже проходит через closing —
+        # различаем пути флагом _force_quit.
+        if _force_quit.is_set() or not tray_manager.available() or not tray_settings()['close_to_tray']:
+            _final_exit()
+            return True
+        try:
+            window.hide()
+        except Exception:
+            _final_exit()
+            return True
+        if not _enter_tray_mode():
+            _final_exit()
+            return True
+        return False
+
+    # Иконка в трее живёт весь цикл приложения (как у Discord): создаётся на
+    # старте и не убирается при открытом окне; ✕ при включённом close_to_tray
+    # прячет окно, иконка остаётся «ручкой» обратно.
+    _tray.show()
+
+    def _final_exit():
+        """Реальный выход: убрать иконку трея + обычная очистка."""
+        _tray.hide()
+        _nuclear_exit()
 
     def _set_icon():
         try:
@@ -626,8 +787,10 @@ def main():
             pass
     window.events.loaded += _on_loaded
 
-    window.events.closing += _nuclear_exit
-    window.events.closed += _nuclear_exit
+    # closing перехватывает только трей-хендлер (см. _on_closing); реальный
+    # выход чистится через closed
+    window.events.closing += _on_closing
+    window.events.closed += _final_exit
 
     # Let pywebview select Cocoa/WebKit2GTK on Unix; EdgeChromium is Windows-only.
     gui = 'edgechromium' if sys.platform == 'win32' else None
@@ -642,7 +805,7 @@ def main():
             pass
     webview.start(**start_kwargs, debug=False)
 
-    _nuclear_exit()
+    _final_exit()
 
 
 if __name__ == '__main__':
