@@ -96,6 +96,14 @@ self.onmessage = function(e) {
 
     var prot = self._protData;
     var protSize = self._protSize;
+    // «Отображать скрытое»: защита уступает ластику изображения там, где
+    // розовая маска прозрачна (редактируется скрытое содержимое, а не
+    // видимый токен). Розовое зеркало уже живёт в воркере.
+    var ghostOverride = !!data.ghostOverride;
+    var pinkSnap = ghostOverride ? self._masks.pink : null;
+    var pinkA = pinkSnap ? pinkSnap.a : null;
+    var pinkW = pinkSnap ? pinkSnap.w : 0;
+    var pinkH = pinkSnap ? pinkSnap.h : 0;
     var effScale = data.effectiveScale || 1;
     var ang = (data.imageRotation || 0) * Math.PI / 180;
     var cosR = Math.cos(ang);
@@ -178,7 +186,11 @@ self.onmessage = function(e) {
                         var pxi = Math.round(pxc);
                         var pyi = Math.round(pyc);
                         if (pxi >= 0 && pyi >= 0 && pxi < protSize && pyi < protSize &&
-                            prot[pyi * protSize + pxi] > 128) skip = true;
+                            prot[pyi * protSize + pxi] > 128) {
+                            skip = true;
+                            if (pinkA && pxi < pinkW && pyi < pinkH &&
+                                pinkA[pyi * pinkW + pxi] < 128) skip = false;
+                        }
                     }
                     if (!skip) {
                         var cur = mask[maskIdx];

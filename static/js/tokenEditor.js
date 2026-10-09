@@ -89,6 +89,36 @@ const TokenEditor = {
                 tokenFileInput.value = '';
             };
         }
+        // Дроп на всю область канваса: открыть картинку можно перетаскиванием
+        // в центр, а не только в блок файла слева. Пустой оверлей канваса
+        // («Перетащите файл сюда») тоже покрыт — события всплывают сюда.
+        const canvasArea = document.querySelector('.canvas-area');
+        const canvasWrapper = $('canvasWrapper');
+        if (canvasArea && canvasWrapper) {
+            let dragDepth = 0;
+            canvasArea.addEventListener('dragenter', e => {
+                const types = e.dataTransfer ? Array.from(e.dataTransfer.types) : [];
+                if (!types.includes('Files')) return;
+                e.preventDefault();
+                dragDepth++;
+                canvasWrapper.classList.add('drop-hover');
+            });
+            canvasArea.addEventListener('dragover', e => e.preventDefault());
+            canvasArea.addEventListener('dragleave', () => {
+                if (--dragDepth <= 0) { dragDepth = 0; canvasWrapper.classList.remove('drop-hover'); }
+            });
+            canvasArea.addEventListener('drop', e => {
+                e.preventDefault();
+                dragDepth = 0;
+                canvasWrapper.classList.remove('drop-hover');
+                const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+                if (files.length > 0) TokenCanvas.loadImage(files[0]);
+                else if (e.dataTransfer.files.length) toast(I18n.t('Перетащите файл изображения'), true);
+            });
+        }
+        // Защита: дроп мимо зон не должен открывать файл в самом вебвью
+        window.addEventListener('dragover', e => e.preventDefault());
+        window.addEventListener('drop', e => e.preventDefault());
         this.setupNavButtons();
         const tokenFileNameInput = $('tokenFileName');
         if (tokenFileNameInput) {
@@ -424,10 +454,7 @@ const TokenEditor = {
         const resetTransformBtn = $('resetTransformBtn');
         if (resetTransformBtn) {
             resetTransformBtn.onclick = () => {
-                state.imageScale = 1;
-                state.imageRotation = 0;
-                TokenCanvas.updateScaleUI();
-                TokenCanvas.updateRotationUI();
+                TokenCanvas.fitToFrame();
                 TokenCanvas.invalidateEffectsCache();
                 TokenCanvas._forceFullRender();
                 TokenCanvas.render();
@@ -551,6 +578,15 @@ const TokenEditor = {
         if (showBordersCheck) {
             showBordersCheck.checked = !!state.showScaleBorders;
             showBordersCheck.onchange = e => { state.showScaleBorders = e.target.checked; TokenCanvas.render(); };
+        const showHiddenCheck = $('showHiddenCheck');
+        if (showHiddenCheck) {
+            showHiddenCheck.checked = !!state.showHidden;
+            showHiddenCheck.onchange = e => {
+                state.showHidden = e.target.checked;
+                TokenCanvas.invalidateEffectsCache();
+                TokenCanvas.render();
+            };
+        }
         }
 
         const saveQualitySelect = $('saveQualitySelect');
@@ -607,15 +643,16 @@ const TokenEditor = {
             const el = $(id); const valEl = $(valId);
             if (!el) return;
             el.value = initVals[id];
-            if (valEl) valEl.textContent = el.value;
+            if (valEl) valEl.value = el.value;
             setSliderFill(el);
-            el.oninput = () => { 
-                AppConfig.setDropShadow(key, parseFloat(el.value) * factor); 
-                if (valEl) valEl.textContent = el.value; 
+            bindSliderValueInput(el, valEl);
+            el.oninput = () => {
+                AppConfig.setDropShadow(key, parseFloat(el.value) * factor);
+                if (valEl) valEl.value = el.value;
                 setSliderFill(el);
                 TokenCanvas.invalidateEffectsCache();
                 TokenCanvas.scheduleEffects(false);
-                TokenCanvas.requestRender(); 
+                TokenCanvas.requestRender();
             };
             el.addEventListener('wheel', ev => { ev.preventDefault(); const step = parseFloat(el.step)||1; el.value = clamp(parseFloat(el.value)+(ev.deltaY<0?step:-step),parseFloat(el.min),parseFloat(el.max)); el.dispatchEvent(new Event('input')); }, { passive: false });
         });
@@ -626,9 +663,9 @@ const TokenEditor = {
                 const ds2 = AppConfig.dropShadow;
                 $('shadowAngle').value = ds2.angle; $('shadowDistance').value = ds2.distance;
                 $('shadowBlur').value = ds2.blur; $('shadowOpacity').value = Math.round(ds2.opacity * 100);
-                sliders.forEach(({ id, valId }) => { const s = $(id); const valEl = $(valId); if (valEl) valEl.textContent = s.value; setSliderFill(s); });
+                sliders.forEach(({ id, valId }) => { const s = $(id); const valEl = $(valId); if (valEl) valEl.value = s.value; setSliderFill(s); });
                 TokenCanvas.invalidateEffectsCache();
-                TokenCanvas.render(); 
+                TokenCanvas.render();
                 toast('Тень сброшена');
             };
         }
@@ -645,16 +682,17 @@ const TokenEditor = {
             const el = $(id); const valEl = $(valId);
             if (!el) return;
             el.value = initVals[id];
-            if (valEl) valEl.textContent = el.value;
+            if (valEl) valEl.value = el.value;
             setSliderFill(el);
-            el.oninput = () => { 
-                AppConfig.setColorCorrection(key, parseFloat(el.value)); 
-                if (valEl) valEl.textContent = el.value; 
+            bindSliderValueInput(el, valEl);
+            el.oninput = () => {
+                AppConfig.setColorCorrection(key, parseFloat(el.value));
+                if (valEl) valEl.value = el.value;
                 setSliderFill(el);
                 TokenCanvas.invalidateEffectsCache();
                 TokenCanvas._deferCC = true;
                 TokenCanvas.scheduleEffects(false);
-                TokenCanvas.requestRender(); 
+                TokenCanvas.requestRender();
             };
             el.addEventListener('wheel', ev => { ev.preventDefault(); const step = parseFloat(el.step)||1; el.value = clamp(parseFloat(el.value)+(ev.deltaY<0?step:-step),parseFloat(el.min),parseFloat(el.max)); el.dispatchEvent(new Event('input')); }, { passive: false });
         });
@@ -664,9 +702,9 @@ const TokenEditor = {
                 AppConfig.resetColorCorrection();
                 const cc2 = AppConfig.colorCorrection;
                 $('ccSaturation').value = cc2.saturation; $('ccLightness').value = cc2.lightness;
-                sliders.forEach(({ id, valId }) => { const s = $(id); const valEl = $(valId); if (valEl) valEl.textContent = s.value; setSliderFill(s); });
+                sliders.forEach(({ id, valId }) => { const s = $(id); const valEl = $(valId); if (valEl) valEl.value = s.value; setSliderFill(s); });
                 TokenCanvas.invalidateAllCaches();
-                TokenCanvas.render(); 
+                TokenCanvas.render();
                 toast('Цветокоррекция сброшена');
             };
         }
@@ -707,15 +745,19 @@ const TokenEditor = {
                 var el = ensurePreviewEl();
                 var row = $('saveBtnRow');
                 var anchor = row || btn;
-                el.style.width = anchor.getBoundingClientRect().width + 'px';
+                var zf = (typeof uiZoom === 'function') ? uiZoom() : 1;
+                el.style.width = anchor.getBoundingClientRect().width / zf + 'px';
                 el.querySelector('img').src = previewCanvas.toDataURL('image/webp', 0.85);
-                el.querySelector('.save-preview-tip-label').textContent = withRing ? 'С кольцом' : 'Без кольца';
+                el.querySelector('.save-preview-tip-label').textContent =
+                    I18n.t(withRing ? 'С кольцом' : 'Без кольца') + ' (' + I18n.t('Масштаб:') + ' ' + (result.usedScale || 1) + ')';
                 el.className = 'save-preview-tip show';
                 var rect = anchor.getBoundingClientRect();
-                var left = rect.left + rect.width / 2 - el.offsetWidth / 2;
-                var top = rect.top - 6 - el.offsetHeight;
-                el.style.left = Math.max(4, Math.min(left, window.innerWidth - el.offsetWidth - 4)) + 'px';
-                el.style.top = (top < 4 ? rect.bottom + 6 : top) + 'px';
+                var left = rect.left + rect.width / 2 - el.offsetWidth * zf / 2;
+                var top = rect.top - 6 - el.offsetHeight * zf;
+                var leftV = Math.max(4, Math.min(left, window.innerWidth - el.offsetWidth * zf - 4));
+                var topV = (top < 4 ? rect.bottom + 6 : top);
+                el.style.left = (leftV / zf) + 'px';
+                el.style.top = (topV / zf) + 'px';
             }, 200);
         }
         function hidePreview() {
@@ -923,7 +965,7 @@ const TokenEditor = {
 
         if (check) check.checked = cfg.enabled;
         if (opacitySlider) opacitySlider.value = cfg.opacity;
-        if (opacityVal) opacityVal.textContent = cfg.opacity;
+        if (opacityVal) opacityVal.value = cfg.opacity;
         if (scaleSelect) scaleSelect.value = cfg.scaleMode;
 
         if (cfg.enabled && !state.exampleImage) {
@@ -934,10 +976,11 @@ const TokenEditor = {
             val = clamp(parseInt(val), 0, 100);
             state.exampleOpacity = val / 100;
             if (opacitySlider) opacitySlider.value = val;
-            if (opacityVal) opacityVal.textContent = val;
+            if (opacityVal) opacityVal.value = val;
             AppConfig.setExample('opacity', val);
             TokenCanvas.render();
         };
+        bindSliderValueInput(opacitySlider, opacityVal);
 
         if (check) {
             check.onchange = e => {
@@ -999,7 +1042,7 @@ const TokenEditor = {
                 state.exampleScaleMode = def.scaleMode;
                 if (fileName) fileName.textContent = 'example.png';
                 if (opacitySlider) opacitySlider.value = def.opacity;
-                if (opacityVal) opacityVal.textContent = def.opacity;
+                if (opacityVal) opacityVal.value = def.opacity;
                 if (scaleSelect) scaleSelect.value = def.scaleMode;
                 AppConfig.setExample('opacity', def.opacity);
                 AppConfig.setExample('scaleMode', def.scaleMode);

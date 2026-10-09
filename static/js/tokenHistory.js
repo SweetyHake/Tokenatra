@@ -142,6 +142,26 @@ var TokenHistory = {
         if (typeof TokenEditor !== 'undefined' && TokenEditor._updateUndoButtons) TokenEditor._updateUndoButtons();
     },
 
+    // Экономный режим (трей): обрезаем снапшоты, НЕ удаляя текущую позицию —
+    // индекс сдвигается вместе с массивом, undo/redo остаются консистентными
+    trimTo(limit) {
+        if (!Number.isFinite(limit) || limit < 1) return;
+        var guard = 0;
+        while (state.history.length > limit && guard++ < 200) {
+            if (state.historyIndex > 0) {
+                state.history.shift();
+                state.historyIndex--;
+            } else {
+                // Стоим на самом первом снапшоте — режем хвост (redo-будущее)
+                state.history.pop();
+            }
+        }
+        if (state.historyIndex >= state.history.length) {
+            state.historyIndex = state.history.length - 1;
+        }
+        if (typeof TokenEditor !== 'undefined' && TokenEditor._updateUndoButtons) TokenEditor._updateUndoButtons();
+    },
+
     redo() {
         if (state.historyIndex < state.history.length - 1) {
             state.historyIndex++;

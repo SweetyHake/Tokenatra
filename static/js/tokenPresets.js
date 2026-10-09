@@ -170,7 +170,8 @@ const TokenPresets = {
             .catch(() => {});
     },
 
-    // Превью пресета — уменьшенная копия маски (белая форма на прозрачном).
+    // Превью пресета: тёмный фон = то, что останется, оранжевая форма
+    // (фирменный --accent #ff9800) = маска — то, что будет вырезано.
     // dataURL кэшируется на объекте пресета: сетка перерисовывается часто,
     // а toDataURL на 1536²-канвасе дорогой
     _getPresetThumb(preset) {
@@ -180,9 +181,20 @@ const TokenPresets = {
         thumb.width = thumbSize;
         thumb.height = thumbSize;
         const tCtx = thumb.getContext('2d');
-        tCtx.imageSmoothingEnabled = true;
-        tCtx.imageSmoothingQuality = 'high';
-        tCtx.drawImage(preset.canvas, 0, 0, thumbSize, thumbSize);
+        tCtx.fillStyle = '#17151a';
+        tCtx.fillRect(0, 0, thumbSize, thumbSize);
+        // форма выреза = прозрачные места preset.canvas: заполняем их оранжевым
+        const tmp = document.createElement('canvas');
+        tmp.width = thumbSize;
+        tmp.height = thumbSize;
+        const xc = tmp.getContext('2d');
+        xc.fillStyle = '#ff9800';
+        xc.fillRect(0, 0, thumbSize, thumbSize);
+        xc.globalCompositeOperation = 'destination-out';
+        xc.imageSmoothingEnabled = true;
+        xc.imageSmoothingQuality = 'high';
+        xc.drawImage(preset.canvas, 0, 0, thumbSize, thumbSize);
+        tCtx.drawImage(tmp, 0, 0);
         preset.thumbUrl = thumb.toDataURL('image/png');
         return preset.thumbUrl;
     },
@@ -262,14 +274,15 @@ const TokenPresets = {
         const sd = srcData.data;
         const od = outData.data;
 
-        // Розовым подсвечивается область, где маска ОСТАНЕТСЯ (совпадает
-        // с миниатюрой: белая форма = маска), а не то, что будет вырезано
+        // Оранжевым (--accent #ff9800) подсвечивается маска — область, которая
+        // будет ВЫРЕЗАНА (в preset.canvas она прозрачна), тёмным остаётся то,
+        // что сохранится — так же, как в миниатюрах пресетов
         for (let i = 0; i < sd.length; i += 4) {
-            const hasMask = sd[i+3] >= 128;
-            od[i]   = hasMask ? 255 : 0;
-            od[i+1] = hasMask ? 80  : 0;
-            od[i+2] = hasMask ? 160 : 0;
-            od[i+3] = hasMask ? 200 : 0;
+            const removed = sd[i+3] < 128;
+            od[i]   = removed ? 255 : 0;
+            od[i+1] = removed ? 152 : 0;
+            od[i+2] = removed ? 0   : 0;
+            od[i+3] = removed ? 200 : 0;
         }
 
         ctx.putImageData(outData, 0, 0);
@@ -429,7 +442,15 @@ const TokenPresets = {
                     if (index === defaultIdx) item.classList.add('active');
                     item.dataset.ringName = ring.name;
                     const img = document.createElement('img');
-                    img.src = `/ring_file/${encodeURIComponent(ring.file)}`;
+                    // Hosted-студия: миниатюра из manifest (~10 КБ вместо
+                    // 0.3–4 МБ полного кольца с сервера мира); в десктопе
+                    // полный файл локален — грузим его
+                    const thumbSrc = (window.__STUDIO_HOSTED__ && ring.thumb)
+                        ? TokenTransport.assetUrl('/ring_file/' + encodeURIComponent(ring.thumb))
+                        : null;
+                    img.src = thumbSrc || (window.TokenTransport
+                        ? TokenTransport.assetUrl(`/ring_file/${encodeURIComponent(ring.file)}`)
+                        : `/ring_file/${encodeURIComponent(ring.file)}`);
                     const localizedName = I18n.t(ring.name);
                     img.alt = localizedName;
                     img.dataset.tooltip = ring.name;

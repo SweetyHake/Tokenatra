@@ -61,12 +61,15 @@ function openModelSettings() {
 }
 
 function updateDeviceIndicator(device, modelExists) {
-    const deviceName = device || 'CPU';
-    const isGPU = deviceName.includes('GPU') || deviceName.includes('DirectML') || deviceName.includes('CUDA') || deviceName.includes('ROCm');
-    const statusClass = !modelExists ? 'model-missing' : (isGPU ? 'gpu' : 'cpu');
+    // '—' — офлайн-маркер из hosted-транспорта: приложение не отвечает
+    const offline = device === '—';
+    const deviceName = offline ? I18n.t('Tokenatra не запущена') : (device || 'CPU');
+    const isGPU = !offline && (deviceName.includes('GPU') || deviceName.includes('DirectML') || deviceName.includes('CUDA') || deviceName.includes('ROCm'));
+    // Офлайн — красная точка (отдельный класс), не жёлтая «CPU»
+    const statusClass = !modelExists ? 'model-missing' : (offline ? 'offline' : (isGPU ? 'gpu' : 'cpu'));
     const tooltip = !modelExists
         ? 'Модель для удаления фона не установлена'
-        : (isGPU ? deviceName + ' (GPU)' : deviceName + ' (CPU)');
+        : (offline ? deviceName : (isGPU ? deviceName + ' (GPU)' : deviceName + ' (CPU)'));
     const dot = $('deviceBadge');
     if (dot) {
         dot.className = 'device-dot ' + statusClass;
@@ -76,7 +79,9 @@ function updateDeviceIndicator(device, modelExists) {
     if (aboutBadge) aboutBadge.className = 'about-device-badge ' + statusClass;
     const aboutValue = $('aboutDeviceValue');
     if (aboutValue) aboutValue.textContent = !modelExists ? 'Модель не установлена' : deviceName;
-    state.deviceName = deviceName;
+    // Сырой маркер ('—' офлайн, имя устройства онлайн): локализованная строка
+    // при повторной прокидке сюда (setModelAvailability) ломала офлайн-ветку
+    state.deviceName = device;
     state.modelAvailable = !!modelExists;
 }
 
@@ -90,8 +95,10 @@ function setModelAvailability(exists) {
         if (!button) return;
         button.classList.toggle('model-missing', !available);
         button.setAttribute('aria-disabled', String(!available));
+        // Таб «Удаление фона» и так подписан — тултип нужен только
+        // для предупреждения, когда модель не установлена
         button.dataset.tooltip = available
-            ? (button === removeBgBtn ? '' : 'Удаление фона')
+            ? ''
             : 'Модель для удаления фона не установлена';
     });
 
@@ -182,6 +189,11 @@ function initGlobalShortcuts() {
 
         if (hotkeyMatches(e, hk.openFile) && !isInput) {
             e.preventDefault();
+            // Hosted-студия: выбор файла — через браузер файлов Foundry
+            if (state.embed && window.TokenEmbed?.isActive?.()) {
+                window.TokenEmbed.pickFile();
+                return;
+            }
             const tokenPanel = $('tokenPanel');
             const fileToolsPanel = $('fileToolsPanel');
             if (tokenPanel?.classList.contains('active')) {
@@ -292,6 +304,14 @@ function initTheme() {
     // legacy per-theme classes removed. Kept as no-op for compat.
 }
 
+function applyUiScale(val) {
+    val = parseFloat(val) || 1;
+    // 100vh при CSS-zoom не пересчитывается: высота оболочки делится на
+    // масштаб через --ui-scale, чтобы окно заполнялось ровно на любом уровне
+    document.documentElement.style.setProperty('--ui-scale', String(val));
+    document.documentElement.style.zoom = val === 1 ? '' : val;
+}
+
 function initDefaultSettings() {
     var languageSelect = $('languageSelect');
     if (languageSelect) {
@@ -301,6 +321,16 @@ function initDefaultSettings() {
             I18n.setLanguage(this.value);
         };
     }
+
+    var uiScaleSelect = $('uiScaleSelect');
+    if (uiScaleSelect) {
+        uiScaleSelect.value = String(AppConfig.uiScale || 1);
+        uiScaleSelect.onchange = function() {
+            AppConfig.setUiScale(parseFloat(this.value));
+            applyUiScale(this.value);
+        };
+    }
+    applyUiScale(AppConfig.uiScale);
 
     var defQ = $('defQualitySelect');
     if (defQ) {
@@ -312,19 +342,14 @@ function initDefaultSettings() {
             if (tokenQ) tokenQ.value = this.value;
         };
     }
-    var defFmt = $('defRemoverFormat');
+    var defFmt = $('defFormatSelect');
     if (defFmt) {
-        defFmt.value = AppConfig.remover.format || 'webp';
+        // Единый формат: и для пакетной обработки, и для сохранения токена
+        defFmt.value = AppConfig.remover.format || (AppConfig.saveSettings && AppConfig.saveSettings.format) || 'webp';
         defFmt.onchange = function() {
             AppConfig.setRemover('format', this.value);
-        };
-    }
-    var tokenFmt = $('tokenFormatSelect');
-    if (tokenFmt) {
-        tokenFmt.value = (AppConfig.saveSettings && AppConfig.saveSettings.format) || 'webp';
-        tokenFmt.onchange = function() {
             AppConfig.setSaveSetting('format', this.value);
-            toast('Формат токена: ' + this.value.toUpperCase());
+            toast('Формат: ' + this.value.toUpperCase());
         };
     }
     var tokenComp = $('tokenCompressionSlider');
@@ -430,8 +455,14 @@ function initWindowControls() {
             doMinimize();
         }
     });
-    $('wcClose')?.addEventListener('click', () => {
-        if (getApi()?.destroy) getApi().destroy();
+    $('wcClose')?.addEventListener('click', async () => {
+        const api = getApi();
+        // close_to_tray: ✕ сворачивает в трей (app.py решает по конфигу и
+        // наличию pystray); иначе — прежний выход
+        if (api?.hide_to_tray) {
+            try { if (await api.hide_to_tray()) return; } catch (e) { /* мост недоступен */ }
+        }
+        if (api?.destroy) api.destroy();
         else flask('close');
     });
 
@@ -457,14 +488,20 @@ function initWindowControls() {
         });
     }
 
-    $('titleBar')?.addEventListener('dblclick', e => {
-        if (e.target.closest('.tb-nav, .window-controls')) return;
-        maxBtn?.click();
-    });
+    // Двойной клик по тайтлбару (разворот) — только для собственного окна;
+    // в embed-режиме клики belong окну Foundry, maxBtn.click() дёрнул бы
+    // окно desktop-приложения через /api/window
+    if (!state.embed) {
+        $('titleBar')?.addEventListener('dblclick', e => {
+            if (e.target.closest('.tb-nav, .window-controls')) return;
+            maxBtn?.click();
+        });
+    }
 
     // Перетаскивание окна: Windows — через Win32 (flask('move')),
     // Linux/macOS — класс pywebview-drag-region на тайтлбаре.
-    if (IS_WINDOWS) {
+    // В embed-режиме (окно модуля Foundry) двигать надо окно Foundry — мимо.
+    if (IS_WINDOWS && !state.embed) {
         $('titleBar')?.addEventListener('mousedown', e => {
             if (e.button !== 0) return;
             if (e.target.closest('.tb-nav, .window-controls')) return;
@@ -472,13 +509,13 @@ function initWindowControls() {
         });
     }
 }
-
 // Linux/macOS frameless: растягивание за края через GTK begin_resize_drag
 function initEdgeResize() {
     // WebView2 consumes the border hit-test, so resize the native parent window
     // while the pointer is held on the outer client-area edge.
     // Windows-only: на Linux/macOS ресайз frameless-окна делает pywebview.
-    if (!IS_WINDOWS) return;
+    // Embed-режим: границы принадлежат окну Foundry — нативный ресайз мимо.
+    if (!IS_WINDOWS || state.embed) return;
     const band = 6;
     const bodyStyle = document.body.style;
     const getEdges = (x, y) => ({
@@ -610,7 +647,54 @@ function initModelSelector() {
 
     if (serverBtn && !serverBtn.dataset.bound) {
         serverBtn.dataset.bound = '1';
-        serverBtn.onclick = () => runModelAction(serverBtn, '/download_model_from_server', 'Загрузка…');
+        // Схема «скачивает браузер»: открываем ссылку на модель в системном
+        // браузере (hosted-студия — новой вкладкой), файл затем подхватывается
+        // через «Загрузить модель с диска». Само приложение больше не качает.
+        serverBtn.onclick = () => openModelLink('full');
+    }
+    const liteBtn = $('downloadModelLiteBtn');
+    if (liteBtn && !liteBtn.dataset.bound) {
+        liteBtn.dataset.bound = '1';
+        liteBtn.onclick = () => openModelLink('lite');
+    }
+
+    // Тултипы с рекомендованными требованиями (переводятся на languagechange)
+    function applyModelTips() {
+        const tips = {
+            downloadModelLiteBtn: I18n.t('BEN2 · 213 МБ · GPU 4+ ГБ VRAM · 8 ГБ ОЗУ'),
+            downloadModelBtn: I18n.t('RMBG-2.0 · 490 МБ · GPU 6+ ГБ VRAM · 16 ГБ ОЗУ')
+        };
+        Object.entries(tips).forEach(([id, tip]) => {
+            const el = $(id);
+            if (el) el.dataset.tooltip = tip;
+        });
+    }
+    applyModelTips();
+    document.addEventListener('languagechange', applyModelTips);
+
+    async function openModelLink(kind) {
+        const key = kind === 'lite' ? 'model_download_url_lite' : 'model_download_url';
+        const url = window._tokenatraModels?.[key];
+        if (!url) {
+            toast(I18n.t('Ссылка на модель ещё не настроена'), true);
+            return;
+        }
+        if (window.TokenTransport && TokenTransport.active()) {
+            window.open(url, '_blank', 'noopener');
+            return;
+        }
+        try {
+            const res = await fetch('/open_model_link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind })
+            });
+            const d = await res.json();
+            if (!res.ok || !d.ok) throw new Error(d.error || 'не удалось открыть ссылку');
+            toast(I18n.t('Ссылка на модель открыта в браузере'));
+        } catch (e) {
+            toast('Ошибка: ' + e.message, true);
+        }
     }
     if (diskBtn && !diskBtn.dataset.bound) {
         diskBtn.dataset.bound = '1';
@@ -676,18 +760,39 @@ function initUpdateNotify() {
     setTimeout(poll, 3000);
 }
 
-function initAboutUpdate() {
-    fetch('/version').then(r => r.json()).then(d => {
-        const v = $('aboutVersion');
-        if (v) v.textContent = 'Версия ' + (d.version || '?');
-        const tv = $('titleVersion');
-        if (tv) tv.textContent = d.version || '';
-    }).catch(() => {});
+function refreshDeviceInfo() {
     fetch('/device').then(r => r.json()).then(d => {
         const el = $('aboutDeviceValue');
         if (el) el.textContent = (d.device || 'CPU');
         if (typeof d.model_exists === 'boolean') updateDeviceIndicator(d.device, d.model_exists);
     }).catch(() => {});
+}
+
+function fetchVersionBadge() {
+    fetch('/version').then(r => r.json()).then(d => {
+        const v = $('aboutVersion');
+        if (v) v.textContent = 'Версия ' + (d.version || '?');
+        const tv = $('titleVersion');
+        if (tv) {
+            // Офлайн-маркер '—' вместо цифр не показываем: блок версии
+            // скрывается целиком, пока Tokenatra не ответит
+            const ok = d.version && d.version !== '—';
+            tv.textContent = ok ? d.version : '';
+            const sub = tv.closest('.tb-subtitle');
+            if (sub) sub.style.display = ok ? '' : 'none';
+        }
+    }).catch(() => {});
+}
+
+function initAboutUpdate() {
+    fetchVersionBadge();
+    refreshDeviceInfo();
+    // Hosted-студия: связь появилась после 'none' — бейдж и версия
+    // переопросятся (версия при загрузке могла уйти в офлайн-фолбэк)
+    window.addEventListener('tokenatra:conn', function() {
+        refreshDeviceInfo();
+        fetchVersionBadge();
+    });
 
     const btn = $('checkUpdatesBtn');
     if (btn) btn.onclick = () => checkForUpdatesManual();
@@ -867,6 +972,115 @@ function applyAboutUpdate() {
         .catch(() => aboutUpdateSetStatus('Не удалось связаться с сервером'));
 }
 
+// Настройки сетевого доступа («Доступ для игроков»): серверный ключ
+// listen_host. НЕ в AppConfig._defaults — защищён сервером от затирания
+// снапшотами (как и настройки трея). Без ключей: тумблер + адрес.
+async function initNetworkSettings() {
+    if (state.embed) return;
+    const card = $('networkSettingsCard');
+    if (!card || !$('allowRemoteCheck')) return;
+
+    async function readConfig() {
+        try { return await (await fetch('/config')).json(); } catch (e) { return {}; }
+    }
+    async function postConfig(patch) {
+        const cur = await readConfig();
+        const res = await fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...cur, ...patch })
+        });
+        return res.ok;
+    }
+
+    const cfg = await readConfig();
+
+    const allowCheck = $('allowRemoteCheck');
+    allowCheck.checked = (cfg.listen_host === '0.0.0.0');
+    allowCheck.onchange = async () => {
+        const ok = await postConfig({ listen_host: allowCheck.checked ? '0.0.0.0' : '127.0.0.1' });
+        toast(ok
+            ? I18n.t('Применится после перезапуска Tokenatra')
+            : I18n.t('Не удалось сохранить настройки'), !ok);
+        refreshAddressHint();
+    };
+
+    // «Разрешить подключения из браузера»: любой сайт может пользоваться
+    // студией из Foundry (чтение, удаление фона, /config студии).
+    // Применяется сразу, без перезапуска.
+    const browserCheck = $('allowBrowserCheck');
+    if (browserCheck) {
+        browserCheck.checked = cfg.allow_browser !== false;
+        browserCheck.onchange = async () => {
+            const ok = await postConfig({ allow_browser: browserCheck.checked });
+            toast(ok
+                ? I18n.t('Настройки сохранены')
+                : I18n.t('Не удалось сохранить настройки'), !ok);
+        };
+    }
+
+    async function refreshAddressHint() {
+        // Строка адреса удалена из карточки — функция оставлена пустой
+        // для совместимости вызовов
+    }
+    refreshAddressHint();
+
+    $('copyAccessInfoBtn').onclick = async () => {
+        // Один адрес: локальный LAN-IP (для игроков с других устройств),
+        // а не весь список; fallback — текущий origin
+        let addr = window.location.origin;
+        try {
+            const info = await (await fetch('/network_info')).json();
+            if (info.ips && info.ips.length) addr = `http://${info.ips[0]}:${info.port}`;
+        } catch (e) { /* оффлайн — остаётся текущий origin */ }
+        try {
+            await navigator.clipboard.writeText(addr);
+            toast(I18n.t('Скопировано') + ': ' + addr);
+        }
+        catch (e) { toast(I18n.t('Не удалось скопировать'), true); }
+    };
+}
+
+// Настройки трея (только Windows): серверные ключи close_to_tray /
+// tray_idle_unload_min. НЕ в AppConfig._defaults — embed-снапшоты не должны
+// их затирать (сервер дополнительно защищает их при /config POST).
+async function initTraySettings() {
+    if (!IS_WINDOWS) return;
+    if (state.embed) return; // настройки трея управляют окном приложения, не embed-инстансом
+    if (!($('traySettingsCard') && $('closeToTrayCheck') && $('trayIdleSelect'))) return;
+    let cfg = {};
+    try { cfg = await (await fetch('/config')).json(); } catch (e) { return; }
+
+    async function postTraySettings(patch) {
+        try {
+            // POST полного слепка текущего конфига с патчем: /config заменяет
+            // содержимое, точечный POST потерял бы остальные ключи
+            const cur = await (await fetch('/config')).json();
+            const res = await fetch('/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...cur, ...patch })
+            });
+            if (res.ok) toast(I18n.t('Настройки трея сохранены'));
+            else toast(I18n.t('Не удалось сохранить настройки'), true);
+        } catch (e) {
+            toast(I18n.t('Не удалось сохранить настройки'), true);
+        }
+    }
+
+    const closeCheck = $('closeToTrayCheck');
+    if (closeCheck) {
+        closeCheck.checked = cfg.close_to_tray !== false;
+        closeCheck.onchange = () => postTraySettings({ close_to_tray: closeCheck.checked });
+    }
+    const idleSelect = $('trayIdleSelect');
+    if (idleSelect) {
+        const val = String(parseInt(cfg.tray_idle_unload_min, 10));
+        idleSelect.value = ['0', '1', '3', '5', '10', '30'].includes(val) ? val : '5';
+        idleSelect.onchange = () => postTraySettings({ tray_idle_unload_min: parseInt(idleSelect.value, 10) });
+    }
+}
+
 async function init() {
     await AppConfig.load();
     I18n.init();
@@ -876,7 +1090,10 @@ async function init() {
         // Функции, доступные только в Windows (контекстное меню ОС)
         document.querySelectorAll('[data-windows-only]').forEach(el => { el.style.display = 'none'; });
     }
-    state.canvasScale = AppConfig.canvasScale || 2;
+    // Embed-инстанс (окно модуля Foundry): «производительный» канвас,
+    // в config.json не пишется (см. TokenCanvas.setCanvasScale)
+    state.embed = !!(window.__EMBED__ && window.__EMBED__.embed);
+    state.canvasScale = state.embed ? 1 : (AppConfig.canvasScale || 2);
     state.dropShadowEnabled = !!AppConfig.dropShadowEnabled;
     state.colorCorrectionEnabled = !!AppConfig.colorCorrectionEnabled;
     state.protectionEnabled = !!AppConfig.protectionEnabled;
@@ -887,7 +1104,7 @@ async function init() {
     initTheme();
     initDefaultSettings();
     initResizeHandles();
-initTabs();
+    initTabs();
     initFileToolModes();
     initWindowControls();
     initEdgeResize();
@@ -903,7 +1120,11 @@ initTabs();
     TokenEditor.init();
     initModelSelector();
     HotkeySettings.init();
+    initTraySettings();
+    initNetworkSettings();
     window.addEventListener('beforeunload', () => { AppConfig.flush(); urlManager.revokeAll(); });
+    // Флаг для tokenEmbed.js: сообщения моста можно обрабатывать
+    window.__APP_READY__ = true;
 }
 
 if (document.readyState === 'loading') {

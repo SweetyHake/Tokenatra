@@ -359,6 +359,9 @@ var TokenCanvas = {
             strokeCount: packed.length / 5,
             effectiveScale: effectiveScale,
             imageRotation: rotation,
+            // «Отображать скрытое»: ластик изображения режет скрытое
+            // содержимое (там розовая маска прозрачна) сквозь защиту
+            ghostOverride: !pink && !!state.showHidden,
             dirtyRect: dirtyRect
         }, [strokeBuf]);
     },
@@ -402,7 +405,9 @@ var TokenCanvas = {
     setCanvasScale: function(scale) {
         if (![1, 2, 3].includes(scale)) return;
         state.canvasScale = scale;
-        AppConfig.setCanvasScale(scale);
+        // Embed-инстанс (окно модуля Foundry) работает на «производительности»
+        // без перезаписи настройки основного приложения
+        if (!state.embed) AppConfig.setCanvasScale(scale);
         var sel = $('canvasScaleSelect');
         if (sel) sel.value = String(scale);
         this._applyCanvasSize();
@@ -636,6 +641,8 @@ var TokenCanvas = {
                 var r = this.canvas.getBoundingClientRect();
                 displaySide = r.width;
             }
+            // rect — visual-пиксели; дальше размер задаётся в layout-пикселях
+            displaySide = displaySide / (typeof uiZoom === 'function' ? uiZoom() : 1);
         }
         if (!displaySide) return;
         var pixelsPerInternalUnit = (displaySide / this.internalSize) * state.viewZoom;
@@ -644,10 +651,10 @@ var TokenCanvas = {
             ? 'rgba(100, 180, 255, 0.85)'
             : 'rgba(255, 100, 180, 0.85)';
         var st = this.eraserCursor.style;
-        // Позиция — через transform (композитор, без layout/paint); размер и
-        // цвет меняются только при зуме/смене режима — не дёргаем стили
-        // на каждом mousemove
-        st.transform = 'translate3d(' + e.clientX + 'px,' + e.clientY + 'px,0) translate(-50%,-50%)';
+        var zf = (typeof uiZoom === 'function') ? uiZoom() : 1;
+        // Позиция — через transform (композитор, без layout/paint); clientX
+        // в visual-пикселях, делим на uiZoom — transform живёт в layout-пикселях
+        st.transform = 'translate3d(' + (e.clientX / zf) + 'px,' + (e.clientY / zf) + 'px,0) translate(-50%,-50%)';
         if (displayDiameter !== this._cursorLastSize) {
             st.width = displayDiameter + 'px';
             st.height = displayDiameter + 'px';
@@ -796,6 +803,10 @@ var TokenCanvas = {
                 if (ringImage) {
                     cctx.drawImage(ringImage, ringOffset, ringOffset, ringSize, ringSize);
                 }
+                // Старая тень переживает патч (см. полный кадр ветки erasing)
+                if (state.dropShadowEnabled && this._shadowCache) {
+                    cctx.drawImage(this._shadowCache, 0, 0, this._shadowCache.width, this._shadowCache.height, 0, 0, size, size);
+                }
                 cctx.restore();
 
                 // Изображение с маской собираем в offscreen-канвасе и кладём
@@ -874,9 +885,13 @@ var TokenCanvas = {
                 tempCtx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
                 tempCtx.restore();
 
+                if (state.showHidden) this._snapHiddenSource(this._tempCanvas);
                 tempCtx.globalCompositeOperation = 'destination-in';
                 tempCtx.drawImage(state.maskCanvas, 0, 0, size, size, 0, 0, size, size);
                 tempCtx.globalCompositeOperation = 'source-over';
+                if (state.showHidden) {
+                    this._drawHiddenLayer(tempCtx, this._tempCanvas, state.maskCanvas, size, size, true);
+                }
 
                 // Полный кадр: в конце штриха или обычный рендер
                 this._strokeFullDirty = false;
@@ -888,6 +903,12 @@ var TokenCanvas = {
                     // кадр дорога, актуализируется на финальном кадре)
                     this.ctx.imageSmoothingEnabled = true;
                     this.ctx.imageSmoothingQuality = 'high';
+                    // Старая тень живёт весь штрих: рисуем устаревший кэш,
+                    // перерасчёт — только на отпускании (иначе токен «прыгает»
+                    // в момент касания)
+                    if (state.dropShadowEnabled && this._shadowCache) {
+                        this.ctx.drawImage(this._shadowCache, 0, 0, this._shadowCache.width, this._shadowCache.height, 0, 0, size, size);
+                    }
                     this.ctx.drawImage(this._tempCanvas, 0, 0);
                     if (state.showErasedZones && this._zonesCanvas) {
                         this.ctx.drawImage(this._zonesCanvas, 0, 0);
@@ -1147,6 +1168,8 @@ var TokenCanvas = {
             maskForSave.height = scale3Size;
             maskForSave.getContext('2d').drawImage(state.maskCanvas, 0, 0, internalSize, internalSize, 0, 0, scale3Size, scale3Size);
 
+            // «Отображать скрытое» — только редакторный оверлей: в сохранённый
+            // файл идёт строго замаскированный токен, без призрака и примера
             tempCtx.globalCompositeOperation = 'destination-in';
             tempCtx.drawImage(maskForSave, 0, 0);
             tempCtx.globalCompositeOperation = 'source-over';
@@ -1170,7 +1193,7 @@ var TokenCanvas = {
         croppedCtx.imageSmoothingQuality = 'high';
         croppedCtx.drawImage(fullRender, cropOffset, cropOffset, finalSize, finalSize, 0, 0, finalSize, finalSize);
 
-        return { canvas: croppedCanvas, finalSize: finalSize };
+        return { canvas: croppedCanvas, finalSize: finalSize, usedScale: usedScale };
     },
 
     detectUsedScale: function() {
@@ -1491,6 +1514,20 @@ var TokenCanvas = {
                 imgBrush.fullSize * effectiveScale,
                 0, 0, imgBrush.fullSize, imgBrush.fullSize
             );
+            // «Отображать скрытое»: защита остаётся только над видимым
+            // токеном (розовая маска непрозрачна) — скрытое режется свободно
+            if (state.showHidden) {
+                psCtx.globalCompositeOperation = 'destination-in';
+                psCtx.drawImage(
+                    state.maskCanvas,
+                    cx - protHalf * effectiveScale,
+                    cy - protHalf * effectiveScale,
+                    imgBrush.fullSize * effectiveScale,
+                    imgBrush.fullSize * effectiveScale,
+                    0, 0, imgBrush.fullSize, imgBrush.fullSize
+                );
+                psCtx.globalCompositeOperation = 'source-over';
+            }
             psCtx.restore();
 
             workCtx.globalCompositeOperation = 'destination-out';
@@ -1595,8 +1632,8 @@ var TokenCanvas = {
         this._strokeFullDirty = true;
         this._strokeChanged = false;
 
-        // Эффекты (тень) держим выключенными на весь штрих — включаем
-        // обратно в stopErasing(), без перезапуска таймера на каждый кадр
+        // Эффекты (тень) на штрих НЕ пересчитываем — весь штрих рисуется со
+        // старым кэшем тени, перерасчёт и возврат эффектов в stopErasing()
         state.effectsEnabled = false;
         if (state.effectsTimeout) {
             clearTimeout(state.effectsTimeout);
@@ -1849,11 +1886,6 @@ var TokenCanvas = {
     loadImage: function(file, filePath) {
         var self = this;
 
-        var prevScale = state.userImage ? state.imageScale : null;
-        var prevX = state.userImage ? state.imageX : null;
-        var prevY = state.userImage ? state.imageY : null;
-        var prevRotation = state.userImage ? state.imageRotation : null;
-
         urlManager.revoke('userImage');
         state.userImageUrl = null;
 
@@ -1870,13 +1902,11 @@ var TokenCanvas = {
         this._clearCanvasCache();
 
         if (state.maskCanvas) {
-            var mCtx = state.maskCanvas.getContext('2d');
-            mCtx.clearRect(0, 0, state.maskCanvas.width, state.maskCanvas.height);
+            state.maskCanvas.width = 0; state.maskCanvas.height = 0; // отпускаем GPU-текстуру сразу
             state.maskCanvas = null;
         }
         if (state.imageMaskCanvas) {
-            var imCtx = state.imageMaskCanvas.getContext('2d');
-            imCtx.clearRect(0, 0, state.imageMaskCanvas.width, state.imageMaskCanvas.height);
+            state.imageMaskCanvas.width = 0; state.imageMaskCanvas.height = 0;
             state.imageMaskCanvas = null;
         }
 
@@ -1907,21 +1937,10 @@ var TokenCanvas = {
             state.showingOriginal = false;
             TokenEditor.updateRemoveBgButton();
 
-            if (prevScale !== null) {
-                state.imageScale = prevScale;
-                state.imageX = prevX;
-                state.imageY = prevY;
-                state.imageRotation = prevRotation;
-            } else {
-                var internalSize = self.internalSize;
-                var scale = internalSize / 1024;
-                var maxDisplayPx = CONFIG.SCALE_SIZES[1] * scale;
-                var imgMaxDim = Math.max(finalImg.width, finalImg.height);
-                state.imageScale = (maxDisplayPx / imgMaxDim) / scale;
-                state.imageX = 0;
-                state.imageY = 0;
-                state.imageRotation = 0;
-            }
+            // Каждый импорт равномерно вписывает изображение в границы
+            // масштаба 1x (логический канвас 1024): крупное уменьшается,
+            // мелкое растягивается; позиция — по центру, поворот — 0
+            self.fitToFrame();
 
             self.updateScaleUI();
             self.updateRotationUI();
@@ -1949,12 +1968,85 @@ var TokenCanvas = {
             if (saveWithRing) saveWithRing.disabled = false;
 
             TokenEditor.updateNavState();
+
+            // Предпросмотр коррекции масштаба в «Экспорте» зависит от картинки
+            if (typeof window.updateSaveHint === 'function') {
+                window.updateSaveHint(
+                    $('saveQualitySelect') ? $('saveQualitySelect').value : 512,
+                    $('saveScaleSelect') ? $('saveScaleSelect').value : 'auto');
+            }
         };
         img.onerror = function() {
             urlManager.revoke('userImage-decode');
             toast('Не удалось прочитать изображение', true);
         };
         img.src = decodeUrl;
+    },
+
+    // Снимок композита ДО обрезки маской — источник слоя скрытых частей
+    _snapHiddenSource: function(canvas) {
+        var src = this._hiddenSrc;
+        if (!src) src = this._hiddenSrc = document.createElement('canvas');
+        if (src.width !== canvas.width || src.height !== canvas.height) { src.width = canvas.width; src.height = canvas.height; }
+        var sc = src.getContext('2d');
+        sc.globalCompositeOperation = 'source-over';
+        sc.clearRect(0, 0, src.width, src.height);
+        sc.drawImage(canvas, 0, 0);
+    },
+
+    // «Отображать скрытое»: скрытые маской области не убираются, а
+    // рисуются поверх с прозрачностью 20%. mask/mw/mh — маска в пикселях
+    // целевого канваса. tinted — оранжевая подкраска призрака; вызывается
+    // ТОЛЬКО из редакторского рендера — в экспорт слой не попадает.
+    _drawHiddenLayer: function(ctx, canvas, mask, mw, mh, tinted) {
+        var w = canvas.width, h = canvas.height;
+        // инвертированная маска: непрозрачна там, где скрыто
+        var inv = this._hiddenInvMask;
+        if (!inv) inv = this._hiddenInvMask = document.createElement('canvas');
+        if (inv.width !== mw || inv.height !== mh) { inv.width = mw; inv.height = mh; }
+        var ic = inv.getContext('2d');
+        ic.globalCompositeOperation = 'source-over';
+        ic.clearRect(0, 0, mw, mh);
+        ic.fillStyle = '#ffffff';
+        ic.fillRect(0, 0, mw, mh);
+        ic.globalCompositeOperation = 'destination-out';
+        ic.drawImage(mask, 0, 0, w, h, 0, 0, mw, mh);
+        // слой скрытых частей — из снимка композита, снятого ДО обрезки маской
+        var layer = this._hiddenLayer;
+        if (!layer) layer = this._hiddenLayer = document.createElement('canvas');
+        if (layer.width !== w || layer.height !== h) { layer.width = w; layer.height = h; }
+        var lc = layer.getContext('2d');
+        lc.globalCompositeOperation = 'source-over';
+        lc.clearRect(0, 0, w, h);
+        lc.drawImage(this._hiddenSrc, 0, 0);
+        lc.globalCompositeOperation = 'destination-in';
+        lc.drawImage(inv, 0, 0, w, h);
+        // лёгкая оранжевая подкраска (фирменный --accent #ff9800): серый
+        // призрак 20% сам по себе малозаметен
+        if (tinted) {
+            lc.globalCompositeOperation = 'source-atop';
+            lc.fillStyle = 'rgba(255, 152, 0, 0.55)';
+            lc.fillRect(0, 0, w, h);
+        }
+        ctx.globalAlpha = 0.2;
+        ctx.drawImage(layer, 0, 0);
+        ctx.globalAlpha = 1;
+    },
+
+    // Равномерно вписать изображение в границы масштаба 1x
+    // (логический канвас 1024): центр, без поворота
+    fitToFrame: function() {
+        if (!state.userImage) return;
+        var imgMaxDim = Math.max(state.userImage.width, state.userImage.height);
+        state.imageScale = Math.min(
+            CONFIG.MAX_SCALE / 100,
+            Math.max(CONFIG.MIN_SCALE / 100, 1024 / imgMaxDim)
+        );
+        state.imageX = 0;
+        state.imageY = 0;
+        state.imageRotation = 0;
+        this.updateScaleUI();
+        this.updateRotationUI();
     },
 
     _capImage: function(img) {
@@ -1994,24 +2086,26 @@ var TokenCanvas = {
     },
 
     _clearCanvasCache: function() {
-        this._compositedImageCache = null;
-        this._shadowCache = null;
-        this._zonesCanvas = null;
-        this._protectionOverlayCache = null;
+        // Обнуляем размеры больших канвасов: null сам по себе не отпускает
+        // GPU-текстуры до сборки мусора — VRAM росла с каждой фотографией
+        var self = this;
+        ['_compositedImageCache', '_shadowCache', '_zonesCanvas', '_protectionOverlayCache',
+         '_ccImageCache', '_hiddenSrc', '_hiddenLayer', '_hiddenInvMask', '_imageBrushCache',
+         '_zoneInvMask', '_zoneBlueTemp', '_zoneInvScaled', '_zonePinkLayer', '_zoneInvImgMask'
+        ].forEach(function(k) {
+            if (self[k]) { self[k].width = 1; self[k].height = 1; self[k] = null; }
+        });
         this._protectionOverlayDirty = true;
         this._zoneHelpersDirty = true;
         this._compositedImageDirty = true;
         this._ccDirty = true;
         this._shadowDirty = true;
         this._zonesDirty = true;
-        this._imageBrushCache = null;
         this._imageBrushCacheSize = -1;
         this._workerQueues.pink = [];
         this._workerQueues.image = [];
         if (this._workerBatchTimer) clearTimeout(this._workerBatchTimer);
         this._workerBatchTimer = null;
-        this._ccImageCache = null;
-        this._ccCacheKey = null;
         this._deferCC = false;
         this._strokeDirtyRect = null;
         this._strokeFullDirty = false;

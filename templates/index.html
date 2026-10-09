@@ -3,6 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        // Embed-режим (окно модуля FoundryVTT): класс на <html> до первого
+        // рендера — без мигания хрома. Мост активен только с валидным
+        // localhost-origin (см. tokenEmbed.js)
+        (function() {
+            if (!/[?&]embed=1\b/.test(location.search)) return;
+            var o = '';
+            try { o = new URLSearchParams(location.search).get('origin') || ''; } catch (e) {}
+            window.__EMBED__ = { embed: true, parentOrigin: o };
+            window.__EMBED_ALLOWED__ = {{ embed_allowed|tojson }};
+            document.documentElement.classList.add('embed');
+        })();
+    </script>
     <title>Tokenatra</title>
     <link rel="icon" href="/icon" type="image/x-icon">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -98,6 +111,7 @@
                             <label class="display-option"><input type="checkbox" id="protectionEnabledCheck"><span>Область защиты</span></label>
                             <label class="display-option"><input type="checkbox" id="showZonesCheck"><span>Отображать маску</span></label>
                             <label class="display-option"><input type="checkbox" id="showBordersCheck"><span>Отображать границы</span></label>
+                        <label class="display-option"><input type="checkbox" id="showHiddenCheck"><span>Отображать скрытое</span></label>
                         </div>
                     </div>
                     <div class="ctx-divider"></div>
@@ -140,7 +154,7 @@
                     </div>
                     <div class="accordion-body open" id="transformBody">
                         <div class="transform-row">
-                            <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="scaleSlider" min="10" max="300" step="1" value="100"><input type="number" id="scaleInput" class="slider-number" value="100" min="10" max="300"><span class="slider-unit">%</span></div>
+                            <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="scaleSlider" min="10" max="500" step="1" value="100"><input type="number" id="scaleInput" class="slider-number" value="100" min="10" max="500"><span class="slider-unit">%</span></div>
                             <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="rotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="rotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
                         </div>
                     </div>
@@ -157,7 +171,7 @@
                         </div>
                     </div>
                     <div class="accordion-body example-settings" id="exampleSettings">
-                        <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="exampleOpacitySlider" min="0" max="100" step="1" value="50"><span class="slider-value" id="exampleOpacityVal">50</span><span class="slider-unit">%</span></div>
+                        <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="exampleOpacitySlider" min="0" max="100" step="1" value="50"><input type="number" class="slider-value" id="exampleOpacityVal" value="50" min="0" max="100" step="1"><span class="slider-unit">%</span></div>
                         <div class="field-row field-row-compact"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="exampleScaleSelect"><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option></select></div>
                         <div class="field-row field-row-compact">
                             <span class="field-row-label field-row-label-tiny">Файл:</span>
@@ -227,10 +241,10 @@
                             </div>
                         </div>
                         <div class="accordion-body" id="dropShadowSettings">
-                            <div class="slider-row"><span class="slider-label">Угол</span><input type="range" id="shadowAngle" min="-180" max="180" step="1" value="-45"><span class="slider-value" id="shadowAngleVal">-45</span><span class="slider-unit">°</span></div>
-                            <div class="slider-row"><span class="slider-label">Смещение</span><input type="range" id="shadowDistance" min="0" max="50" step="1" value="10"><span class="slider-value" id="shadowDistanceVal">10</span><span class="slider-unit">px</span></div>
-                            <div class="slider-row"><span class="slider-label">Размытие</span><input type="range" id="shadowBlur" min="0" max="40" step="1" value="10"><span class="slider-value" id="shadowBlurVal">10</span><span class="slider-unit">px</span></div>
-                            <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="shadowOpacity" min="0" max="100" step="1" value="75"><span class="slider-value" id="shadowOpacityVal">75</span><span class="slider-unit">%</span></div>
+                            <div class="slider-row"><span class="slider-label">Угол</span><input type="range" id="shadowAngle" min="-180" max="180" step="1" value="-45"><input type="number" class="slider-value" id="shadowAngleVal" value="-45" min="-180" max="180" step="1"><span class="slider-unit">°</span></div>
+                            <div class="slider-row"><span class="slider-label">Смещение</span><input type="range" id="shadowDistance" min="0" max="50" step="1" value="10"><input type="number" class="slider-value" id="shadowDistanceVal" value="10" min="0" max="50" step="1"><span class="slider-unit">px</span></div>
+                            <div class="slider-row"><span class="slider-label">Размытие</span><input type="range" id="shadowBlur" min="0" max="40" step="1" value="10"><input type="number" class="slider-value" id="shadowBlurVal" value="10" min="0" max="40" step="1"><span class="slider-unit">px</span></div>
+                            <div class="slider-row"><span class="slider-label">Прозрачность</span><input type="range" id="shadowOpacity" min="0" max="100" step="1" value="75"><input type="number" class="slider-value" id="shadowOpacityVal" value="75" min="0" max="100" step="1"><span class="slider-unit">%</span></div>
                         </div>
 
                         <div class="ctx-divider"></div>
@@ -247,8 +261,8 @@
                             </div>
                         </div>
                         <div class="accordion-body" id="colorCorrectionSettings">
-                            <div class="slider-row"><span class="slider-label">Насыщенность</span><input type="range" id="ccSaturation" min="-100" max="100" step="1" value="5"><span class="slider-value" id="ccSaturationVal">5</span><span class="slider-unit">%</span></div>
-                            <div class="slider-row"><span class="slider-label">Яркость</span><input type="range" id="ccLightness" min="-100" max="100" step="1" value="-5"><span class="slider-value" id="ccLightnessVal">-5</span><span class="slider-unit">%</span></div>
+                            <div class="slider-row"><span class="slider-label">Насыщенность</span><input type="range" id="ccSaturation" min="-100" max="100" step="1" value="5"><input type="number" class="slider-value" id="ccSaturationVal" value="5" min="-100" max="100" step="1"><span class="slider-unit">%</span></div>
+                            <div class="slider-row"><span class="slider-label">Яркость</span><input type="range" id="ccLightness" min="-100" max="100" step="1" value="-5"><input type="number" class="slider-value" id="ccLightnessVal" value="-5" min="-100" max="100" step="1"><span class="slider-unit">%</span></div>
                         </div>
 
                         <div class="ctx-divider"></div>
@@ -266,6 +280,7 @@
                         <div class="accordion-body" id="portraitSettings">
                             <div class="portrait-canvas-wrap"><canvas id="portraitCanvas"></canvas></div>
                             <div class="portrait-controls">
+                                <div class="field-row"><span class="field-row-label">Размер:</span><select class="compact-select" id="portraitSizeSelect"><option value="512">512px</option><option value="1024" selected>1024px</option><option value="2048">2048px</option><option value="4096">4096px</option></select></div>
                                 <div class="slider-row"><span class="slider-label">Масштаб</span><input type="range" id="portraitScaleSlider" min="10" max="500" step="1" value="100"><input type="number" id="portraitScaleInput" class="slider-number" value="100" min="10" max="500"><span class="slider-unit">%</span></div>
                                 <div class="slider-row"><span class="slider-label">Поворот</span><input type="range" id="portraitRotationSlider" min="-180" max="180" step="1" value="0"><input type="number" id="portraitRotationInput" class="slider-number" value="0" min="-180" max="180"><span class="slider-unit">°</span></div>
                                 <div class="toggle-row toggle-row-mt">
@@ -279,8 +294,6 @@
                                 <button class="save-action primary save-action-block" id="portraitSaveBtn"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>Сохранить</button>
                             </div>
                         </div>
-
-                        <div class="ctx-divider"></div>
 
                         <div class="editor-export-section">
                         <div class="accordion-header" id="exportAccordion" role="button" tabindex="0" aria-expanded="true" aria-controls="exportBody">
@@ -498,18 +511,18 @@
                                 </div>
                             </div>
                             <div class="settings-group">
-                                <div class="model-status" id="modelStatus" aria-live="polite">
-                                    <span class="model-status-dot"></span>
-                                    <span id="modelStatusText">Проверка модели…</span>
-                                    <span id="modelSizeLabel" class="model-size-label"></span>
-                                </div>
                                     <div class="field-row"><span class="field-row-label">Модель:</span><select class="compact-select" id="modelSelect" disabled><option>Загрузка…</option></select></div>
-                                <div class="settings-model-path"><span class="field-row-label">Папка models</span><span id="modelsDirLabel" class="models-dir-label"></span></div>
                                 <div class="model-actions">
-                                    <button class="ghost-btn model-action-btn" id="downloadModelBtn" type="button">
-                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
-                                        Загрузить модель с сервера
-                                    </button>
+                                    <div class="model-actions-row">
+                                        <button class="ghost-btn model-action-btn" id="downloadModelLiteBtn" type="button">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+                                            Легковесная
+                                        </button>
+                                        <button class="ghost-btn model-action-btn" id="downloadModelBtn" type="button">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+                                            Полная
+                                        </button>
+                                    </div>
                                     <button class="accent-btn model-action-btn" id="loadModelDiskBtn" type="button">
                                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg>
                                         Загрузить модель с диска
@@ -531,10 +544,43 @@
                             <div class="settings-group">
                                  <div class="field-row"><span class="field-row-label">Размер холста:</span><select class="compact-select" id="canvasScaleSelect"><option value="1">Производительность</option><option value="2" selected>Баланс</option><option value="3">Качество</option></select></div>
                                  <div class="field-row"><span class="field-row-label">История отмен:</span><select class="compact-select" id="historyLimitSelect"><option value="10">10 шагов</option><option value="20">20 шагов</option><option value="30" selected>30 шагов</option><option value="50">50 шагов</option><option value="100">100 шагов</option></select></div>
-                                <p class="settings-card-hint">Больший размер даёт больше деталей при работе, но требует больше памяти. На экспортируемое изображение это не влияет — экспорт всегда выполняется в полном разрешении.</p>
-                                <p class="settings-card-hint">Больше шагов отмены — больше расход памяти. Применяется к новым записям истории.</p>
                             </div>
-</section>
+                        </section>
+
+                        <section class="settings-card" id="traySettingsCard" data-windows-only>
+                            <div class="settings-card-heading">
+                                <span class="settings-card-icon">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v10H3z"/><path d="M8 19h3M13 19h3M3 15h18v4H3z"/></svg>
+                                </span>
+                                <div>
+                                    <span class="settings-card-kicker">ТРЕЙ</span>
+                                    <h3>Трей и память</h3>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                 <label class="display-option"><input type="checkbox" id="closeToTrayCheck"><span>Сворачивать в трей при закрытии</span></label>
+                                 <div class="field-row"><span class="field-row-label">Выгружать модель в простое:</span><select class="compact-select" id="trayIdleSelect"><option value="0">Никогда</option><option value="1">Через 1 мин</option><option value="3">Через 3 мин</option><option value="5" selected>Через 5 мин</option><option value="10">Через 10 мин</option><option value="30">Через 30 мин</option></select></div>
+                            </div>
+                        </section>
+
+                        <section class="settings-card" id="networkSettingsCard">
+                            <div class="settings-card-heading">
+                                <span class="settings-card-icon">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3Z"/></svg>
+                                </span>
+                                <div>
+                                    <span class="settings-card-kicker">СЕТЬ</span>
+                                    <h3>Доступ для игроков</h3>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                <label class="display-option"><input type="checkbox" id="allowBrowserCheck" checked><span>Разрешить подключения из браузера</span></label>
+                                <label class="display-option"><input type="checkbox" id="allowRemoteCheck"><span>Разрешить подключения из сети (LAN)</span></label>
+                                <div class="model-actions">
+                                    <button class="ghost-btn model-action-btn" id="copyAccessInfoBtn" type="button">Копировать адрес для подключений</button>
+                                </div>
+                            </div>
+                        </section>
 
                         <div class="settings-card-pair">
                         <section class="settings-card">
@@ -543,13 +589,14 @@
                                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.2 2.4 3.3 5.4 3.3 9S14.2 18.6 12 21c-2.2-2.4-3.3-5.4-3.3-9S9.8 5.4 12 3Z"/></svg>
                                 </span>
                                 <div>
-                                    <span class="settings-card-kicker">ЯЗЫК</span>
-                                    <h3>Язык интерфейса</h3>
+                                    <span class="settings-card-kicker">ИНТЕРФЕЙС</span>
+                                    <h3>Интерфейс</h3>
                                 </div>
                             </div>
                             <div class="settings-group">
                                  <div class="field-row"><span class="field-row-label">Язык:</span><select class="compact-select" id="languageSelect"><option value="system">Как в системе</option><option value="ru">Русский</option><option value="en">English</option></select></div>
-                                <p class="settings-card-hint">Выберите язык интерфейса приложения.</p>
+                                 <div class="field-row"><span class="field-row-label">Масштаб:</span><select class="compact-select" id="uiScaleSelect"><option value="0.5">50%</option><option value="0.75">75%</option><option value="0.9">90%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="1.5">150%</option></select></div>
+                                <p class="settings-card-hint">Выберите язык и масштаб интерфейса приложения.</p>
                             </div>
                         </section>
 
@@ -566,8 +613,7 @@
                             <div class="settings-save-right">
                                 <div class="settings-save-fields">
                                      <div class="field-row"><span class="field-row-label">Размер токена:</span><select class="compact-select" id="defQualitySelect"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select></div>
-                                     <div class="field-row"><span class="field-row-label">Формат пакетной обработки:</span><select class="compact-select" id="defRemoverFormat"><option value="webp">WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option><option value="avif">AVIF</option></select></div>
-                                     <div class="field-row"><span class="field-row-label">Формат токена:</span><select class="compact-select" id="tokenFormatSelect"><option value="webp" selected>WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option></select></div>
+                                     <div class="field-row"><span class="field-row-label">Формат:</span><select class="compact-select" id="defFormatSelect"><option value="webp" selected>WEBP</option><option value="png">PNG</option><option value="jpg">JPG</option><option value="avif">AVIF</option></select></div>
                                 </div>
                                 <div class="settings-quality-row">
                                      <span class="field-row-label">Качество токена (WebP/JPG):</span>
@@ -768,7 +814,9 @@
 <script src="{{ url_for('static', filename='js/hotkeySettings.js', v=__version__) }}"></script>
 <script src="{{ url_for('static', filename='js/remover.js', v=__version__) }}"></script>
 <script src="{{ url_for('static', filename='js/converter.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/tokenEmbed.js', v=__version__) }}"></script>
 <script src="{{ url_for('static', filename='js/main.js', v=__version__) }}"></script>
+<script src="{{ url_for('static', filename='js/tokenTray.js', v=__version__) }}"></script>
 <script>
     document.getElementById('saveQualitySelect').addEventListener('change', function() {
         updateSaveHint(this.value, document.getElementById('saveScaleSelect').value);
@@ -782,11 +830,14 @@
         const hint = document.getElementById('saveInfoHint');
         if (!hint) return;
         quality = parseInt(quality);
+        // Предпросмотр коррекции масштаба: при «Авто» — распознанное значение
+        const eff = scale === 'auto' ? (window.TokenCanvas ? TokenCanvas.detectUsedScale() : 1) : parseInt(scale);
+        const tag = '(' + I18n.t('Масштаб:') + ' ' + eff + ')';
         if (scale === 'auto') {
-            hint.textContent = I18n.t('Масштаб подбирается автоматически по размеру изображения на холсте');
+            hint.textContent = I18n.t('Масштаб подбирается автоматически по размеру изображения на холсте') + ' ' + tag;
         } else {
             const s = parseInt(scale);
-            hint.textContent = I18n.t(quality + 'px × ' + s + ' = ' + (quality * s) + 'px итоговый файл');
+            hint.textContent = I18n.t(quality + 'px × ' + s + ' = ' + (quality * s) + 'px итоговый файл') + ' ' + tag;
         }
     }
     document.addEventListener('languagechange', function() {

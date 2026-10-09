@@ -93,6 +93,23 @@ function setSliderFill(el) {
     el.style.setProperty('--p', ((val - min) / range * 100) + '%');
 }
 
+// Ручной ввод значения слайдера: применяет число из инпута к слайдеру
+// (с клампом и округлением по step) через штатный oninput слайдера
+function bindSliderValueInput(slider, input) {
+    if (!slider || !input) return;
+    input.addEventListener('change', () => {
+        const min = parseFloat(slider.min), max = parseFloat(slider.max);
+        const step = parseFloat(slider.step) || 1;
+        let v = parseFloat(String(input.value).replace(',', '.'));
+        if (isNaN(v)) { input.value = slider.value; return; }
+        v = clamp(Math.round(v / step) * step, min, max);
+        slider.value = v;
+        slider.dispatchEvent(new Event('input'));
+    });
+    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); } });
+    input.addEventListener('wheel', ev => ev.preventDefault(), { passive: false });
+}
+
 async function saveFileWithPicker(blob, suggestedName) {
     const fd = new FormData();
     fd.append('file', blob, suggestedName);
@@ -119,6 +136,13 @@ async function pickFolder() {
         toast('Ошибка выбора папки', true);
         return null;
     }
+}
+
+// Текущий CSS-zoom интерфейса: координаты в visual-пикселях (clientX,
+// getBoundingClientRect) при записи в style.left/top/transform нужно
+// делить на него — иначе при масштабе != 100% всплывающие элементы уезжают
+function uiZoom() {
+    return parseFloat(document.documentElement.style.zoom) || 1;
 }
 
 function initTooltips() {
@@ -149,11 +173,13 @@ function initTooltips() {
         document.body.appendChild(el);
         requestAnimationFrame(function() {
             if (!el || el._target !== target) return;
+            var zf = uiZoom();
             var rect = target.getBoundingClientRect();
-            var top = rect.top - 6 - el.offsetHeight;
+            var top = rect.top - 6 - el.offsetHeight * zf;
             if (top < 4) top = rect.bottom + 6;
-            el.style.left = Math.max(4, Math.min(rect.left + rect.width / 2 - el.offsetWidth / 2, window.innerWidth - el.offsetWidth - 4)) + 'px';
-            el.style.top = top + 'px';
+            var leftV = Math.max(4, Math.min(rect.left + rect.width / 2 - el.offsetWidth * zf / 2, window.innerWidth - el.offsetWidth * zf - 4));
+            el.style.left = (leftV / zf) + 'px';
+            el.style.top = (top / zf) + 'px';
             el.classList.add('show');
         });
     }, false);

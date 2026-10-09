@@ -3,6 +3,8 @@ const PortraitGenerator = {
     ctx: null,
     SIZE: 2048,
     DISPLAY_SIZE: 480,
+    SIZES: [512, 1024, 2048, 4096],
+    saveSize: null,
 
     imageX: 0,
     imageY: 0,
@@ -95,6 +97,9 @@ const PortraitGenerator = {
 
         const saveBtn = $('portraitSaveBtn');
         if (saveBtn) saveBtn.onclick = () => this.save();
+
+        const sizeSelect = $('portraitSizeSelect');
+        if (sizeSelect) sizeSelect.onchange = e => { this.saveSize = parseInt(e.target.value); };
 
         const qsCheck = $('portraitQuickSaveCheck');
         if (qsCheck) {
@@ -235,8 +240,20 @@ const PortraitGenerator = {
         this.ctx.restore();
     },
 
+    // Размер сохранения по умолчанию — ближайший к большей стороне загруженного изображения
+    _autoSize() {
+        const img = this.getImage();
+        if (!img) return 1024;
+        const maxDim = Math.max(img.width, img.height);
+        let best = this.SIZES[0];
+        for (const s of this.SIZES) {
+            if (Math.abs(s - maxDim) < Math.abs(best - maxDim)) best = s;
+        }
+        return best;
+    },
+
     renderForSave() {
-        const quality = state.saveQuality || 512;
+        const quality = this.saveSize || this._autoSize();
         const out = document.createElement('canvas');
         out.width = quality;
         out.height = quality;
@@ -290,6 +307,9 @@ const PortraitGenerator = {
     },
 
     onImageLoaded() {
+        this.saveSize = this._autoSize();
+        const sizeSelect = $('portraitSizeSelect');
+        if (sizeSelect) sizeSelect.value = this.saveSize;
         this.resetTransform();
     },
 

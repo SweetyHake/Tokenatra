@@ -1,6 +1,9 @@
 const Remover = {
     init() {
         this.setupDeviceInfo();
+        // Hosted-студия: связь с Tokenatra появилась после 'none' —
+        // переопрашиваем бейдж устройства
+        window.addEventListener('tokenatra:conn', () => this.setupDeviceInfo());
         this.setupFormatControls();
         this.setupDropzone();
         this.setupResultsControls();
@@ -331,6 +334,11 @@ const Remover = {
             btnWrap.appendChild(copyBtn);
             btnWrap.appendChild(editBtn);
             btnWrap.appendChild(dlBtn);
+            // Embed-режим: прямая отправка готового результата в Foundry
+            if (window.__EMBED__ && window.__EMBED__.embed && typeof TokenEmbed !== 'undefined'
+                    && typeof TokenEmbed.createRemoverButton === 'function') {
+                btnWrap.appendChild(TokenEmbed.createRemoverButton(id));
+            }
 
             info.innerHTML = '';
             info.appendChild(infoText);
