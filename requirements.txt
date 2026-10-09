@@ -6,3 +6,4 @@ psutil
 imageio-ffmpeg
 onnxruntime-directml; sys_platform == 'win32'
 onnxruntime; sys_platform != 'win32'
+pystray; sys_platform == 'win32'

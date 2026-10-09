@@ -33,7 +33,14 @@ def terminate_process(pid: int) -> bool:
     try:
         if sys.platform == "win32":
             import subprocess
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, check=False)
+            # CREATE_NO_WINDOW: windowed-exe без этого флага вспыхивает окном
+            # терминала (kill прошлого экземпляра по app.pid при каждом старте)
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True,
+                check=False,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
         else:
             os.kill(pid, signal.SIGTERM)
         return True

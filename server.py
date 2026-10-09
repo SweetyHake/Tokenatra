@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,7 @@ from pathlib import Path
 from flask import Flask, request, render_template, jsonify, send_file, current_app
 from PIL import Image, ImageFilter, ImageDraw
 import onnxruntime as ort
-from version import __version__, APP_NAME, GITHUB_REPO, MODEL_DOWNLOAD_URL
+from version import __version__, APP_NAME, GITHUB_REPO, MODEL_DOWNLOAD_URL, MODEL_DOWNLOAD_URL_LITE
 from platform_utils import user_data_dir
 from updater import (
     get_status as updater_status,
@@ -67,18 +68,231 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 
+# ===== Интеграция с FoundryVTT (модуль-коннектор) =====
+# Роуты, доступные кросс-сайтово с Origin localhost-семейства (Foundry на той
+# же машине, любой порт). Остальные роуты остаются строго same-origin.
+CONNECTOR_API_VERSION = 1
+CONNECTOR_ROUTES = {'/health', '/process', '/version', '/device', '/models_list', '/embed_export'}
+CONNECTOR_ROUTE_PREFIXES = ('/embed_export/',)
+
+# Публичный сценарий (Foundry за прокси, игроки из интернета): non-local
+# запросы с валидным секретом пускаются ТОЛЬКО на эти роуты — UI студии и
+# инференс, но не управление приложением (/shutdown, /apply_update, /api/window).
+PUBLIC_PROXY_ROUTES = CONNECTOR_ROUTES | {
+    '/icon', '/logo', '/mask', '/ring', '/example',
+    '/presets_list', '/rings_list', '/models_list',
+}
+# /config НАМЕРЕННО не в списке: GET отдал бы shared_secret, POST позволил бы
+# игроку переписать конфиг — embed-UI в публичном режиме живёт на дефолтах.
+PUBLIC_PROXY_ROUTE_PREFIXES = CONNECTOR_ROUTE_PREFIXES + ('/static/', '/preset_file/', '/ring_file/')
+
+# Читается без ключа: статика UI и ассеты (первая навигация iframe ещё без
+# cookie — она ставится ответом на /?embed=1&key=…)
+PUBLIC_OPEN_EXACT = {'/', '/splash', '/icon', '/logo', '/mask', '/ring', '/example',
+                     '/presets_list', '/rings_list'}
+PUBLIC_OPEN_PREFIXES = ('/static/', '/preset_file/', '/ring_file/')
+
+
+def _is_connector_route():
+    path = request.path
+    return path in CONNECTOR_ROUTES or any(path.startswith(p) for p in CONNECTOR_ROUTE_PREFIXES)
+
+
+def _is_public_proxy_route():
+    path = request.path
+    if path in PUBLIC_PROXY_ROUTES:
+        return True
+    return any(path.startswith(p) for p in PUBLIC_PROXY_ROUTE_PREFIXES)
+
+
+def _localhost_host_name(host):
+    """'localhost:30000'/'[::1]:5' → 'localhost'/'::1' (порт отбрасывается)."""
+    host = (host or '').lower().strip()
+    if host.startswith('['):
+        return host[1:host.index(']')] if ']' in host else host.lstrip('[')
+    return host.rsplit(':', 1)[0]
+
+
+def _shared_secret():
+    try:
+        v = (_load_config() or {}).get('shared_secret')
+    except Exception:
+        return ''
+    return v.strip() if isinstance(v, str) else ''
+
+
+def _allowed_hosts():
+    try:
+        raw = (_load_config() or {}).get('allowed_hosts') or []
+    except Exception:
+        return []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            out.append(item.strip().lower().rstrip('/'))
+    return out
+
+
+def _network_mode():
+    """Сетевой режим: слушаем все интерфейсы И принимаем не-localhost Host.
+    Управляется тумблером «Разрешить подключения из сети» (listen_host)."""
+    return listen_host() == '0.0.0.0'
+
+
+def listen_host():
+    """Адрес привязки сервера: '127.0.0.1' по умолчанию; '0.0.0.0' — прямой
+    доступ из LAN. Меняется ТОЛЬКО перезапуском приложения."""
+    try:
+        h = (_load_config() or {}).get('listen_host')
+    except Exception:
+        return '127.0.0.1'
+    return h if h in ('127.0.0.1', '0.0.0.0') else '127.0.0.1'
+
+
+def _allow_browser():
+    """«Разрешить подключения из браузера»: любой сайт может пользоваться
+    студией из Foundry (чтение роутов-коннектора, статика, /config, /process).
+    Системные роуты (/shutdown, /apply_update, /api/window, /save_to_folder)
+    и ключи безопасности — нет. По умолчанию ВКЛ."""
+    try:
+        v = (_load_config() or {}).get('allow_browser')
+    except Exception:
+        return True
+    return v is not False
+
+
+def _supplied_secret():
+    """Секрет из заголовка, query (?key=…) или куки (ставится при загрузке
+    embed-страницы — same-доменные подзапросы iframe идут без заголовков)."""
+    key = request.headers.get('X-Tokenatra-Key', '')
+    if not key:
+        key = request.args.get('key', '')
+    if not key:
+        key = request.cookies.get('tokenatra_key', '')
+    return key.strip()
+
+
+def _request_key_valid():
+    secret = _shared_secret()
+    supplied = _supplied_secret()
+    if not secret or not supplied:
+        return False
+    try:
+        return secrets.compare_digest(supplied, secret)
+    except Exception:
+        return False
+
+
+def _allowed_origins():
+    """Явно разрешённые кросс-сайтовые Origin (config allowed_origins, список
+    строк 'https://host[:port]') — сценарий «Foundry за доменом/прокси».
+    Нормализация: нижний регистр, без хвостового слэша."""
+    try:
+        raw = (_load_config() or {}).get('allowed_origins') or []
+    except Exception:
+        return []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        o = item.strip().rstrip('/').lower()
+        if o:
+            out.append(o)
+    return out
+
+
+def _is_ui_asset_path():
+    """Читаемые GET-пути UI (страница, статика, ассеты) — их отдают
+    разрешённым Origin для сборки hosted-студии."""
+    p = request.path
+    return (p == '/' or p in PUBLIC_OPEN_EXACT
+            or any(p.startswith(x) for x in PUBLIC_OPEN_PREFIXES))
+
+
+def _connector_origin():
+    """Origin localhost-семейства (порт любой) либо явно разрешённый в
+    config.json (allowed_origins) — легитимный источник модуля, иначе None."""
+    origin = request.headers.get('Origin', '')
+    if not origin:
+        return None
+    try:
+        from urllib.parse import urlparse
+        host = _localhost_host_name(urlparse(origin).netloc)
+    except Exception:
+        return None
+    if host in ('127.0.0.1', 'localhost', '::1'):
+        return origin
+    allowed = _allowed_origins()
+    if allowed and origin.strip().rstrip('/').lower() in allowed:
+        return origin
+    return None
+
+
 @app.before_request
 def _guard_localhost_only():
     """Защита от CSRF/DNS-rebinding: API доступен только с localhost.
-    Внешние страницы (Origin != localhost) и чужие Host отклоняются."""
+    Внешние страницы (Origin != localhost) и чужие Host отклоняются.
+    Исключение — роуты коннектора Foundry (см. CONNECTOR_ROUTES)."""
     try:
-        host = (request.host or '').lower()
-        # '[::1]:7878' -> '::1'
-        host_name = host.rsplit(':', 1)[0]
-        if host_name.startswith('['):
-            host_name = host_name.lstrip('[')
+        host_name = _localhost_host_name(request.host or '')
         if host_name not in ('127.0.0.1', 'localhost', '::1'):
+            # ===== Сетевой режим (опти-ин: listen_host = 0.0.0.0) =====
+            # Наружу — только студия и коннекторные роуты; управление
+            # приложением (/config, /shutdown, /apply_update, /api/window)
+            # остаётся строго локальным. shared_secret (если задан вручную
+            # в config.json) — опциональное ужесточение «только с ключом».
+            if not _network_mode():
+                return jsonify({'error': 'Forbidden'}), 403
+            allowed_hosts = _allowed_hosts()
+            if allowed_hosts and host_name not in allowed_hosts:
+                return jsonify({'error': 'Forbidden'}), 403
+            if request.method == 'OPTIONS':
+                return None  # preflight (ACAO добавит after_request)
+            key_required = bool(_shared_secret())
+            if not key_required or _request_key_valid():
+                if _is_public_proxy_route() or request.path in PUBLIC_OPEN_EXACT:
+                    return None
+                return jsonify({'error': 'Forbidden'}), 403
+            # Ужесточение с ключом: без него — только статика UI
+            if request.method in ('GET', 'HEAD') and (
+                    request.path in PUBLIC_OPEN_EXACT
+                    or any(request.path.startswith(p) for p in PUBLIC_OPEN_PREFIXES)):
+                return None
             return jsonify({'error': 'Forbidden'}), 403
+        # Модуль Foundry: localhost:30000 -> 127.0.0.1:7878 для браузера
+        # cross-site (порт в same-site не входит), но это та же машина —
+        # пропускаем Sec-Fetch-Site/Origin-проверки только для allowlist-роутов
+        if _is_connector_route() and _connector_origin():
+            return None
+        # Сборка hosted-студии клиентом за доменом из allowed_origins:
+        # чтение страницы/статики UI (GET) и настоящий /config студии ГМа
+        # (GET содержит shared_secret — домен должен быть в списке явно)
+        origin_hdr = request.headers.get('Origin', '')
+        origin_allowed = (origin_hdr
+                          and origin_hdr.strip().rstrip('/').lower() in _allowed_origins())
+        if (origin_allowed and request.method in ('GET', 'HEAD') and _is_ui_asset_path()):
+            return None
+        if (origin_allowed and request.path == '/config'
+                and request.method in ('GET', 'POST', 'OPTIONS')):
+            return None
+        # «Разрешить подключения из браузера»: любой сайт может пользоваться
+        # студией из Foundry (чтение, /process, /config); системные роуты
+        # (/shutdown, /apply_update, /api/window, /save_to_folder) остаются
+        # только для приложения. Тумблер в карточке «Сеть».
+        try:
+            _ab = _allow_browser()
+            _icr = _is_connector_route()
+            _iui = _is_ui_asset_path()
+            _cfg = request.path == '/config'
+        except BaseException as e:
+            raise
+        if _allow_browser() and (_is_connector_route() or _is_ui_asset_path()
+                                 or request.path == '/config'):
+            return None
         state_changing = request.method in ('POST', 'PUT', 'DELETE', 'PATCH')
         # Chromium присылает Sec-Fetch-Site всегда; кросс-сайтовые state-changing
         # запросы режем сразу (страховка от будущих дыр в Origin-проверке)
@@ -87,15 +301,12 @@ def _guard_localhost_only():
             return jsonify({'error': 'Forbidden'}), 403
         origin = request.headers.get('Origin', '')
         if origin:
-            from urllib.parse import urlparse
-            oh = urlparse(origin).netloc.lower()
-            oh_name = oh.rsplit(':', 1)[0]
-            if oh_name.startswith('['):
-                oh_name = oh_name.lstrip('[')
-            # Пустой netloc (Origin: null из sandboxed iframe / data:-документа)
-            # НЕ пропускаем: это вектор CSRF на /save_to_folder и другие POST.
-            # Легитимное приложение шлёт Origin http://127.0.0.1:7878 либо не шлёт вовсе.
-            if oh_name not in ('127.0.0.1', 'localhost', '::1'):
+            # Для не-connector роутов Origin обязан быть самим приложением
+            # (exact scheme://host, с портом). Иначе страница с ДРУГОГО локального
+            # порта (localhost:4200 → localhost:7878 для браузера same-site!)
+            # могла бы POST-ить в /config, /apply_update, /shutdown.
+            expected = f'{request.scheme}://{request.host}'.lower()
+            if origin.lower() != expected:
                 return jsonify({'error': 'Forbidden'}), 403
         elif state_changing:
             # State-changing запросы без Origin (не-браузерный клиент)
@@ -103,6 +314,52 @@ def _guard_localhost_only():
     except Exception:
         return jsonify({'error': 'Forbidden'}), 403
     return None
+
+
+@app.after_request
+def _connector_headers(response):
+    # CORS-заголовки только для allowlist-роутов коннектора и только для
+    # легитимных Origin (localhost-семейство или allowed_origins из config)
+    origin_hdr = request.headers.get('Origin', '')
+    config_read = (request.path == '/config' and origin_hdr
+                      and origin_hdr.strip().rstrip('/').lower() in _allowed_origins())
+    ui_read = (request.method in ('GET', 'HEAD') and origin_hdr
+               and origin_hdr.strip().rstrip('/').lower() in _allowed_origins()
+               and _is_ui_asset_path())
+    if _is_connector_route() or _is_public_proxy_route() or config_read or ui_read:
+        origin = origin_hdr
+        preflight = request.method == 'OPTIONS'
+        allowed = (_connector_origin() or _network_mode()
+                   or _request_key_valid() or ui_read
+                   or (preflight and bool(_shared_secret()))
+                   or _allow_browser())
+        if origin and allowed:
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Vary'] = 'Origin'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Tokenatra-Key'
+            response.headers['Access-Control-Max-Age'] = '600'
+            # Chrome Local/Private Network Access: запрос с публичного https-
+            # сайта к 127.0.0.1 требует согласия в preflight
+            if preflight and 'Access-Control-Request-Private-Network' in request.headers:
+                response.headers['Access-Control-Allow-Private-Network'] = 'true'
+    # Анти-кликджеккинг: полный UI запрещено встраивать; страница с ?embed=1 —
+    # только локальное окружение и явно разрешённые Origin (Foundry за доменом)
+    if 'text/html' in response.headers.get('Content-Type', ''):
+        if request.args.get('embed') == '1':
+            ancestors = [
+                'http://localhost:*', 'https://localhost:*',
+                'http://127.0.0.1:*', 'https://127.0.0.1:*',
+                'http://[::1]:*', 'https://[::1]:*',
+            ] + _allowed_origins()
+            if _network_mode() or _request_key_valid():
+                o = (request.args.get('origin') or '').strip().lower()
+                if o.startswith('http://') or o.startswith('https://'):
+                    ancestors.append(o.rstrip('/'))
+            response.headers['Content-Security-Policy'] = 'frame-ancestors ' + ' '.join(ancestors)
+        else:
+            response.headers['Content-Security-Policy'] = "frame-ancestors 'none'"
+    return response
 
 if getattr(sys, 'frozen', False):
     # A portable build launched from the source tree keeps user data in the
@@ -162,6 +419,7 @@ BUILTIN_RINGS = {
 }
 PRESET_DIR = RESOURCE_DIR
 MODEL_DOWNLOAD_URL = os.environ.get('TOKENATRA_MODEL_URL', MODEL_DOWNLOAD_URL).strip()
+MODEL_DOWNLOAD_URL_LITE = os.environ.get('TOKENATRA_MODEL_URL_LITE', MODEL_DOWNLOAD_URL_LITE).strip()
 
 
 def _migrate_legacy_model():
@@ -318,6 +576,206 @@ def _save_device_cache(providers, provider_options, device_name):
         _update_config(_mutate)
     except Exception:
         pass
+
+
+# ===== Трей / экономный режим: выгрузка модели в простое =====
+# Монитор запускается ЛЕНИВО из set_tray_mode(True) (вызывает app.py) —
+# CLI-дети (--tune-gpu, context_menu_helper) импортируют server без трея.
+
+TRAY_MODE = False
+_LAST_ACTIVITY = time.time()
+_MODEL_LISTENERS = []
+_TRAY_MONITOR_STARTED = False
+
+
+def add_model_state_listener(fn):
+    """Подписка на смену «модель в памяти/выгружена» (иконка трея в app.py)."""
+    _MODEL_LISTENERS.append(fn)
+
+
+def _notify_model_state(loaded):
+    for fn in list(_MODEL_LISTENERS):
+        try:
+            fn(loaded)
+        except Exception:
+            pass
+
+
+def mark_activity():
+    global _LAST_ACTIVITY
+    _LAST_ACTIVITY = time.time()
+
+
+def set_tray_mode(on):
+    """Вход/выход из режима трея. Лениво стартует монитор простоя."""
+    global TRAY_MODE, _TRAY_MONITOR_STARTED
+    on = bool(on)
+    changed = TRAY_MODE != on
+    TRAY_MODE = on
+    mark_activity()
+    if on and not _TRAY_MONITOR_STARTED:
+        _TRAY_MONITOR_STARTED = True
+        threading.Thread(target=_tray_monitor_loop, daemon=True, name='tray-idle-monitor').start()
+    return changed
+
+
+def model_loaded():
+    with SESSION_LOCK:
+        return SESSION is not None
+
+
+def unload_model():
+    """Выгрузить ONNX-сессию — освобождает основную часть памяти приложения."""
+    global SESSION
+    with SESSION_LOCK:
+        if SESSION is None:
+            return False
+        SESSION = None
+    import gc
+    gc.collect()
+    print('[tray] Модель выгружена по простою в трее')
+    _notify_model_state(False)
+    return True
+
+
+def tray_settings():
+    """Настройки трея из config.json (серверные ключи, клиент их не хранит)."""
+    try:
+        cfg = _load_config() or {}
+    except Exception:
+        cfg = {}
+    try:
+        minutes = float(cfg.get('tray_idle_unload_min', 5))
+    except (TypeError, ValueError):
+        minutes = 5.0
+    return {
+        'close_to_tray': bool(cfg.get('close_to_tray', True)),
+        'tray_idle_unload_min': max(0.0, minutes),
+    }
+
+
+def _tray_monitor_loop():
+    while True:
+        time.sleep(30)
+        try:
+            with _EMBED_EXPORT_LOCK:
+                _embed_export_cleanup()
+            if not TRAY_MODE:
+                continue
+            minutes = tray_settings()['tray_idle_unload_min']
+            if minutes <= 0:
+                continue
+            if model_loaded() and (time.time() - _LAST_ACTIVITY) > minutes * 60:
+                unload_model()
+        except Exception:
+            pass
+
+
+# ===== Экспорт во встроенном режиме (модуль Foundry) =====
+# Embed-редактор (iframe, same-origin) кладёт готовый блоб сюда и отдаёт
+# модулю короткоживый URL; модуль забирает его fetch'ем с CORS.
+
+_EMBED_EXPORT_DIR = USER_DATA_DIR / 'embed_export'
+# RLock: _embed_export_cleanup вызывается и из-под уже взятого лока
+_EMBED_EXPORT_LOCK = threading.RLock()
+_EMBED_EXPORT_ITEMS = {}   # имя файла -> {'path': Path, 'mime': str, 'expires': float}
+_EMBED_EXPORT_TTL = 600
+_EMBED_EXPORT_MAX_ITEMS = 32
+_EMBED_EXPORT_MAX_BYTES = 40 * 1024 * 1024
+
+
+def _embed_export_cleanup():
+    """Удаляет просроченные файлы. Вызывается под _EMBED_EXPORT_LOCK (RLock)."""
+    now = time.time()
+    for name in [n for n, item in list(_EMBED_EXPORT_ITEMS.items()) if item['expires'] <= now]:
+        item = _EMBED_EXPORT_ITEMS.pop(name)
+        try:
+            item['path'].unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def purge_embed_export_dir():
+    """Полная очистка каталога экспорта (вызывает app.py на старте — до подъёма
+    сервера; НЕ на уровне модуля server: CLI-дети импортируют server при живом
+    основном приложении и не должны удалять его активные экспорты)."""
+    with _EMBED_EXPORT_LOCK:
+        _EMBED_EXPORT_ITEMS.clear()
+    try:
+        if _EMBED_EXPORT_DIR.is_dir():
+            for f in _EMBED_EXPORT_DIR.iterdir():
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+@app.route('/embed_export', methods=['POST'])
+def embed_export_save():
+    """Принять готовое изображение из embed-редактора, отдать id+url для модуля."""
+    file = request.files.get('image') or request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({'error': 'Нет файла'}), 400
+    ext = Path(file.filename).suffix.lower()
+    if ext not in {'.webp', '.png', '.jpg', '.jpeg'}:
+        ext = '.webp'
+    mime = {'.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}[ext]
+
+    try:
+        _EMBED_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return jsonify({'error': 'Не удалось создать каталог экспорта'}), 500
+    # id секретный (token_urlsafe) — реестр не перебирается снаружи
+    file_id = secrets.token_urlsafe(16)
+    target = _EMBED_EXPORT_DIR / (file_id + ext)
+    try:
+        file.save(target)
+        if target.stat().st_size > _EMBED_EXPORT_MAX_BYTES:
+            target.unlink(missing_ok=True)
+            return jsonify({'error': 'Файл больше 40 МБ'}), 413
+    except Exception as e:
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return jsonify({'error': f'Не удалось сохранить: {e}'}), 500
+
+    with _EMBED_EXPORT_LOCK:
+        _embed_export_cleanup()
+        # LRU-вытеснение при переполнении реестра
+        while len(_EMBED_EXPORT_ITEMS) >= _EMBED_EXPORT_MAX_ITEMS:
+            oldest = min(_EMBED_EXPORT_ITEMS.items(), key=lambda kv: kv[1]['expires'])[0]
+            item = _EMBED_EXPORT_ITEMS.pop(oldest)
+            try:
+                item['path'].unlink(missing_ok=True)
+            except OSError:
+                pass
+        _EMBED_EXPORT_ITEMS[target.name] = {
+            'path': target, 'mime': mime, 'expires': time.time() + _EMBED_EXPORT_TTL,
+        }
+    return jsonify({'id': file_id, 'url': f'/embed_export/{target.name}'})
+
+
+@app.route('/embed_export/<file_name>')
+def embed_export_get(file_name):
+    safe = Path(file_name).name
+    stem = safe.split('.')[0]
+    with _EMBED_EXPORT_LOCK:
+        entry = _EMBED_EXPORT_ITEMS.get(safe)
+        if entry is None:
+            entry = next((i for n, i in _EMBED_EXPORT_ITEMS.items() if n.split('.')[0] == stem), None)
+    if entry is None:
+        return jsonify({'error': 'Not found'}), 404
+    # Прямые GET с чужих страниц (<img src=…> без Origin): cross-site режем —
+    # легитимный fetch модуля всегда приходит с localhost-Origin
+    if not _connector_origin():
+        if request.headers.get('Sec-Fetch-Site', '').lower() == 'cross-site':
+            return jsonify({'error': 'Forbidden'}), 403
+    response = send_file(str(entry['path']), mimetype=entry['mime'])
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 def allowed_file(filename):
@@ -584,7 +1042,12 @@ def get_providers():
 
     def run_cmd(cmd):
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            options = {'capture_output': True, 'text': True, 'timeout': 5}
+            if sys.platform == 'win32':
+                # CREATE_NO_WINDOW: в windowed-exe дочерняя консоль иначе
+                # вспыхивает видимым окном терминала на каждом запуске
+                options['creationflags'] = 0x08000000
+            result = subprocess.run(cmd, **options)
             return result.stdout or ''
         except Exception:
             return ''
@@ -782,6 +1245,7 @@ def load_session():
 
             print(f" Готово\n")
             _spawn_tune_child()
+            _notify_model_state(True)
     return SESSION
 
 
@@ -884,9 +1348,11 @@ def cli_tune_gpu():
         print(f"  [tune] ошибка: {e}")
 
 
-def refine_mask(mask_pil, edge_blur=1, threshold_low=10, threshold_high=245, work_size=1024, target_size=None):
+def refine_mask(mask_pil, edge_blur=1, threshold_low=10, threshold_high=245, work_size=1024, target_size=None, gentle=False):
     """Маска рефайнится на уменьшенной копии (work_size), чтобы не жечь RAM на больших картинках.
-    Результат возвращается в размере target_size (или в исходном размере маски)."""
+    Результат возвращается в размере target_size (или в исходном размере маски).
+    gentle=True — для моделей с тонкими масками (BEN2): без ^1.2 и эрозии MinFilter,
+    с мягкой отсечкой — иначе «съедаются» тонкие детали по краям персонажа."""
     orig_size = target_size or mask_pil.size
     w, h = orig_size
     if work_size and max(w, h) > work_size:
@@ -900,14 +1366,16 @@ def refine_mask(mask_pil, edge_blur=1, threshold_low=10, threshold_high=245, wor
     low = threshold_low / 255.0
     high = threshold_high / 255.0
     mask_np = np.clip((mask_np - low) / (high - low + 1e-8), 0.0, 1.0)
-    mask_np = mask_np ** 1.2
+    if not gentle:
+        mask_np = mask_np ** 1.2
 
     mask_pil = Image.fromarray((mask_np * 255).astype(np.uint8), mode='L')
 
-    mask_pil = mask_pil.filter(ImageFilter.MinFilter(3))
+    if not gentle:
+        mask_pil = mask_pil.filter(ImageFilter.MinFilter(3))
 
     mask_np = np.array(mask_pil).astype(np.float32) / 255.0
-    mask_np = np.where(mask_np < 0.15, 0.0, mask_np)
+    mask_np = np.where(mask_np < (0.05 if gentle else 0.15), 0.0, mask_np)
     mask_np = np.where(mask_np > 0.92, 1.0, mask_np)
     mask_pil = Image.fromarray((mask_np * 255).astype(np.uint8), mode='L')
 
@@ -956,8 +1424,16 @@ def remove_background(image, edge_blur=1):
     gc.collect()
     print(f"  [RAM] после numpy arr: {mem():.0f} МБ")
 
-    arr -= np.array([0.485, 0.456, 0.406], dtype=np.float32)
-    arr /= np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    # Нормализация зависит от модели: BiRefNet/RMBG ждут ImageNet-статистику,
+    # а BEN2 (официальный ONNX) — plain ToTensor 0..1 без нормализации
+    # (см. onnx_run.py авторов). Сдвиг входа «съедает» тонкие детали.
+    try:
+        model_name = get_selected_model_path().name.lower()
+    except Exception:
+        model_name = ''
+    if 'ben' not in model_name:
+        arr -= np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        arr /= np.array([0.229, 0.224, 0.225], dtype=np.float32)
     arr = arr.transpose(2, 0, 1)
 
     tensor = arr[np.newaxis]
@@ -1005,7 +1481,8 @@ def remove_background(image, edge_blur=1):
     del mask
     gc.collect()
 
-    mask_pil = refine_mask(mask_pil, edge_blur, target_size=image.size)
+    gentle_refine = 'ben' in model_name
+    mask_pil = refine_mask(mask_pil, edge_blur, target_size=image.size, gentle=gentle_refine)
 
     # White-penalty считается на уменьшенной копии (1024), поправка затем масштабируется.
     small = image.resize((1024, 1024), Image.BILINEAR)
@@ -1120,7 +1597,18 @@ def index():
             theme = cfg.get('theme', 'indigo')
         except Exception:
             pass
-    return render_template('index.html', github_repo=GITHUB_REPO, theme=theme, __version__=__version__)
+    html = render_template('index.html', github_repo=GITHUB_REPO, theme=theme,
+                           __version__=__version__, embed_allowed=_allowed_origins())
+    resp = app.response_class(html)
+    # Сетевой режим: ключ из query превращаем в cookie — same-доменные
+    # подзапросы iframe (за прокси) идут без заголовков
+    if request.args.get('key') and _request_key_valid():
+        try:
+            resp.set_cookie('tokenatra_key', request.args.get('key'),
+                            max_age=12 * 3600, httponly=True, samesite='Lax')
+        except Exception:
+            pass
+    return resp
 
 @app.route('/version')
 def version_info():
@@ -1177,7 +1665,27 @@ def models_list():
         'models': models,
         'models_dir': str(MODELS_DIR),
         'selected': selected.name if selected.exists() else None,
+        # Ссылки для кнопок «Легковесная / Полная модель» — открываются в браузере
+        'model_download_url': MODEL_DOWNLOAD_URL or '',
+        'model_download_url_lite': MODEL_DOWNLOAD_URL_LITE or '',
     })
+
+
+@app.route('/open_model_link', methods=['POST'])
+def open_model_link():
+    """Открыть ссылку на скачивание модели в системном браузере: файл качает
+    браузер пользователя, в models/ он кладётся через «Загрузить модель с диска»."""
+    data = request.get_json(force=True, silent=True) or {}
+    kind = data.get('kind') if isinstance(data, dict) else None
+    url = MODEL_DOWNLOAD_URL_LITE if kind == 'lite' else MODEL_DOWNLOAD_URL
+    if not url:
+        return jsonify({'error': 'Ссылка на модель ещё не настроена'}), 503
+    try:
+        import webbrowser
+        webbrowser.open(url)
+    except Exception as e:
+        return jsonify({'error': f'Не удалось открыть браузер: {e}'}), 500
+    return jsonify({'ok': True, 'url': url})
 
 
 @app.route('/select_model', methods=['POST'])
@@ -1399,6 +1907,14 @@ def window_action(action):
         elif action == 'restore':
             win.restore()
         elif action in ('close', 'destroy'):
+            # Путь обновления/выхода: closing-хендлер трея не должен отменить
+            # закрытие (флаг выставляет app.py)
+            force_quit = getattr(current_app, 'force_quit_ref', None)
+            if force_quit:
+                try:
+                    force_quit()
+                except Exception:
+                    pass
             win.destroy()
         elif action == 'move':
             if sys.platform != 'win32':
@@ -1669,6 +2185,103 @@ def device():
     return jsonify({
         'device': DEVICE_NAME,
         'model_exists': get_selected_model_path().exists(),
+    })
+
+
+@app.route('/network_info')
+def network_info():
+    """Локальная справка для карточки «Доступ для игроков»: LAN-адреса."""
+    import ipaddress
+    import socket
+    cands = []  # (iface_rank, ip_rank, ip)
+
+    def ip_tier(ip):
+        if ip.startswith('192.168.'):
+            return 0
+        if ip.startswith('10.'):
+            return 1
+        o = ip.split('.')
+        try:
+            if o[0] == '172' and 16 <= int(o[1]) <= 31:
+                return 2
+        except Exception:
+            pass
+        return 3
+
+    def add(ip, iface_rank):
+        ip = str(ip).strip()
+        if not ip:
+            return
+        try:
+            a = ipaddress.ip_address(ip)
+        except Exception:
+            return
+        if a.version != 4 or a.is_loopback or a.is_link_local:
+            return
+        # 198.18.0.0/15 — benchmark-диапазон: так представляются адаптеры
+        # VPN/прокси в fake-IP режиме, игрокам по нему не подключиться
+        if ip.startswith('198.18.') or ip.startswith('198.19.'):
+            return
+        cands.append((iface_rank, ip_tier(ip), ip))
+
+    # Адаптер по умолчанию (активный маршрут); на машинах с VPN это может
+    # быть TUN-адаптер — такой адрес отсеется фильтром выше
+    try:
+        sck = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sck.connect(('8.8.8.8', 80))
+        add(sck.getsockname()[0], 2)
+        sck.close()
+    except Exception:
+        pass
+    # Полный обход адаптеров: имя даёт ранг (реальные Ethernet/Wi-Fi выше
+    # виртуальных), диапазон IP — приоритет LAN-подсетей
+    try:
+        import psutil
+        skip_kw = ('loopback', 'vpn', 'tun', 'tap', 'clash', 'wintun',
+                   'wireguard', 'tailscale', 'zerotier', 'ppp', 'virtual',
+                   'mihomo', 'sing-box', 'vmware', 'hyper-v', 'vEthernet')
+        prefer_kw = ('ethernet', 'wi-fi', 'wifi', 'беспровод', 'локал',
+                     'local area')
+        for name, addrs in psutil.net_if_addrs().items():
+            lname = name.lower()
+            if any(k in lname for k in skip_kw):
+                continue
+            irank = 0 if any(k in lname for k in prefer_kw) else 1
+            for a in addrs:
+                if a.family == socket.AF_INET:
+                    add(a.address, irank)
+    except Exception:
+        pass
+    # hostbyname-экстры — без имён адаптеров, пониженный ранг
+    try:
+        _, _, extras = socket.gethostbyname_ex(socket.gethostname())
+        for ip in extras:
+            add(ip, 2)
+    except Exception:
+        pass
+
+    cands.sort()
+    seen, ips = set(), []
+    for _, _, ip in cands:
+        if ip not in seen:
+            seen.add(ip)
+            ips.append(ip)
+    return jsonify({'ips': ips, 'port': 7878, 'listen_host': listen_host()})
+
+
+@app.route('/health')
+def health():
+    """Лёгкий статус для модуля Foundry (без загрузки модели)."""
+    p = get_selected_model_path()
+    return jsonify({
+        'app': APP_NAME,
+        'version': __version__,
+        'connectorApi': CONNECTOR_API_VERSION,
+        'model_exists': p.exists(),
+        'model_loaded': model_loaded(),
+        'model_name': p.name if p.exists() else None,
+        'device': DEVICE_NAME,
+        'tray': TRAY_MODE,
     })
 
 
@@ -2003,6 +2616,7 @@ def example():
 @app.route('/process', methods=['POST'])
 def process():
     import gc
+    mark_activity()
 
     if 'image' not in request.files:
         return jsonify({'error': 'Нет изображения'}), 400
@@ -2032,6 +2646,8 @@ def process():
         # до модели/композитинга (иначе 8K держит ~200-270 МБ лишних).
         image = cap_process_size(image)
         result = remove_background(image, edge_blur)
+        # Удержание модели после обработки (сброс таймера idle-unload в трее)
+        mark_activity()
         del image
         gc.collect()
 
@@ -2495,9 +3111,15 @@ def get_config():
         return jsonify({})
     try:
         import json
-        return jsonify(json.loads(config_path.read_text(encoding='utf-8')))
+        cfg = json.loads(config_path.read_text(encoding='utf-8'))
     except Exception:
         return jsonify({})
+    # Чтение из браузера с неизвестным Origin (режим «из браузера») —
+    # без сетевого секрета
+    origin_hdr = (request.headers.get('Origin', '') or '').strip().rstrip('/').lower()
+    if origin_hdr and origin_hdr not in _allowed_origins() and not _connector_origin():
+        cfg.pop('shared_secret', None)
+    return jsonify(cfg)
 
 @app.route('/config', methods=['POST'])
 def save_config():
@@ -2510,9 +3132,25 @@ def save_config():
         # /select_model или tune-gpu потеряет свои ключи.
         def _mutate(existing):
             merged = dict(data)
+            # Серверные ключи. Модель/GPU клиент через /config никогда не
+            # меняет (только /select_model) — берём существующее значение
+            # безусловно, иначе долгоживущий снапшот откатит чужую смену.
             for key in ('selected_model', 'gpu_device_id'):
+                if key in existing:
+                    merged[key] = existing[key]
+            # Ключи трея/коннектора: серверные, клиентский снапшот их не хранит —
+            # при отсутствии в теле сохраняем существующие значения
+            for key in ('close_to_tray', 'tray_idle_unload_min', 'allowed_origins',
+                        'shared_secret', 'allowed_hosts', 'listen_host'):
                 if (key not in data or data[key] is None) and key in existing:
                     merged[key] = existing[key]
+            # При «Разрешить подключения из браузера» неизвестные origin'ы
+            # могут менять настройки студии, но не ключи безопасности сети
+            origin_hdr = (request.headers.get('Origin', '') or '').strip().rstrip('/').lower()
+            if origin_hdr and origin_hdr not in _allowed_origins() and not _connector_origin():
+                for key in ('shared_secret', 'listen_host', 'allowed_origins',
+                            'allowed_hosts', 'allow_browser'):
+                    merged.pop(key, None)
             return merged
         _update_config(_mutate)
         return jsonify({'ok': True})
@@ -2558,5 +3196,5 @@ if __name__ == '__main__' and not getattr(sys, 'frozen', False):
             print(f"Model: {e}")
         print("http://localhost:7878")
         print("=" * 50 + "\n")
-        app.run(host='127.0.0.1', port=7878, debug=False, threaded=True)
+        app.run(host=listen_host(), port=7878, debug=False, threaded=True)
 
