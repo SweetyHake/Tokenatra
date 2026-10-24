@@ -1297,10 +1297,12 @@ var TokenCanvas = {
         // DOM-оверлей пресета должен масштабироваться вместе с канвасом
         var po = $('presetOverlay');
         if (po) po.style.transform = this.canvas.style.transform;
-        var indicator = $('zoomIndicator');
-        if (indicator) {
-            indicator.textContent = Math.round(state.viewZoom * 100) + '%';
-            indicator.classList.toggle('show', state.viewZoom !== 1 || state.viewPanX !== 0 || state.viewPanY !== 0);
+        // Процент в виджете зума — единственный индикатор: подсвечен,
+        // когда вид отклонился от 100%/центра; клик по нему сбрасывает
+        var label = $('zoomLabel');
+        if (label) {
+            label.textContent = Math.round(state.viewZoom * 100) + '%';
+            label.classList.toggle('modified', state.viewZoom !== 1 || state.viewPanX !== 0 || state.viewPanY !== 0);
         }
     },
 
@@ -1966,6 +1968,7 @@ var TokenCanvas = {
             var saveWithRing = $('saveWithRing');
             if (saveWithoutRing) saveWithoutRing.disabled = false;
             if (saveWithRing) saveWithRing.disabled = false;
+            if (window.syncZoomControlsState) syncZoomControlsState();
 
             TokenEditor.updateNavState();
 

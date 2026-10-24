@@ -131,32 +131,38 @@ function setModelAvailability(exists) {
 }
 
 function initZoomControls() {
+    // Процент — кнопка сброса вида; подсветку .modified и текст синхронизирует
+    // TokenCanvas.updateViewTransform (единственный источник истины по виду)
     const zoomIn = $('zoomInBtn');
     const zoomOut = $('zoomOutBtn');
-    const zoomReset = $('zoomResetBtn');
     const zoomLabel = $('zoomLabel');
 
-    function updateLabel() {
-        if (zoomLabel && state.viewZoom !== undefined) zoomLabel.textContent = Math.round(state.viewZoom * 100) + '%';
-    }
+    // Без изображения масштаб вида менять нечего — виджет скрыт полностью
+    window.syncZoomControlsState = function() {
+        const has = !!state.userImage;
+        const zc = $('zoomControls');
+        if (zc) zc.classList.toggle('no-image', !has);
+        if (zoomIn) zoomIn.disabled = !has;
+        if (zoomOut) zoomOut.disabled = !has;
+        if (zoomLabel) zoomLabel.disabled = !has;
+    };
 
     if (zoomIn) zoomIn.onclick = () => {
-        if (!TokenCanvas) return;
+        if (!state.userImage || !TokenCanvas) return;
         state.viewZoom = Math.min(state.viewZoom * 1.25, CONFIG.MAX_ZOOM || 20);
         TokenCanvas.updateViewTransform();
-        updateLabel();
     };
     if (zoomOut) zoomOut.onclick = () => {
-        if (!TokenCanvas) return;
+        if (!state.userImage || !TokenCanvas) return;
         state.viewZoom = Math.max(state.viewZoom * 0.8, CONFIG.MIN_ZOOM || 0.5);
         TokenCanvas.updateViewTransform();
-        updateLabel();
     };
-    if (zoomReset) zoomReset.onclick = () => {
-        if (!TokenCanvas) return;
+    if (zoomLabel) zoomLabel.onclick = () => {
+        if (!state.userImage || !TokenCanvas) return;
         TokenCanvas.resetView();
-        updateLabel();
     };
+
+    syncZoomControlsState();
 
     document.addEventListener('keydown', e => {
         if ((e.ctrlKey || e.metaKey) && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
@@ -166,7 +172,7 @@ function initZoomControls() {
             e.preventDefault(); zoomOut?.click();
         }
         if ((e.ctrlKey || e.metaKey) && e.code === 'Digit0') {
-            e.preventDefault(); zoomReset?.click();
+            e.preventDefault(); zoomLabel?.click();
         }
     });
 }

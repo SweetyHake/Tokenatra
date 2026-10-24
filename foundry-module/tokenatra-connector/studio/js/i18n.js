@@ -69,6 +69,7 @@ const I18n = {
         'Уменьшить': 'Zoom out',
         'Увеличить': 'Zoom in',
         'Сбросить': 'Reset',
+        'Сбросить (Ctrl+0)': 'Reset (Ctrl+0)',
         'Кольцо': 'Ring',
         'Добавить кольцо': 'Add ring',
         'Тень': 'Shadow',

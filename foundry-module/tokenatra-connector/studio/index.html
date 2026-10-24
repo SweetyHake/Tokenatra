@@ -174,7 +174,6 @@
                     <button class="undo-btn" id="undoBtn" data-hotkey-hint data-tooltip="Отменить (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M3 10h13a4 4 0 0 1 0 8H9"/><polyline points="7 6 3 10 7 14"/></svg></button>
                     <button class="undo-btn" id="redoBtn" data-hotkey-hint data-tooltip="Повторить (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M21 10H8a4 4 0 0 0 0 8h7"/><polyline points="17 6 21 10 17 14"/></svg></button>
                 </div>
-                <div class="zoom-indicator" id="zoomIndicator">100%</div>
                 <div class="token-canvas-wrapper" id="canvasWrapper">
                     <canvas id="tokenCanvas" width="2048" height="2048"></canvas>
                     <div id="presetOverlay" class="preset-overlay"></div>
@@ -187,9 +186,8 @@
                 </div>
                 <div class="zoom-controls" id="zoomControls">
                     <button class="zc-btn" id="zoomOutBtn" data-tooltip="Уменьшить"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
-                    <span class="zc-label" id="zoomLabel">100%</span>
+                    <button type="button" class="zc-label" id="zoomLabel" data-tooltip="Сбросить (Ctrl+0)">100%</button>
                     <button class="zc-btn" id="zoomInBtn" data-tooltip="Увеличить"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
-                    <button class="zc-btn" id="zoomResetBtn" data-tooltip="Сбросить"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
                 </div>
             </div>
             <div class="resize-handle" id="rightPanelHandle"></div>
