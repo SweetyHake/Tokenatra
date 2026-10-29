@@ -36,8 +36,10 @@ tokenatra.exe --folder-to-webp D  контекстное меню: папка ->
 ## Стек
 
 - HTTP: axum + tower (guard/CORS/CSP-мидлварь — порт `_guard_localhost_only`)
-- ONNX: ort 2.0 (DirectML на Windows, CoreML на macOS, CPU на Linux),
-  фолбэк-каскад EXTENDED→BASIC→CPU, f16/f32/f64-выходы, tune-gpu
+- ONNX: ort 2.0. Провайдеры по вендору GPU:
+  NVIDIA → CUDA (Windows/Linux), AMD → DirectML (Windows) / ROCm (Linux),
+  Intel → DirectML (Windows) / CPU (Linux), macOS → CoreML;
+  фолбэк-каскад EXTENDED→BASIC→CPU, f16/f32/f64-выходы, tune-gpu (DML)
 - Изображения: image + imageproc (LANCZOS/bilinear, MinFilter3, гаусс),
   libwebp (lossy WebP как PIL), ravif (AVIF), AVIF-декод через ffmpeg
 - GUI: wry/tao; кастомный тайтлбар Windows (DWM + WndProc-хук: NCCALCSIZE,
@@ -50,7 +52,8 @@ tokenatra.exe --folder-to-webp D  контекстное меню: папка ->
 
 - AVIF-вход декодируется системным ffmpeg (если есть); AVIF-выход работает
   нативно (ravif). У Python AVIF-выход зависел от pillow-avif-plugin.
-- CUDA/ROCm-провайдеры не слинкованы (pip-версия их тоже не поставляла).
+- Linux+Intel без GPU-ускорения (CPU); OpenVINO-EP можно добавить по запросу.
+  Сборка тянет CUDA/ROCm-архивы pyke (~ГБ) — первый build долгий, дальше кеш.
 - `webp` crate вместо Pillow для lossy-кодирования (тот же libwebp).
 
 ## Проверка (2026-10-29, Windows)

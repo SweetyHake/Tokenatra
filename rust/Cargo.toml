@@ -34,15 +34,16 @@ which = "8"
 winreg = "0.56"
 wry = "0.57"
 
-# ONNX Runtime (pyke io). Execution providers are unified per target below:
-# Windows -> DirectML, macOS -> CoreML, Linux -> CPU (the same matrix the
-# Python app shipped: onnxruntime-directml / onnxruntime / onnxruntime).
+# ONNX Runtime (pyke io). Execution providers per target (unified below):
+# Windows -> DirectML (AMD/Intel) + CUDA (NVIDIA); macOS -> CoreML;
+# Linux -> ROCm (AMD) + CUDA (NVIDIA). Intel on Linux runs on CPU.
 ort = { version = "2.0.0-rc.15", features = ["half"] }
 crossbeam-channel = "0.5.17"
 half = "2.7.1"
 
 [target.'cfg(windows)'.dependencies]
-ort = { version = "2.0.0-rc.15", features = ["directml"] }
+# DirectML covers AMD/Intel (and is the NVIDIA fallback); CUDA for NVIDIA
+ort = { version = "2.0.0-rc.15", features = ["directml", "cuda"] }
 tray-icon = "0.21"
 muda = "0.17"
 windows = { version = "0.62", features = [
@@ -60,3 +61,7 @@ windows = { version = "0.62", features = [
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ort = { version = "2.0.0-rc.15", features = ["coreml"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# ROCm for AMD, CUDA for NVIDIA
+ort = { version = "2.0.0-rc.15", features = ["rocm", "cuda"] }

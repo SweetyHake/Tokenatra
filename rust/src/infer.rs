@@ -9,9 +9,11 @@ use crate::state::{AppState, ProviderConfig};
 /// Провайдеры, слинкованные в этот бинарь (аналог ort.get_available_providers()).
 pub fn available_providers() -> &'static [&'static str] {
     if cfg!(windows) {
-        &["DmlExecutionProvider", "CPUExecutionProvider"]
+        &["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
     } else if cfg!(target_os = "macos") {
         &["CoreMLExecutionProvider", "CPUExecutionProvider"]
+    } else if cfg!(target_os = "linux") {
+        &["CUDAExecutionProvider", "ROCMExecutionProvider", "CPUExecutionProvider"]
     } else {
         &["CPUExecutionProvider"]
     }
@@ -78,10 +80,26 @@ fn build_session(
                 }
                 dispatch.push(dml.into());
             }
+            #[cfg(feature = "cuda")]
+            "CUDAExecutionProvider" => {
+                let mut cuda = ort::ep::CUDA::default();
+                if let Some(id) = dml_device_id {
+                    cuda = cuda.with_device_id(id);
+                }
+                dispatch.push(cuda.into());
+            }
+            #[cfg(feature = "rocm")]
+            "ROCMExecutionProvider" => {
+                let mut rocm = ort::ep::ROCm::default();
+                if let Some(id) = dml_device_id {
+                    rocm = rocm.with_device_id(id);
+                }
+                dispatch.push(rocm.into());
+            }
             #[cfg(target_os = "macos")]
             "CoreMLExecutionProvider" => dispatch.push(ort::ep::CoreML::default().into()),
             "CPUExecutionProvider" => dispatch.push(ort::ep::CPU::default().into()),
-            _ => {} // CUDA/ROCm не слинкованы в этот бинарь
+            _ => {} // провайдер не слинкован в этот бинарь — ORT молча откатится на CPU-узлы
         }
     }
     if !dispatch.is_empty() {
@@ -520,7 +538,15 @@ pub fn detect_device(state: &AppState) {
         return;
     }
 
-    if let (Some(g), true) = (&gpu_name, has_rocm) {
+    // ROCm — только на AMD: с Intel GPU нельзя (EP упадёт), там CPU
+    let is_amd_gpu = gpu_name
+        .as_ref()
+        .map(|g| {
+            let l = g.to_lowercase();
+            l.contains("radeon") || l.contains("amd")
+        })
+        .unwrap_or(false);
+    if let (Some(g), true) = (&gpu_name, has_rocm && is_amd_gpu) {
         let name = format!("ROCm ({g})");
         *state.device_name.write().unwrap() = name.clone();
         *state.provider_cfg.write().unwrap() = Some(ProviderConfig {
