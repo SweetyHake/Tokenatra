@@ -80,8 +80,12 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(800.0, 600.0))
         .with_resizable(true)
+        // Единый кастомный тайтлбар на всех ОС: нативные декорации выключены,
+        // кнопки/перетаскивание/ресайз — наши (Windows: Win32-хук; Linux/macOS:
+        // tao drag_window/drag_resize_window + краевой ресайз из фронтенда)
+        .with_decorations(false)
         // Windows: прячем до настройки тайтлбара/иконки (как pywebview);
-        // Linux/macOS — нативные декорации, окно видно сразу
+        // Linux/macOS — окно видно сразу
         .with_visible(!cfg!(windows))
         .build(&event_loop)
         .expect("create window");
@@ -207,6 +211,12 @@ fn handle_gui_command(
         }
         GuiCommand::EvalJs(code) => {
             let _ = webview.evaluate_script(&code);
+        }
+        GuiCommand::DragWindow => {
+            let _ = window.drag_window();
+        }
+        GuiCommand::DragResize(direction) => {
+            let _ = window.drag_resize_window(direction);
         }
         GuiCommand::HideToTray(tx) => {
             #[cfg(windows)]

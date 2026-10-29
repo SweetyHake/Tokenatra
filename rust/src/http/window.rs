@@ -60,6 +60,8 @@ async fn hide_to_tray(_state: std::sync::Arc<AppState>) -> Response {
 fn window_move() -> Response {
     #[cfg(windows)]
     {
+        // Windows: Win32-хук с SetCapture (модальный цикл tao drag_window
+        // в WebView2 «прилипал» — см. историю app.py)
         match crate::win::hwnd() {
             Some(hwnd) => {
                 crate::win::post_drag_message(hwnd);
@@ -70,7 +72,8 @@ fn window_move() -> Response {
     }
     #[cfg(not(windows))]
     {
-        ok_json(json!({ "ok": false, "error": "native move is unavailable on this platform" }))
+        crate::gui_control::send(crate::gui_control::GuiCommand::DragWindow);
+        ok_json(json!({ "ok": true }))
     }
 }
 
@@ -87,7 +90,8 @@ pub async fn resize_end() -> Response {
     ok_json(json!({ "ok": true }))
 }
 
-/// Windows: WebView2 держит hit-test краёв — тянем родное окно сами.
+/// Ресайз за края: Windows — модальный цикл по кнопке; Linux — GTK
+/// begin_resize_drag; macOS — tao вернёт unsupported (нет системного API).
 pub async fn resize_start(body: axum::body::Bytes) -> Response {
     #[cfg(windows)]
     {
@@ -111,7 +115,26 @@ pub async fn resize_start(body: axum::body::Bytes) -> Response {
     }
     #[cfg(not(windows))]
     {
-        let _ = body;
-        ok_json(json!({ "ok": false, "error": "native resize is unavailable on this platform" }))
+        use tao::window::ResizeDirection;
+        let data: serde_json::Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+        let (l, r, t, b) = (
+            data.get("left").and_then(|v| v.as_bool()).unwrap_or(false),
+            data.get("right").and_then(|v| v.as_bool()).unwrap_or(false),
+            data.get("top").and_then(|v| v.as_bool()).unwrap_or(false),
+            data.get("bottom").and_then(|v| v.as_bool()).unwrap_or(false),
+        );
+        let direction = match (l, r, t, b) {
+            (true, _, true, _) => ResizeDirection::NorthWest,
+            (true, _, _, true) => ResizeDirection::SouthWest,
+            (_, true, true, _) => ResizeDirection::NorthEast,
+            (_, true, _, true) => ResizeDirection::SouthEast,
+            (true, _, _, _) => ResizeDirection::West,
+            (_, true, _, _) => ResizeDirection::East,
+            (_, _, true, _) => ResizeDirection::North,
+            (_, _, _, true) => ResizeDirection::South,
+            _ => return ok_json(json!({ "ok": false, "error": "no edges" })),
+        };
+        crate::gui_control::send(crate::gui_control::GuiCommand::DragResize(direction));
+        ok_json(json!({ "ok": true }))
     }
 }

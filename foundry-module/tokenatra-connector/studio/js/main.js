@@ -437,12 +437,9 @@ function initResizeHandles() {
 }
 
 function initWindowControls() {
-    if (!IS_WINDOWS) {
-        // macOS/Linux: нативная рамка окна (системные кнопки, ресайз,
-        // перемещение); наша панель остаётся только с вкладками навигации.
-        document.body.classList.add('native-frame');
-        return;
-    }
+    // Единый кастомный тайтлбар на всех ОС: нативные декорации выключены,
+    // кнопки работают через /api/window (Windows: Win32-хук, Linux/macOS:
+    // tao drag_window/drag_resize_window на стороне сервера).
     const flask = (action) => fetch('/api/window/' + action, { method: 'POST' }).catch(() => {});
     // Мост pywebview появляется асинхронно — читаем на каждый клик, не кэшируем
     const getApi = () => window.pywebview?.api;
@@ -504,10 +501,10 @@ function initWindowControls() {
         });
     }
 
-    // Перетаскивание окна: Windows — через Win32 (flask('move')),
-    // Linux/macOS — класс pywebview-drag-region на тайтлбаре.
+    // Перетаскивание окна за хедер (на всех ОС: Windows — Win32-хук,
+    // Linux/macOS — drag_window на сервере).
     // В embed-режиме (окно модуля Foundry) двигать надо окно Foundry — мимо.
-    if (IS_WINDOWS && !state.embed) {
+    if (!state.embed) {
         $('titleBar')?.addEventListener('mousedown', e => {
             if (e.button !== 0) return;
             if (e.target.closest('.tb-nav, .window-controls')) return;
@@ -517,11 +514,10 @@ function initWindowControls() {
 }
 // Linux/macOS frameless: растягивание за края через GTK begin_resize_drag
 function initEdgeResize() {
-    // WebView2 consumes the border hit-test, so resize the native parent window
-    // while the pointer is held on the outer client-area edge.
-    // Windows-only: на Linux/macOS ресайз frameless-окна делает pywebview.
-    // Embed-режим: границы принадлежат окну Foundry — нативный ресайз мимо.
-    if (!IS_WINDOWS || state.embed) return;
+    // Frameless-окно: ресайз за края клиентской области (на всех ОС —
+    // resize_start на сервере). Embed-режим: границы принадлежат окну
+    // Foundry — нативный ресайз мимо.
+    if (state.embed) return;
     const band = 6;
     const bodyStyle = document.body.style;
     const getEdges = (x, y) => ({

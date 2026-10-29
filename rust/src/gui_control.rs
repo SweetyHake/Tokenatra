@@ -14,6 +14,10 @@ pub enum GuiCommand {
     Show,
     #[allow(dead_code)]
     EvalJs(String),
+    /// Перетаскивание окна за хедер (Linux/macOS; Windows — через Win32-хук).
+    DragWindow,
+    /// Ресайз за края (Linux/macOS; macOS вернёт unsupported).
+    DragResize(tao::window::ResizeDirection),
 }
 
 struct Channel {
