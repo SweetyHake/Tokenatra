@@ -42,6 +42,41 @@ struct DragState {
 static DRAG_STATE: Mutex<Option<DragState>> = Mutex::new(None);
 static ORIG_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 
+/// Вебвью для ресайза из хука. Хук всегда вызывается на потоке event loop —
+/// тот же, где создан Arc<WebView>, поэтому thread_local безопасен и не
+/// требует Sync от COM-обёртки wry.
+thread_local! {
+    static RESIZE_TARGET: std::cell::RefCell<Option<std::sync::Arc<wry::WebView>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Регистрирует вебвью, который hook_proc растягивает по WM_SIZE.
+pub fn set_resize_target(webview: std::sync::Arc<wry::WebView>) {
+    RESIZE_TARGET.with(|c| *c.borrow_mut() = Some(webview));
+}
+
+/// Растянуть вебвью по клиентской области родителя (вызывается из хука на
+/// WM_SIZE и из shell при показе окна). Возвращает false, если цели нет.
+pub fn resize_webview_to_client() -> bool {
+    let Some(hwnd) = hwnd() else { return false };
+    let mut rect = RECT::default();
+    if unsafe { GetClientRect(hwnd, &mut rect) }.is_err() {
+        return false;
+    }
+    let w = (rect.right - rect.left).max(0) as u32;
+    let h = (rect.bottom - rect.top).max(0) as u32;
+    RESIZE_TARGET.with(|c| {
+        if let Some(wv) = c.borrow().as_ref() {
+            let _ = wv.set_bounds(wry::Rect {
+                position: tao::dpi::PhysicalPosition::new(0, 0).into(),
+                size: tao::dpi::PhysicalSize::new(w, h).into(),
+            });
+            return true;
+        }
+        false
+    })
+}
+
 pub fn post_drag_message(hwnd: HWND) {
     unsafe {
         let _ = PostMessageW(Some(hwnd), WM_APP + 1, WPARAM(0), LPARAM(0));
@@ -92,6 +127,11 @@ unsafe extern "system" fn hook_proc(
     if msg == WM_NCCALCSIZE && wp.0 != 0 {
         // Полный клиент-арей: содержимое WebView2 покрывает всё окно
         return LRESULT(0);
+    }
+    if msg == WM_SIZE && wp.0 != SIZE_MINIMIZED as usize {
+        // Сабкласс wry не получает WM_SIZE через нашу цепочку хуков —
+        // растягиваем вебвью сами (hook гарантированно первый в цепочке)
+        resize_webview_to_client();
     }
     if msg == WM_APP + 1 {
         let swap = GetSystemMetrics(SM_SWAPBUTTON);

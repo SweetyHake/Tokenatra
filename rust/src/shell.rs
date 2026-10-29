@@ -96,23 +96,23 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
 
     // Windows: кастомный тайтлбар (тёмная рамка, DWM NC off, WndProc-хук)
     #[cfg(windows)]
-    {
+    let (window, webview) = {
         use tao::platform::windows::WindowExtWindows as _;
         let hwnd = window.hwnd();
         crate::win::store_hwnd(hwnd);
         crate::win::customize_window(hwnd);
         crate::win::set_window_icon(hwnd, &crate::paths::resource_dir().join("icon.ico"));
         window.set_visible(true);
-        // wry создаёт вебвью при СКРЫТОМ окне и снимает неверный клиентский
-        // размер (WM_SIZE после этого не приходит) — child остаётся ~280px
-        // квадратом. Принудительно задаём bounds по фактической клиентской
-        // области (физические пиксели).
-        let client = window.inner_size();
-        let _ = webview.set_bounds(wry::Rect {
-            position: tao::dpi::PhysicalPosition::new(0, 0).into(),
-            size: tao::dpi::PhysicalSize::new(client.width, client.height).into(),
-        });
-    }
+        // Регистрируем вебвью для ресайза из хука (WM_SIZE) и сразу
+        // растягиваем: wry создал вебвью при СКРЫТОМ окне и снял неверный
+        // клиентский размер — без этого child остаётся ~280px квадратом.
+        let webview = Arc::new(webview);
+        crate::win::set_resize_target(webview.clone());
+        crate::win::resize_webview_to_client();
+        (window, webview)
+    };
+    #[cfg(not(windows))]
+    let (window, webview) = (window, Arc::new(webview));
 
     // ===== Трей: иконка живёт весь цикл приложения (как у Discord) =====
     #[cfg(windows)]
@@ -121,7 +121,6 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
     let tray: Option<()> = None;
 
     let window = Arc::new(window);
-    let webview = Arc::new(webview);
     let st = state.clone();
 
     event_loop.run(move |event, _, control_flow| {
