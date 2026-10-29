@@ -125,7 +125,19 @@ unsafe extern "system" fn hook_proc(
         }
     }
     if msg == WM_NCCALCSIZE && wp.0 != 0 {
-        // Полный клиент-арей: содержимое WebView2 покрывает всё окно
+        // Полный клиент-арей: содержимое WebView2 покрывает всё окно.
+        // При maximize Windows раздувает окно на ширину невидимой рамки —
+        // компенсируем, иначе верхняя часть тайтлбара уезжает за экран.
+        if IsZoomed(hwnd).as_bool() {
+            let frame =
+                GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            if let Some(r) = (lp.0 as *mut RECT).as_mut() {
+                r.left += frame;
+                r.top += frame;
+                r.right -= frame;
+                r.bottom -= frame;
+            }
+        }
         return LRESULT(0);
     }
     if msg == WM_SIZE && wp.0 != SIZE_MINIMIZED as usize {
