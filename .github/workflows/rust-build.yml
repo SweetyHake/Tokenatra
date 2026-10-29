@@ -1,0 +1,87 @@
+name: rust-build
+
+# Сборка Rust-версии Tokenatra на всех платформах.
+# Отдельная от Python-релизов линия: артефакты прикладываются к workflow run,
+# прод-релизы (setup.exe/dmg/AppImage) продолжает собирать build-release.yml.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["rust/**", ".github/workflows/rust-build.yml"]
+  push:
+    branches: [main]
+    paths: ["rust/**", ".github/workflows/rust-build.yml"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: rust
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: tokenatra-windows-x86_64
+          - os: macos-latest
+            artifact: tokenatra-macos
+          - os: ubuntu-22.04
+            artifact: tokenatra-linux-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies (webkit2gtk + gtk)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Clippy
+        run: cargo clippy --release -- -D warnings
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/tokenatra.exe dist/
+          cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../example.png dist/ 2>/dev/null || true
+          7z a -tzip "${{ matrix.artifact }}.zip" dist
+      - name: Package (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/tokenatra dist/
+          cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../example.png dist/ 2>/dev/null || true
+          tar czf "${{ matrix.artifact }}.tar.gz" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            rust/*.zip
+            rust/*.tar.gz
+          if-no-files-found: error

@@ -1,0 +1,62 @@
+[package]
+name = "tokenatra"
+version = "26.4.0"
+edition = "2024"
+description = "Tokenatra: token editor & background remover (Rust edition)"
+default-run = "tokenatra"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = "symbols"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["multipart"] }
+base64 = "0.23"
+if-addrs = "0.15"
+image = { version = "0.25", features = ["avif"] }
+imageproc = "0.27"
+open = "5"
+percent-encoding = "2"
+rand = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json"] }
+rfd = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tao = "0.37"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower = "0.5"
+tower-http = { version = "0.7", features = ["fs"] }
+url = "2.5"
+webp = "0.3"
+which = "8"
+winreg = "0.56"
+wry = "0.57"
+
+# ONNX Runtime (pyke io). Execution providers are unified per target below:
+# Windows -> DirectML, macOS -> CoreML, Linux -> CPU (the same matrix the
+# Python app shipped: onnxruntime-directml / onnxruntime / onnxruntime).
+ort = { version = "2.0.0-rc.15", features = ["half"] }
+crossbeam-channel = "0.5.17"
+half = "2.7.1"
+
+[target.'cfg(windows)'.dependencies]
+ort = { version = "2.0.0-rc.15", features = ["directml"] }
+tray-icon = "0.21"
+muda = "0.17"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Com",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ort = { version = "2.0.0-rc.15", features = ["coreml"] }
