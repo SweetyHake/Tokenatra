@@ -18,13 +18,23 @@ pub fn render_index() -> String {
     out = out.replace("{{ __version__ }}", VERSION);
     out = out.replace("{{ embed_allowed|tojson }}", &embed_json);
     // {{ url_for('static', filename='X', v=__version__) }} -> /static/X?v=VERSION
-    while let Some(pos) = out.find("{{ url_for('static', filename='") {
-        let after = &out[pos + "{{ url_for('static', filename='".len()..];
-        let Some(end_rel) = after.find("') }}") else { break };
+    // (в шаблоне у url_for есть хвост ", v=__version__" — считаем его часть подстановки)
+    let marker = "{{ url_for('static', filename='";
+    while let Some(pos) = out.find(marker) {
+        let after = &out[pos + marker.len()..];
+        // filename заканчивается на ') или ', — берём всё до закрывающих "}}}"
+        let Some(end_rel) = after.find('\'') else { break };
         let filename = &after[..end_rel];
+        let rest = &after[end_rel..];
+        // пропускаем остальные аргументы url_for до "}}"
+        let Some(close) = rest.find("}}") else { break };
         let replacement = format!("/static/{filename}?v={VERSION}");
-        let end_full = pos + "{{ url_for('static', filename='".len() + end_rel + "') }}".len();
+        let end_full = pos + marker.len() + end_rel + close + 2;
         out.replace_range(pos..end_full, &replacement);
+    }
+    if out.contains("{{") {
+        // страховка от рассинхрона с шаблоном: сырой Jinja не должен доехать до UI
+        println!(" WARNING: render_index оставил необработанные подстановки в index.html");
     }
     out
 }
