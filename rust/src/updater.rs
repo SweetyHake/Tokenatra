@@ -196,7 +196,17 @@ pub fn check_for_updates(force: bool) {
             .header("Accept", "application/vnd.github.v3+json")
             .send()?
             .error_for_status()?;
-        Ok(resp.json()?)
+        let status = resp.status();
+        let text = resp.text()?;
+        println!("  [update] API status: {status}, body: {} bytes", text.len());
+        if let Ok(v) = serde_json::from_str::<Value>(&text) {
+            println!(
+                "  [update] tag: {:?}, message: {:?}",
+                v.get("tag_name").and_then(|t| t.as_str()),
+                v.get("message").and_then(|t| t.as_str())
+            );
+        }
+        serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("json: {e}"))
     })();
 
     let mut s = state().lock().unwrap();
