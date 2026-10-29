@@ -102,8 +102,16 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
         crate::win::store_hwnd(hwnd);
         crate::win::customize_window(hwnd);
         crate::win::set_window_icon(hwnd, &crate::paths::resource_dir().join("icon.ico"));
-        let _ = hwnd;
         window.set_visible(true);
+        // wry создаёт вебвью при СКРЫТОМ окне и снимает неверный клиентский
+        // размер (WM_SIZE после этого не приходит) — child остаётся ~280px
+        // квадратом. Принудительно задаём bounds по фактической клиентской
+        // области (физические пиксели).
+        let client = window.inner_size();
+        let _ = webview.set_bounds(wry::Rect {
+            position: tao::dpi::PhysicalPosition::new(0, 0).into(),
+            size: tao::dpi::PhysicalSize::new(client.width, client.height).into(),
+        });
     }
 
     // ===== Трей: иконка живёт весь цикл приложения (как у Discord) =====
