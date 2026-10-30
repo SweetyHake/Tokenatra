@@ -1,3 +1,9 @@
+// Release-сборка: GUI-подсистема Windows — без консольного окна у процесса
+// (это окно и видно при запуске). Debug остаётся консольным: println и
+// --server видны в терминале. При перенаправлении вывода (stdout в файл)
+// GUI-подсистема пишет в хендлы как обычно.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod cli;
 mod config;
 mod consts;
