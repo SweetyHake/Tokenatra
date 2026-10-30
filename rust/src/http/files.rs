@@ -57,21 +57,25 @@ pub async fn save_file(mut mp: Multipart) -> Response {
     };
 
     let ext = super::ext_of(&filename);
-    let label = match ext.as_str() {
-        "webp" => "WebP Image",
-        "png" => "PNG Image",
-        "jpg" | "jpeg" => "JPEG Image",
-        "avif" => "AVIF Image",
-        _ => "File",
-    };
 
     let suggested = filename.clone();
     let picked = tokio::task::spawn_blocking(move || {
-        rfd::FileDialog::new()
-            .set_file_name(&suggested)
-            .add_filter(label, &[&ext])
-            .add_filter("All files", &["*"])
-            .save_file()
+        // «Тип файла» в диалоге: все экспортные форматы, формат выбранного
+        // файла первым (диалог откроется с ним), затем все остальные
+        let mut types: Vec<(&str, Vec<&str>)> = vec![
+            ("WebP Image", vec!["webp"]),
+            ("PNG Image", vec!["png"]),
+            ("JPEG Image", vec!["jpg", "jpeg"]),
+            ("AVIF Image", vec!["avif"]),
+        ];
+        types.sort_by_key(|(_, exts)| {
+            if exts.iter().any(|e| *e == ext.as_str()) { 0 } else { 1 }
+        });
+        let mut dlg = rfd::FileDialog::new().set_file_name(&suggested);
+        for (name, exts) in &types {
+            dlg = dlg.add_filter(*name, exts.as_slice());
+        }
+        dlg.add_filter("All files", &["*"]).save_file()
     })
     .await
     .unwrap_or(None);
