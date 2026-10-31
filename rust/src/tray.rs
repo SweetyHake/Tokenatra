@@ -64,6 +64,8 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         .with_icon(icon)
         .with_tooltip("Tokenatra")
         .with_menu(Box::new(menu))
+        // ЛКМ — открыть окно (обработчик TrayIconEvent ниже), меню — по ПКМ
+        .with_menu_on_left_click(false)
         .build()
         .ok()?;
 
@@ -109,9 +111,14 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         if let Ok(ev) = tray_icon::TrayIconEvent::receiver()
             .recv_timeout(std::time::Duration::from_millis(0))
         {
+            // ЛКМ или двойной клик — открыть окно; меню открывается по ПКМ
+            // силами tray-icon (menu_on_left_click = false)
             let open = matches!(
                 ev,
-                tray_icon::TrayIconEvent::DoubleClick { .. }
+                tray_icon::TrayIconEvent::Click {
+                    button: tray_icon::MouseButton::Left,
+                    ..
+                } | tray_icon::TrayIconEvent::DoubleClick { .. }
             );
             if open {
                 let _ = crate::gui_control::send(crate::gui_control::GuiCommand::Show);

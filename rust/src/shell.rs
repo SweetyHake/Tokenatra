@@ -197,7 +197,10 @@ fn handle_gui_command(
             EXIT_REQUESTED.store(true, Ordering::SeqCst);
         }
         GuiCommand::Show => {
+            // Из трея окно может быть и спрятано, и свернуто — восстанавливаем
+            window.set_minimized(false);
             window.set_visible(true);
+            window.set_focus();
             state.set_tray_mode(false);
             let _ = webview.evaluate_script(exit_idle_js());
         }
