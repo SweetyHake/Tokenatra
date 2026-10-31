@@ -3,10 +3,14 @@
 //! меню, GPU-настройки WebView2, тёмные диалоги, освобождение порта.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::Mutex;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, ReleaseCapture, VK_LBUTTON, VK_RBUTTON,
 };
@@ -76,6 +80,81 @@ pub fn post_drag_message(hwnd: HWND) {
     }
 }
 
+// ===== Полноэкранный режим F11 =====
+// tao Borderless оставляет окну WS_CAPTION и не поднимает его над панелью
+// задач: Windows не считает такое окно полноэкранным и панель задач остаётся
+// видимой. Здесь честный Win32-переход: снять WS_CAPTION|WS_THICKFRAME и
+// растянуть на монитор; при выходе восстановить стили, границы и
+// развёрнутость. Состояние живёт только здесь — event loop-поток.
+
+struct FullscreenState {
+    rect: RECT,
+    style: isize,
+    zoomed: bool,
+}
+
+static FULLSCREEN: Mutex<Option<FullscreenState>> = Mutex::new(None);
+
+pub fn is_fullscreen() -> bool {
+    FULLSCREEN.lock().map(|s| s.is_some()).unwrap_or(false)
+}
+
+pub fn toggle_fullscreen(hwnd: HWND) {
+    unsafe {
+        if let Some(prev) = FULLSCREEN.lock().unwrap().take() {
+            // Выход: вернуть стили, границы и (если было) развёрнутое состояние
+            let _ = SetWindowLongPtrW(hwnd, GWL_STYLE, prev.style);
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                prev.rect.left,
+                prev.rect.top,
+                prev.rect.right - prev.rect.left,
+                prev.rect.bottom - prev.rect.top,
+                SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            if prev.zoomed {
+                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+            }
+        } else {
+            let mut rect = RECT::default();
+            if GetWindowRect(hwnd, &mut rect).is_err() {
+                return;
+            }
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+            let zoomed = IsZoomed(hwnd).as_bool();
+            *FULLSCREEN.lock().unwrap() = Some(FullscreenState { rect, style, zoomed });
+            let _ = SetWindowLongPtrW(
+                hwnd,
+                GWL_STYLE,
+                style
+                    & !(WS_CAPTION.0 as isize
+                        | WS_THICKFRAME.0 as isize
+                        // иначе останется IsZoomed() и NCCALCSIZE-инсет развернутого
+                        // окна съест 10px по краям полноэкранного кадра
+                        | WS_MAXIMIZE.0 as isize),
+            );
+            let mut mi = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut mi).as_bool() {
+                let rc = mi.rcMonitor;
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOP),
+                    rc.left,
+                    rc.top,
+                    rc.right - rc.left,
+                    rc.bottom - rc.top,
+                    SWP_FRAMECHANGED,
+                );
+            }
+        }
+        let _ = resize_webview_to_client();
+    }
+}
+
 unsafe extern "system" fn hook_proc(
     hwnd: HWND,
     msg: u32,
@@ -83,7 +162,7 @@ unsafe extern "system" fn hook_proc(
     lp: LPARAM,
 ) -> LRESULT { unsafe {
     let is_zoomed = IsZoomed(hwnd).as_bool();
-    if msg == WM_NCHITTEST && !is_zoomed {
+    if msg == WM_NCHITTEST && !is_zoomed && !is_fullscreen() {
         let x = (lp.0 & 0xFFFF) as i16 as i32;
         let y = ((lp.0 >> 16) & 0xFFFF) as i16 as i32;
         let mut rect = RECT::default();

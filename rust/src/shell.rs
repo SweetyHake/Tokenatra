@@ -205,11 +205,21 @@ fn handle_gui_command(
             let _ = webview.evaluate_script(exit_idle_js());
         }
         GuiCommand::ToggleFullscreen => {
-            use tao::window::Fullscreen;
-            if window.fullscreen().is_some() {
-                window.set_fullscreen(None);
-            } else {
-                window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+            // Windows: честный Win32-fullscreen (win.rs) — tao Borderless
+            // оставляет WS_CAPTION и не прячет панель задач;
+            // Linux/macOS: нативный borderless tao работает корректно.
+            #[cfg(windows)]
+            if let Some(hwnd) = crate::win::hwnd() {
+                crate::win::toggle_fullscreen(hwnd);
+            }
+            #[cfg(not(windows))]
+            {
+                use tao::window::Fullscreen;
+                if window.fullscreen().is_some() {
+                    window.set_fullscreen(None);
+                } else {
+                    window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                }
             }
         }
         GuiCommand::EvalJs(code) => {
