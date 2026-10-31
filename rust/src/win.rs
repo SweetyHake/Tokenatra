@@ -3,13 +3,12 @@
 //! меню, GPU-настройки WebView2, тёмные диалоги, освобождение порта.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
-use std::sync::Mutex;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, ReleaseCapture, SetCapture, VK_LBUTTON, VK_RBUTTON,
+    GetAsyncKeyState, ReleaseCapture, VK_LBUTTON, VK_RBUTTON,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -34,12 +33,6 @@ pub fn hwnd() -> Option<HWND> {
 
 // ===== WndProc: NCCALCSIZE/NCHITTEST + перетаскивание из WebView =====
 
-struct DragState {
-    dx: i32,
-    dy: i32,
-}
-
-static DRAG_STATE: Mutex<Option<DragState>> = Mutex::new(None);
 static ORIG_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 
 /// Вебвью для ресайза из хука. Хук всегда вызывается на потоке event loop —
@@ -146,53 +139,23 @@ unsafe extern "system" fn hook_proc(
         resize_webview_to_client();
     }
     if msg == WM_APP + 1 {
+        // Нативный модальный цикл перемещения вместо ручного SetCapture-цикла:
+        // система сама двигает окно, поэтому работают Aero Snap (перетягивание
+        // к краям — половина экрана, вверх — в максимум, с флайаутом Snap
+        // Layouts в Win11) и перетягивание развёрнутого окна. ReleaseCapture
+        // обязателен: без него WebView2 держит захват мыши и цикл «прилипает»
+        // (история app.py), не получая WM_LBUTTONUP.
+        use windows::Win32::UI::WindowsAndMessaging::{HTCAPTION, SC_MOVE};
         let swap = GetSystemMetrics(SM_SWAPBUTTON);
         let vk_primary = if swap != 0 { VK_RBUTTON } else { VK_LBUTTON };
-        if !is_zoomed && (GetAsyncKeyState(vk_primary.0 as i32) as u32 & 0x8000) != 0 {
-            let mut pt = POINT::default();
-            let mut rect = RECT::default();
-            if GetCursorPos(&mut pt).is_ok() && GetWindowRect(hwnd, &mut rect).is_ok() {
-                if let Ok(mut st) = DRAG_STATE.lock() {
-                    *st = Some(DragState {
-                        dx: pt.x - rect.left,
-                        dy: pt.y - rect.top,
-                    });
-                }
-                let _ = ReleaseCapture();
-                let _ = SetCapture(hwnd);
-            }
-        }
-        return LRESULT(0);
-    }
-    if msg == WM_MOUSEMOVE {
-        if let Ok(st) = DRAG_STATE.lock() {
-            if let Some(d) = st.as_ref() {
-                let mut pt = POINT::default();
-                if GetCursorPos(&mut pt).is_ok() {
-                    let _ = SetWindowPos(
-                        hwnd,
-                        None,
-                        pt.x - d.dx,
-                        pt.y - d.dy,
-                        0,
-                        0,
-                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-                    );
-                }
-                return LRESULT(0);
-            }
-        }
-    }
-    if msg == WM_LBUTTONUP {
-        let had = DRAG_STATE.lock().map(|mut s| s.take().is_some()).unwrap_or(false);
-        if had {
+        if (GetAsyncKeyState(vk_primary.0 as i32) as u32 & 0x8000) != 0 {
             let _ = ReleaseCapture();
-        }
-        return LRESULT(0);
-    }
-    if msg == WM_CAPTURECHANGED {
-        if let Ok(mut s) = DRAG_STATE.lock() {
-            *s = None;
+            SendMessageW(
+                hwnd,
+                WM_SYSCOMMAND,
+                Some(WPARAM((SC_MOVE | HTCAPTION) as usize)),
+                Some(LPARAM(0)),
+            );
         }
         return LRESULT(0);
     }
