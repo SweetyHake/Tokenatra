@@ -283,13 +283,6 @@ def _guard_localhost_only():
         # студией из Foundry (чтение, /process, /config); системные роуты
         # (/shutdown, /apply_update, /api/window, /save_to_folder) остаются
         # только для приложения. Тумблер в карточке «Сеть».
-        try:
-            _ab = _allow_browser()
-            _icr = _is_connector_route()
-            _iui = _is_ui_asset_path()
-            _cfg = request.path == '/config'
-        except BaseException as e:
-            raise
         if _allow_browser() and (_is_connector_route() or _is_ui_asset_path()
                                  or request.path == '/config'):
             return None
@@ -2996,6 +2989,13 @@ def save_to_folder():
     if 'file' not in request.files:
         return jsonify({'error': 'No file'}), 400
 
+    # Имя файла приходит из формы: разрешаем только изображения, чтобы
+    # эндпоинт нельзя было превратить в «запиши .bat/.js в выбранную
+    # папку» (см. аудит Agent API, цепочка lastFolders).
+    ext = Path(filename).suffix.lower()
+    if ext not in {'.webp', '.png', '.jpg', '.jpeg', '.avif'}:
+        return jsonify({'error': 'Only image extensions are allowed (.webp/.png/.jpg/.jpeg/.avif)'}), 400
+
     folder_path = Path(folder)
     if not folder_path.exists() or not folder_path.is_dir():
         return jsonify({'error': 'Invalid folder'}), 400
@@ -3151,6 +3151,13 @@ def save_config():
                 for key in ('shared_secret', 'listen_host', 'allowed_origins',
                             'allowed_hosts', 'allow_browser'):
                     merged.pop(key, None)
+                # lastFolders — пути записи quick-save: чужой сайт не должен
+                # подменять их (экспорт молча писал бы куда угодно). Ключ не
+                # удаляем, а откатываем к существующему значению.
+                if 'lastFolders' in merged and 'lastFolders' in existing:
+                    merged['lastFolders'] = existing['lastFolders']
+                else:
+                    merged.pop('lastFolders', None)
             return merged
         _update_config(_mutate)
         return jsonify({'ok': True})
