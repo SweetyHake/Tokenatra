@@ -263,6 +263,31 @@ def _guard_localhost_only():
                     or any(request.path.startswith(p) for p in PUBLIC_OPEN_PREFIXES)):
                 return None
             return jsonify({'error': 'Forbidden'}), 403
+        # ===== Agent API (/agent/v1/*): локальные инструменты без ключей =====
+        # Модель Blender MCP: доверенная зона — localhost-процессы того же
+        # пользователя; отдельных ключей и тумблеров нет. Ветка стоит ДО
+        # пермиссивной allow_browser-ветки: агентные роуты не открываются
+        # чужим сайтам ни при каких настройках. X-Tokenatra-Agent — не
+        # секрет, а capability-маркер: кросс-сайтовая форма/no-cors не может
+        # поставить кастомный заголовок, а браузеру для него нужен preflight
+        # с Origin — чужой Origin режется проверкой ниже.
+        if request.path.startswith('/agent/'):
+            if request.method == 'OPTIONS':
+                # Легитимных preflight нет: same-origin браузер не префлайбит,
+                # local_tool не OPTIONS-ит. Любой preflight — чужой сайт.
+                return jsonify({'error': 'Forbidden'}), 403
+            sec = request.headers.get('Sec-Fetch-Site', '').lower()
+            if sec and sec not in ('same-origin', 'same-site', 'none'):
+                # no-cors сабресурс (img/form) с чужого сайта
+                return jsonify({'error': 'Forbidden'}), 403
+            origin = request.headers.get('Origin', '')
+            if origin:
+                expected = f'{request.scheme}://{request.host}'.lower()
+                if origin.lower() != expected:
+                    return jsonify({'error': 'Forbidden'}), 403
+            if request.headers.get('X-Tokenatra-Agent', '') != '1':
+                return jsonify({'error': 'Forbidden'}), 403
+            return None
         # Модуль Foundry: localhost:30000 -> 127.0.0.1:7878 для браузера
         # cross-site (порт в same-site не входит), но это та же машина —
         # пропускаем Sec-Fetch-Site/Origin-проверки только для allowlist-роутов
