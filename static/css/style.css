@@ -449,8 +449,8 @@ html.embed .quick-save-folder-row.example-file-row{ display: flex; }.quick-save-
     display: flex; align-items: center; gap: 6px;
     font-size: 11px; font-weight: var(--fw-semibold);
     text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted);
-}.accordion-header-left svg{ width: 12px; height: 12px; }.accordion-header-right{ display: flex; align-items: center; gap: 4px; }.accordion-reset-btn{
-    width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+}.accordion-header-left svg{ width: 12px; height: 12px; }.accordion-header-right{ display: flex; align-items: center; gap: 2px; }.accordion-reset-btn{
+    width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
     background: transparent; border: none; border-radius: var(--r-xs);
     color: var(--text-muted); cursor: pointer; padding: 0;
     transition: all var(--dur-fast) var(--ease-out);
@@ -466,7 +466,7 @@ html.embed .quick-save-folder-row.example-file-row{ display: flex; }.quick-save-
 }.accordion-body.open{ height: auto; opacity: 1; padding: 6px 0; }/* Accordion body dims when collapsed (already handled by JS .open class) */
 
 /* ── Effect check ───────────────────────────────────────────── */
-.effect-check{ display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; cursor: pointer; position: relative; }.effect-check input[type="checkbox"]{
+.effect-check{ display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; cursor: pointer; position: relative; }.effect-check input[type="checkbox"]{
     position: absolute; width: 1px; height: 1px; margin: 0;
     opacity: 0; clip-path: inset(50%); overflow: hidden;
 }.check-box{
@@ -1010,7 +1010,7 @@ html.embed .quick-save-folder-row.example-file-row{ display: flex; }.quick-save-
    TOKEN EDITOR WORKSPACE
    Keep the editor focused, dense and tool-first.
    ================================================================ */
-#tokenPanel .workspace{ background: var(--bg-base); }.ctx-scroll{ padding: 12px 14px 14px; gap: 8px; }.ctx-divider{ background: var(--border-subtle); margin: 1px 0; }.file-row{ min-height: 38px; padding: 6px 8px; border-radius: var(--r-sm); background: var(--bg-raised); }.file-row::before{ width: 28px; height: 28px; -webkit-mask-size: 18px 18px; mask-size: 18px 18px; }.file-row .ghost-btn{ padding: 4px 8px; }.tool-bar{ gap: 4px; }.tool-btn{ height: 48px; border-radius: var(--r-sm); background: var(--bg-raised); border-color: var(--border-subtle); }.tool-btn:hover{ transform: none; box-shadow: none; }.tool-btn.active{ box-shadow: 0 0 0 1px var(--accent-glow); }.tool-icon-btn, #removeBgBtn{ height: 34px; border-radius: var(--r-sm); }.eraser-size-row{ border-radius: var(--r-sm); background: var(--bg-raised); }.transform-row{ gap: 4px; }.slider-row{ min-height: 22px; }.slider-label{ min-width: 58px; font-size: var(--fs-xs); }.context-panel-right .ctx-scroll{ gap: 8px; }.accordion-header{ height: 42px; min-height: 42px; padding: 4px 6px; border: 1px solid var(--border-subtle); border-radius: var(--r-sm); background: rgba(48,40,49,.35); }.accordion-header-left{ font-size: 12px; letter-spacing: .06em; }.accordion-header-left svg{ color: var(--accent); }.accordion-header-right{ gap: 4px; }.accordion-body.open{ padding: 6px 4px 2px; }.ring-carousel{ padding: 2px 0; }.canvas-area{
+#tokenPanel .workspace{ background: var(--bg-base); }.ctx-scroll{ padding: 12px 14px 14px; gap: 8px; }.ctx-divider{ background: var(--border-subtle); margin: 1px 0; }.file-row{ min-height: 38px; padding: 6px 8px; border-radius: var(--r-sm); background: var(--bg-raised); }.file-row::before{ width: 28px; height: 28px; -webkit-mask-size: 18px 18px; mask-size: 18px 18px; }.file-row .ghost-btn{ padding: 4px 8px; }.tool-bar{ gap: 4px; }.tool-btn{ height: 48px; border-radius: var(--r-sm); background: var(--bg-raised); border-color: var(--border-subtle); }.tool-btn:hover{ transform: none; box-shadow: none; }.tool-btn.active{ box-shadow: 0 0 0 1px var(--accent-glow); }.tool-icon-btn, #removeBgBtn{ height: 34px; border-radius: var(--r-sm); }.eraser-size-row{ border-radius: var(--r-sm); background: var(--bg-raised); }.transform-row{ gap: 4px; }.slider-row{ min-height: 22px; }.slider-label{ min-width: 58px; font-size: var(--fs-xs); }.context-panel-right .ctx-scroll{ gap: 8px; }.accordion-header{ height: 42px; min-height: 42px; padding: 4px 4px; border: 1px solid var(--border-subtle); border-radius: var(--r-sm); background: rgba(48,40,49,.35); }.accordion-header-left{ font-size: 12px; letter-spacing: .03em; }.accordion-header-left svg{ color: var(--accent); }.accordion-header-right{ gap: 2px; }.accordion-body.open{ padding: 6px 4px 2px; }.ring-carousel{ padding: 2px 0; }.canvas-area{
     margin: 0; border: 0; border-radius: 0; box-shadow: inset 0 0 50px rgba(0,0,0,.36);
 }.canvas-undo-bar{ top: 14px; left: 14px; border-radius: var(--r-md); opacity: .75; }.undo-btn{ border-radius: var(--r-sm); }.canvas-overlay svg{ width: 48px; height: 48px; }.canvas-overlay p{ font-size: var(--fs-md); }.canvas-overlay span{ font-size: var(--fs-xs); }.zoom-controls{ top: 14px; right: 14px; border-radius: var(--r-md); opacity: .75; }.zc-btn{ border-radius: var(--r-sm); }@media (max-width: 900px){
     .context-panel { width: 240px !important; min-width: 190px; }
@@ -1102,7 +1102,7 @@ html.embed .nav-btn[data-mode="fileTools"],
 html.embed .nav-btn[data-mode="settings"]{
     display: none;
 }/* ── Заголовки аккордеонов: текст обрезается, контролы всегда видимы ── */
-.accordion-header{ gap: 8px; }.accordion-header-left{
+.accordion-header{ gap: 4px; }.accordion-header-left{
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
