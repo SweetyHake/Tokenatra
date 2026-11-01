@@ -176,6 +176,16 @@ def test_assets_lists_catalogs(api):
     assert 'rings' in r.get_json() and 'presets' in r.get_json()
 
 
+def test_tools_schema_openai_dialect(api):
+    r = api.get('/agent/v1/tools_schema', headers=MARKER)
+    assert r.status_code == 200
+    tools = r.get_json()
+    names = {t['function']['name'] for t in tools}
+    assert all(t['type'] == 'function' for t in tools)
+    assert 'tokenatra_create_session' in names
+    assert 'tokenatra_export' in names
+
+
 def test_preview_webp(api):
     sid = _create(api)
     r = api.get(f'/agent/v1/sessions/{sid}/preview?size=128', headers=MARKER)

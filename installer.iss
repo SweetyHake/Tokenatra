@@ -36,6 +36,9 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Files]
 Source: "dist\Tokenatra\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; MCP-прокси для ИИ-агентов (Claude/OpenCode/DeepSeek): отдельный каталог,
+; чтобы _internal не пересекался с основным приложением
+Source: "dist\TokenatraMCP\*"; DestDir: "{app}\TokenatraMCP"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

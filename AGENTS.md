@@ -154,6 +154,17 @@ iscc installer.iss
   «Доступ для игроков» + `/network_info` (только localhost).
 - Подробности и FAQ: docs/FOUNDRY.md.
 
+## Agent API (редактор для ИИ-агентов)
+
+- `/?embed=1` — не единственный внешний вход: `/agent/v1/*` — headless-редактор токенов (план и политика — `docs/AGENT_API.md`, обязателен к прочтению перед правками).
+- Модель доверия Blender MCP: **без ключей и тумблеров**, доступ = localhost-процесс + заголовок `X-Tokenatra-Agent: 1` (см. ветку гуарда и `tests/test_agent_guard.py`).
+- Инвариант: операции `/agent/*` НИКОГДА не исполняют код, не читают конфиг/секреты, не пишут на диск, не ходят в сеть; источники — только base64/data_url. Новая «способная» операция получает собственный гейт, а не исключение из инварианта.
+- Файлы: `agent_pipeline.py` (ядро, чистый Pillow/numpy, без Flask), `agent_api.py` (blueprint-транспорт), `tokenatra_mcp.py` (MCP stdio-прокси, **stdlib-only** — не добавлять туда зависимости), `examples/deepseek_demo.py`.
+- Схемы OpenAI (`/agent/v1/tools_schema`) и MCP-тулзы строятся из одного источника (`tokenatra_mcp._TOOLS`) — не дублировать.
+- Быстрый смоук из репо: приложение/`python server.py` должно слушать 7878; `curl -H "X-Tokenatra-Agent: 1" http://127.0.0.1:7878/agent/v1/manifest`.
+- Тесты: `python -m pytest tests/` (guard/pipeline/api/mcp; ONNX не нужен — remove_bg мокается).
+- Паритет композиции с `TokenCanvas.renderForSave` — обязательный референс при правках `compose()`; известные расхождения описаны в docs/AGENT_API.md.
+
 ## Dependencies
 
 Единый `requirements.txt` — источник правды для `start.sh` и CI.

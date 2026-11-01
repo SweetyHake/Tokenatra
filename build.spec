@@ -84,6 +84,27 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# --- TokenatraMCP: консольный stdio-прокси Agent API (фаза 2) ---
+# Чистый stdlib (никаких PIL/numpy/flask/onnx): exe получается маленьким
+# и не тянет GUI-стек. Логика живёт в приложении на 127.0.0.1:7878.
+m = Analysis(
+    ['tokenatra_mcp.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        'PIL', 'numpy', 'flask', 'webview', 'onnxruntime', 'psutil',
+        'pystray', 'tkinter', 'imageio_ffmpeg', 'matplotlib', 'scipy',
+        'pandas', 'pydantic', 'anyio', 'httpx', 'starlette', 'tqdm',
+    ],
+    noarchive=False,
+)
+pyz_mcp = PYZ(m.pure, m.zipped_data, cipher=block_cipher)
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -104,6 +125,28 @@ exe = EXE(
     entitlements_file=None,
     version='version_info.txt' if is_windows else None,
     icon='icon.ico' if is_windows else icns_path,
+)
+
+exe_mcp = EXE(
+    pyz_mcp,
+    m.scripts,
+    [],
+    exclude_binaries=True,
+    name='TokenatraMCP',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    # stdio MCP обязан быть консольным: главный exe — console=False,
+    # у windowed-процесса нет stdout/stdin пайпов
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
 )
 
 if is_macos:
@@ -132,4 +175,16 @@ else:
         upx=True,
         upx_exclude=[],
         name=APP_NAME,
+    )
+    # MCP-прокси — отдельным каталогом (свой _internal), инсталлятор
+    # кладёт его в {app}\TokenatraMCP
+    coll_mcp = COLLECT(
+        exe_mcp,
+        m.binaries,
+        m.zipfiles,
+        m.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='TokenatraMCP',
     )

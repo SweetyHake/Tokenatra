@@ -126,6 +126,22 @@ def assets():
     return jsonify(core.list_assets())
 
 
+@agent_bp.get('/tools_schema')
+def tools_schema():
+    """OpenAI function-calling схемы (static, без параметров диалекта —
+    правка арх. ревью). Источник — те же определения, что отдаёт MCP:
+    схемы не могут разъехаться."""
+    import tokenatra_mcp
+    return jsonify([{
+        'type': 'function',
+        'function': {
+            'name': t['name'],
+            'description': t['description'],
+            'parameters': t['inputSchema'],
+        },
+    } for t in tokenatra_mcp._TOOLS])
+
+
 # ===== Сессии =====
 
 @agent_bp.post('/sessions')
