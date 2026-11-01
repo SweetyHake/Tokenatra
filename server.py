@@ -67,6 +67,13 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 # подхватывать старые JS (12-часовой дефолт Flask давал микс старых/новых файлов)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
+# ===== Agent API (фаза 1): headless-редактор для ИИ-агентов =====
+# Гуард выше (ветка /agent/*) пускает local_tool + X-Tokenatra-Agent
+# и same-origin браузер; всем остальным — 403. Логика в agent_pipeline,
+# здесь только регистрация транспорта.
+from agent_api import agent_bp  # noqa: E402
+app.register_blueprint(agent_bp)
+
 
 # ===== Интеграция с FoundryVTT (модуль-коннектор) =====
 # Роуты, доступные кросс-сайтово с Origin localhost-семейства (Foundry на той

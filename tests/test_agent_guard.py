@@ -18,12 +18,15 @@ SELF_ORIGIN = 'http://localhost'  # тест-клиент шлёт Host без �
 
 
 def test_local_tool_with_marker_passes_guard(client):
+    # Роуты появились в фазе 1: «гуард пропустил» видно по не-403 ответу
+    # (здесь — 400 от валидации тела)
     r = client.post('/agent/v1/sessions', headers=MARKER)
-    assert r.status_code == 404  # гуард пропустил, маршрута ещё нет
+    assert r.status_code == 400
+    assert r.get_json()['code'] == 'bad_params'
 
 
 def test_get_with_marker_passes_guard(client):
-    assert client.get('/agent/v1/manifest', headers=MARKER).status_code == 404
+    assert client.get('/agent/v1/manifest', headers=MARKER).status_code == 200
 
 
 def test_no_marker_blocked(client):
@@ -54,7 +57,8 @@ def test_connector_origin_blocked(client):
 def test_same_origin_browser_with_marker_allowed(client):
     r = client.post('/agent/v1/sessions',
                     headers={**MARKER, 'Origin': SELF_ORIGIN})
-    assert r.status_code == 404
+    assert r.status_code == 400  # гуард пропустил, тело невалидно
+    assert 'Access-Control-Allow-Origin' not in r.headers
 
 
 def test_no_cors_subresource_blocked(client):
@@ -68,7 +72,7 @@ def test_no_cors_subresource_blocked(client):
 def test_same_site_sec_fetch_allowed(client):
     r = client.get('/agent/v1/manifest',
                    headers={**MARKER, 'Sec-Fetch-Site': 'same-origin'})
-    assert r.status_code == 404
+    assert r.status_code == 200
 
 
 def test_preflight_options_denied(client):
