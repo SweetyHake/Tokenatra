@@ -602,7 +602,7 @@ function initModelSelector() {
         d.models.forEach(function(m) {
             const opt = document.createElement('option');
             opt.value = m.name;
-            opt.textContent = m.selected ? m.name + ' (' + I18n.t('текущая') + ')' : m.name;
+            opt.textContent = m.name;
             if (m.selected) opt.selected = true;
             sel.appendChild(opt);
         });
