@@ -348,7 +348,12 @@ html[lang="ru"] .slider-label{ flex-basis: 92px; width: 92px; }html[lang="ru"] .
 html[lang="ru"] .transform-group input[type="range"],
 html[lang="ru"] .eraser-size-row input[type="range"],
 html[lang="ru"] .toolbar-slider,
-html[lang="ru"] .settings-quality-row .toolbar-slider{ flex-basis: 122px; width: 122px; }/* ── Presets ────────────────────────────────────────────────── */
+html[lang="ru"] .settings-quality-row .toolbar-slider{ flex-basis: 122px; width: 122px; }/* Слайдер гибкий: в узкой панели строка не разваливается — число и юнит
+   фиксированы, слайдер забирает остаток ширины (дизайн-ширина строки 271px
+   сохраняется на широких панелях) */
+.slider-row input[type="range"]{ flex: 1 1 152px; width: auto; min-width: 48px; }
+html[lang="ru"] .slider-row input[type="range"]{ flex-basis: 122px; }
+.slider-row .slider-number{ flex: 0 0 27px; }/* ── Presets ────────────────────────────────────────────────── */
 /* Сетка превью масок — по аналогии с кольцами: миниатюра формы маски,
    крестик удаления у пользовательских пресетов */
 .preset-grid{
