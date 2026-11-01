@@ -59,19 +59,25 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-OpenCode (`opencode.json`; сюда же GLM Coding Plan и DeepSeek):
+OpenCode (`opencode.json` в корне проекта; сюда же GLM Coding Plan и DeepSeek).
+**Важно (V2)**: серверы живут под `mcp.servers`, файл — `opencode.json`
+(не `.opencode.json`); поля `enabled` нет — есть `disabled`:
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "tokenatra": {
-      "type": "local",
-      "command": ["C:\\Program Files\\Tokenatra\\TokenatraMCP\\TokenatraMCP.exe"],
-      "enabled": true
+    "servers": {
+      "tokenatra": {
+        "type": "local",
+        "command": ["C:\\Program Files (x86)\\Tokenatra\\TokenatraMCP\\TokenatraMCP.exe"]
+      }
     }
   }
 }
 ```
+
+Или через CLI (пишет в конфиг проекта сам): `opencode mcp add tokenatra -- "C:\Program Files (x86)\Tokenatra\TokenatraMCP\TokenatraMCP.exe"`, проверка: `opencode mcp list`.
 
 Из исходников: `"command": ["python", "Z:\\Tokenatra\\tokenatra_mcp.py"]`.
 См. также `examples/deepseek_demo.py` — цикл function-calling для raw API.
