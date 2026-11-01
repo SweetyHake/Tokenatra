@@ -75,11 +75,13 @@
                             <span class="file-row-name" id="dropzoneLabel">Файл не выбран</span>
                         </div>
                         <input type="file" id="tokenFileInput" accept="image/*">
-                        <div class="nav-arrows" id="navArrows" style="display:none">
-                            <button class="nav-arrow-btn" id="navPrev" data-hotkey-hint data-tooltip="Предыдущий файл (Ctrl+Left)">&#9664;</button>
+                        <!-- Поле имени видно всегда; стрелки навигации включает
+                             updateNavState, когда файл из папки и есть что листать -->
+                        <div class="file-name-row">
+                            <button class="nav-arrow-btn" id="navPrev" data-hotkey-hint data-tooltip="Предыдущий файл (Ctrl+Left)" style="display:none">&#9664;</button>
                             <input type="text" id="tokenFileName" class="nav-filename-input" placeholder="token">
-                            <button class="nav-arrow-btn" id="navNext" data-hotkey-hint data-tooltip="Следующий файл (Ctrl+Right)">&#9654;</button>
-                            <span class="nav-arrow-info" id="navInfo"></span>
+                            <button class="nav-arrow-btn" id="navNext" data-hotkey-hint data-tooltip="Следующий файл (Ctrl+Right)" style="display:none">&#9654;</button>
+                            <span class="nav-arrow-info" id="navInfo" style="display:none"></span>
                         </div>
                     </div>
                     <div class="ctx-divider"></div>

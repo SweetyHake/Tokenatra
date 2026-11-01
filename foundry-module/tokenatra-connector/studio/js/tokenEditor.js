@@ -169,12 +169,24 @@ const TokenEditor = {
     updateNavState() {
         this.updateDropzoneLabel();
 
-        const el = $('navArrows');
+        const prevBtn = $('navPrev');
+        const nextBtn = $('navNext');
         const infoEl = $('navInfo');
-        if (!el || !infoEl) return;
+        if (!prevBtn || !nextBtn || !infoEl) return;
+
+        // Стрелки и счётчик показываются, только когда файл из папки и есть
+        // что листать; поле имени видно всегда
+        const showNav = show => {
+            const d = show ? '' : 'none';
+            prevBtn.style.display = d;
+            nextBtn.style.display = d;
+            infoEl.style.display = d;
+        };
 
         if (!state.currentFilePath) {
-            el.style.display = 'none';
+            showNav(false);
+            state.imageFileList = [];
+            state.imageFileIndex = -1;
             return;
         }
 
@@ -186,18 +198,18 @@ const TokenEditor = {
         .then(r => r.json())
         .then(data => {
             if (data.error || !data.files || data.total <= 1) {
-                el.style.display = 'none';
+                showNav(false);
                 state.imageFileList = [];
                 state.imageFileIndex = -1;
                 return;
             }
             state.imageFileList = data.files;
             state.imageFileIndex = data.currentIndex;
-            el.style.display = 'flex';
+            showNav(true);
             this.updateNavFileName();
         })
         .catch(() => {
-            el.style.display = 'none';
+            showNav(false);
         });
     },
 

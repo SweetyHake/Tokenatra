@@ -194,7 +194,7 @@ body.native-frame .window-controls{ display: none; }.tb-brand{
     mask-size: 22px 22px; mask-position: center; mask-repeat: no-repeat;
     background-color: var(--text-muted);
 }.file-row.has-image::before{ background-color: var(--accent); }.file-row-name{ flex: 1; font-size: var(--fs-sm); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; user-select: none; }.file-row.has-image .file-row-name{ font-weight: var(--fw-medium); color: var(--text-secondary); }input[type="file"]{ display: none; }/* ── Nav arrows ─────────────────────────────────────────────── */
-.nav-arrows{ display: none; align-items: center; gap: 4px; margin-top: 2px; }.nav-arrow-btn{
+.file-name-row{ display: flex; align-items: center; gap: 4px; margin-top: 2px; }.nav-arrow-btn{
     width: 28px; height: 28px;
     display: flex; align-items: center; justify-content: center;
     background: var(--bg-input); border: 1px solid var(--border);
