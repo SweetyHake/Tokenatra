@@ -338,16 +338,6 @@ function initDefaultSettings() {
     }
     applyUiScale(AppConfig.uiScale);
 
-    var defQ = $('defQualitySelect');
-    if (defQ) {
-        defQ.value = AppConfig.saveSettings.quality || 512;
-        defQ.onchange = function() {
-            AppConfig.setSaveSetting('quality', parseInt(this.value));
-            state.saveQuality = parseInt(this.value);
-            const tokenQ = $('saveQualitySelect');
-            if (tokenQ) tokenQ.value = this.value;
-        };
-    }
     var defFmt = $('defFormatSelect');
     if (defFmt) {
         // Единый формат: и для пакетной обработки, и для сохранения токена
