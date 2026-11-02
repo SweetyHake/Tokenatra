@@ -1,9 +1,8 @@
-# Tokenatra — AGENTS.md (Rust edition)
+# Tokenatra — AGENTS.md
 
 Инструкции для ИИ-агентов, работающих с этим репозиторием и приложением.
 
-**Приложение полностью на Rust** (`rust/`): axum (HTTP) + ort (ONNX Runtime) +
-wry/tao (GUI). Python-версии больше нет (удалена; см. историю git при необходимости).
+**Приложение** (`rust/`): axum (HTTP) + ort (ONNX Runtime) + wry/tao (GUI).
 
 ## Команды
 

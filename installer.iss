@@ -1,4 +1,4 @@
-; Tokenatra Inno Setup script (Rust edition)
+; Tokenatra Inno Setup script
 ; Install Inno Setup from https://jrsoftware.org/isdl.php first
 ; Build: cargo build --release (in rust/) -> rust\target\release\tokenatra.exe
 
@@ -67,7 +67,7 @@ begin
 end;
 
 // Миграция с Python-установки: config.json и модели жили в {app},
-// Rust-версия хранит их в %APPDATA%\Tokenatra. Переносим один раз.
+// Конфиг и модели хранятся в %APPDATA%\Tokenatra. Переносим один раз.
 procedure MigrateFromPython;
 var
   appDir, dataDir, srcFile, dstFile: String;

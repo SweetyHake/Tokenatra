@@ -2,7 +2,7 @@
 
 Редактор токенов для Foundry VTT и фоновым удалением (AI ONNX): загрузи арта → вырезка фона → кольцо → экспорт.
 
-Нативная **Rust-сборка**: axum (HTTP) + ort (ONNX Runtime: DirectML/CUDA/CoreML/ROCm) + wry/tao (GUI).
+Нативное приложение: axum (HTTP) + ort (ONNX Runtime: DirectML/CUDA/CoreML/ROCm) + wry/tao (GUI).
 Один бинарник, без Python-окружения.
 
 ---
@@ -79,7 +79,7 @@ build_installer.bat
 ## English
 
 **Tokenatra** — a token editor for Foundry VTT with AI background removal.
-Native **Rust edition**: axum (HTTP) + ort (ONNX Runtime: DirectML/CUDA/CoreML/ROCm) + wry/tao GUI.
+Native app: axum (HTTP) + ort (ONNX Runtime: DirectML/CUDA/CoreML/ROCm) + wry/tao GUI.
 Single binary, no Python environment required.
 
 ### Install

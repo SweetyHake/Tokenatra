@@ -2,7 +2,7 @@
 name = "tokenatra"
 version = "26.5.0"
 edition = "2024"
-description = "Tokenatra: token editor & background remover (Rust edition)"
+description = "Tokenatra: token editor & background remover"
 default-run = "tokenatra"
 
 [profile.release]
