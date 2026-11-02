@@ -64,6 +64,7 @@ const I18n = {
         'Сброс': 'Reset',
         'Трансформация': 'Transform',
         'Масштаб': 'Scale',
+        'Авто': 'Auto',
         'Поворот': 'Rotation',
         'Сбросить трансформацию': 'Reset transform',
         'Уменьшить': 'Zoom out',

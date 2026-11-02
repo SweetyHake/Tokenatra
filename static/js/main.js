@@ -310,6 +310,27 @@ function initTheme() {
     // legacy per-theme classes removed. Kept as no-op for compat.
 }
 
+// auto UI scale from the window size: 720p -> 75%, 1080p -> 100%, 1440p -> 125%, 4K -> 150%
+function autoUiScale() {
+    var w = window.innerWidth || 1920;
+    var h = window.innerHeight || 1080;
+    var pts = [[720, 0.75], [1080, 1.0], [1440, 1.25], [2160, 1.5]];
+    function interp(v) {
+        if (v <= pts[0][0]) return pts[0][1];
+        var last = pts[pts.length - 1];
+        if (v >= last[0]) return last[1];
+        for (var i = 1; i < pts.length; i++) {
+            if (v <= pts[i][0]) {
+                var a = pts[i - 1], b = pts[i];
+                return a[1] + (v - a[0]) * (b[1] - a[1]) / (b[0] - a[0]);
+            }
+        }
+        return 1;
+    }
+    // 16:9-equivalent: both width and height count (a narrow window limits the scale)
+    return Math.min(interp(h), interp(w * 1080 / 1920));
+}
+
 function applyUiScale(val) {
     val = parseFloat(val) || 1;
     // 100vh при CSS-zoom не пересчитывается: высота оболочки делится на
@@ -330,13 +351,35 @@ function initDefaultSettings() {
 
     var uiScaleSelect = $('uiScaleSelect');
     if (uiScaleSelect) {
-        uiScaleSelect.value = String(AppConfig.uiScale || 1);
+        var effectiveScale;
+        if (AppConfig.uiScaleAuto) {
+            effectiveScale = autoUiScale();
+            uiScaleSelect.value = 'auto';
+        } else {
+            effectiveScale = AppConfig.uiScale || 1;
+            uiScaleSelect.value = String(effectiveScale);
+        }
         uiScaleSelect.onchange = function() {
-            AppConfig.setUiScale(parseFloat(this.value));
-            applyUiScale(this.value);
+            if (this.value === 'auto') {
+                AppConfig.setUiScaleAuto(true);
+                effectiveScale = autoUiScale();
+            } else {
+                AppConfig.setUiScale(parseFloat(this.value));
+                effectiveScale = parseFloat(this.value);
+            }
+            applyUiScale(effectiveScale);
         };
+        applyUiScale(effectiveScale);
     }
-    applyUiScale(AppConfig.uiScale);
+
+    var autoResizeTimer = null;
+    window.addEventListener('resize', function() {
+        if (!AppConfig.uiScaleAuto) return;
+        clearTimeout(autoResizeTimer);
+        autoResizeTimer = setTimeout(function() {
+            applyUiScale(autoUiScale());
+        }, 120);
+    });
 
     var defFmt = $('defFormatSelect');
     if (defFmt) {
