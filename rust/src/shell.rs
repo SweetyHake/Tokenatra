@@ -144,6 +144,21 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
                 }
             }
             Event::WindowEvent {
+                event: WindowEvent::Resized(size),
+                ..
+            } => {
+                // Sync the DOM is-maximized class with the real window state:
+                // maximize can come from outside the button (Aero Snap, Win+Up,
+                // drag detach) and a stale class inverts the button's next
+                // action (restore on a windowed window and vice versa).
+                let _ = size;
+                let maximized = window.is_maximized();
+                let _ = webview.evaluate_script(&format!(
+                    "document.documentElement.classList.toggle('is-maximized', {});",
+                    maximized
+                ));
+            }
+            Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
@@ -188,8 +203,25 @@ fn handle_gui_command(
 ) {
     match cmd {
         GuiCommand::Minimize => window.set_minimized(true),
-        GuiCommand::Maximize => window.set_maximized(true),
+        GuiCommand::Maximize => {
+            // The maximize/restore buttons must not fight the F11 fullscreen
+            // state: cancel fullscreen first or it leaks (the next F11 would
+            // "exit" a fullscreen the user never saw and teleport the window).
+            #[cfg(windows)]
+            if crate::win::is_fullscreen() {
+                if let Some(hwnd) = crate::win::hwnd() {
+                    crate::win::toggle_fullscreen(hwnd);
+                }
+            }
+            window.set_maximized(true)
+        }
         GuiCommand::Restore => {
+            #[cfg(windows)]
+            if crate::win::is_fullscreen() {
+                if let Some(hwnd) = crate::win::hwnd() {
+                    crate::win::toggle_fullscreen(hwnd);
+                }
+            }
             window.set_maximized(false);
         }
         GuiCommand::Destroy | GuiCommand::Quit => {

@@ -117,12 +117,20 @@ pub fn toggle_fullscreen(hwnd: HWND) {
                 let _ = ShowWindow(hwnd, SW_MAXIMIZE);
             }
         } else {
+            // If maximized: restore first so tao/Windows agree on the base
+            // placement; otherwise stripping WS_MAXIMIZE behind tao's back
+            // desyncs its maximized flag and the next maximize/restore goes
+            // crooked. The pre-restore zoomed flag is kept so exit can
+            // re-apply maximized.
+            let zoomed = IsZoomed(hwnd).as_bool();
+            if zoomed {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
             let mut rect = RECT::default();
             if GetWindowRect(hwnd, &mut rect).is_err() {
                 return;
             }
             let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-            let zoomed = IsZoomed(hwnd).as_bool();
             *FULLSCREEN.lock().unwrap() = Some(FullscreenState { rect, style, zoomed });
             let _ = SetWindowLongPtrW(
                 hwnd,
