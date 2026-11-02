@@ -8,7 +8,7 @@ use super::{err_status, file_response, mime_by_ext, query_pairs};
 use crate::consts::{GITHUB_REPO, VERSION};
 use crate::paths;
 
-/// Рендер templates/index.html: подстановка Jinja-переменных из Python-версии.
+/// Renders templates/index.html, substituting the Jinja placeholders.
 pub fn render_index() -> String {
     let tpl = std::fs::read_to_string(paths::resource_dir().join("templates").join("index.html"))
         .unwrap_or_else(|_| "<html><body>index.html missing</body></html>".into());
@@ -18,22 +18,22 @@ pub fn render_index() -> String {
     out = out.replace("{{ __version__ }}", VERSION);
     out = out.replace("{{ embed_allowed|tojson }}", &embed_json);
     // {{ url_for('static', filename='X', v=__version__) }} -> /static/X?v=VERSION
-    // (в шаблоне у url_for есть хвост ", v=__version__" — считаем его часть подстановки)
+    // (url_for has a ", v=__version__" tail, part of the substitution)
     let marker = "{{ url_for('static', filename='";
     while let Some(pos) = out.find(marker) {
         let after = &out[pos + marker.len()..];
-        // filename заканчивается на ') или ', — берём всё до закрывающих "}}}"
+        // filename ends with ') or ', take everything up to the closing "}}}"
         let Some(end_rel) = after.find('\'') else { break };
         let filename = &after[..end_rel];
         let rest = &after[end_rel..];
-        // пропускаем остальные аргументы url_for до "}}"
+        // skip remaining url_for args up to "}}"
         let Some(close) = rest.find("}}") else { break };
         let replacement = format!("/static/{filename}?v={VERSION}");
         let end_full = pos + marker.len() + end_rel + close + 2;
         out.replace_range(pos..end_full, &replacement);
     }
     if out.contains("{{") {
-        // страховка от рассинхрона с шаблоном: сырой Jinja не должен доехать до UI
+        // guard against template drift: raw Jinja must never reach the UI
         println!(" WARNING: render_index оставил необработанные подстановки в index.html");
     }
     out
@@ -43,7 +43,7 @@ pub async fn index(uri: axum::http::Uri) -> Response {
     let query = query_pairs(&uri);
     let html = render_index();
     let mut resp = file_response(html.into_bytes(), "text/html; charset=utf-8", None);
-    // Сетевой режим: ключ из query превращаем в cookie
+    // network mode: query key becomes a cookie
     if let Some(key) = query.get("key").cloned() {
         let mut valid = false;
         {
@@ -88,7 +88,7 @@ pub async fn app_logo() -> Response {
 }
 
 pub async fn static_file(Path(path): Path<String>) -> Response {
-    // Санитизация: никаких .. и абсолютных путей
+    // sanitize: no .. or absolute paths
     if path.contains("..") || path.starts_with('/') || path.contains('\\') {
         return super::err_status(StatusCode::NOT_FOUND, "Not found");
     }
@@ -96,7 +96,7 @@ pub async fn static_file(Path(path): Path<String>) -> Response {
     match std::fs::read(&full) {
         Ok(bytes) => {
             let ext = super::ext_of(&path);
-            // Статика не кэшируется: WebView2 не должен подхватывать старые JS
+            // no caching for static: WebView2 must not keep stale JS
             file_response(bytes, mime_by_ext(&ext), Some("no-cache"))
         }
         Err(_) => err_status(StatusCode::NOT_FOUND, "Not found"),

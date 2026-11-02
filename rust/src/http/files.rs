@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use super::{err_status, ok_json};
 use crate::state::AppState;
 
-/// str(Path) без verbatim-префикса canonicalize (как pathlib.resolve() в Python).
+/// str(Path) without the canonicalize verbatim prefix.
 pub fn clean_path(p: &Path) -> String {
     let s = p.to_string_lossy().to_string();
     const VERBATIM: &str = "\\\\?\\";
@@ -60,8 +60,8 @@ pub async fn save_file(mut mp: Multipart) -> Response {
 
     let suggested = filename.clone();
     let picked = tokio::task::spawn_blocking(move || {
-        // «Тип файла» в диалоге: все экспортные форматы, формат выбранного
-        // файла первым (диалог откроется с ним), затем все остальные
+        // file type filter: all export formats, the selected file format first
+        // (the dialog opens with it), then the rest
         let mut types: Vec<(&str, Vec<&str>)> = vec![
             ("WebP Image", vec!["webp"]),
             ("PNG Image", vec!["png"]),
@@ -138,7 +138,7 @@ pub async fn save_to_folder(
         return err_status(StatusCode::BAD_REQUEST, "Invalid folder");
     }
 
-    // Разрешены только папки из диалога этой сессии либо lastFolders из config
+    // only folders from this session's dialog or lastFolders from config
     let mut allowed: Vec<PathBuf> = state
         .picked_folders
         .lock()

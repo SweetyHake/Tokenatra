@@ -1,8 +1,8 @@
 #![cfg(windows)]
-//! Системный трей (Windows, tray-icon + muda) — порт tray_manager.py.
-//! Иконка живёт весь цикл приложения; скрытие — только реальный выход.
-//! muda-объекты не Sync: Tray живёт ТОЛЬКО в главном потоке event loop,
-//! действия из других потоков приходят через каналы.
+//! System tray (Windows, tray-icon + muda).
+//! The icon lives for the whole app lifetime; hide means real exit.
+//! muda objects are not Sync: the Tray lives on the main event loop
+//! thread only; other threads talk through channels.
 
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -14,7 +14,7 @@ pub struct Tray {
     pub model_item: muda::MenuItem,
 }
 
-/// Канал обновления подписи «Загрузить/Выгрузить модель» (в главный поток).
+/// Channel for model menu label updates (to the main thread).
 struct ModelLabelChannel {
     tx: Sender<bool>,
     rx: Mutex<Option<std::sync::mpsc::Receiver<bool>>>,
@@ -40,7 +40,7 @@ fn load_tray_icon() -> Option<tray_icon::Icon> {
     tray_icon::Icon::from_rgba(resized.into_raw(), 64, 64).ok()
 }
 
-/// Создать трей. Вызывать ТОЛЬКО в главном потоке (event loop).
+/// Builds the tray. Must run on the main event loop thread.
 pub fn create(state: &Arc<AppState>) -> Option<Tray> {
     let Some(icon) = load_tray_icon() else {
         crate::tray_control::set_created(false);
@@ -64,12 +64,12 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         .with_icon(icon)
         .with_tooltip("Tokenatra")
         .with_menu(Box::new(menu))
-        // ЛКМ — открыть окно (обработчик TrayIconEvent ниже), меню — по ПКМ
+        // left click opens the window (TrayIconEvent below), menu on right click
         .with_menu_on_left_click(false)
         .build()
         .ok()?;
 
-    // Обновление подписи пункта меню из любого потока — через канал
+    // menu label updates from any thread go through the channel
     {
         let ch = model_label();
         crate::tray_control::set_model_state_handler(Box::new(move |loaded| {
@@ -78,7 +78,7 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         }));
     }
 
-    // Поток обработки кликов меню/иконки (клики — дёшево, модель — в фоне)
+    // thread handling menu/icon clicks (clicks are cheap, model in background)
     let st = state.clone();
     std::thread::spawn(move || loop {
         match muda::MenuEvent::receiver().recv_timeout(std::time::Duration::from_millis(200)) {
@@ -111,8 +111,8 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         if let Ok(ev) = tray_icon::TrayIconEvent::receiver()
             .recv_timeout(std::time::Duration::from_millis(0))
         {
-            // ЛКМ или двойной клик — открыть окно; меню открывается по ПКМ
-            // силами tray-icon (menu_on_left_click = false)
+            // left click or double click opens the window; the menu opens on
+            // right click (menu_on_left_click = false)
             let open = matches!(
                 ev,
                 tray_icon::TrayIconEvent::Click {
@@ -132,7 +132,7 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
 
 static MODEL_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Применить отложенные смены подписи модели (вызывать в event loop).
+/// Applies pending model label changes (call on the event loop).
 pub fn drain_model_labels(tray: &Tray) {
     let guard = model_label().rx.lock().unwrap();
     if let Some(rx) = guard.as_ref() {

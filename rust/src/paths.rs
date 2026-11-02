@@ -3,8 +3,8 @@ use std::sync::OnceLock;
 
 use crate::consts;
 
-/// Кандидаты каталога ресурсов: env -> exe-каталог (и его родители для
-/// target/debug-запусков) -> compile-time корень репозитория.
+/// Resource dir candidates: env -> exe dir (and parents for
+/// target/debug runs) -> compile-time repo root.
 fn resource_dir_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(cfg) = std::env::var("TOKENATRA_RESOURCE_DIR") {
@@ -15,12 +15,12 @@ fn resource_dir_candidates() -> Vec<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         let exe_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         out.push(exe_dir.clone());
-        // cargo run: target/debug/tokenatra.exe -> три уровня вверх к корню
+        // cargo run: target/debug/tokenatra.exe -> three levels up to repo root
         for anc in exe_dir.ancestors().skip(1).take(4) {
             out.push(anc.to_path_buf());
         }
     }
-    // Compile-time: rust/ -> корень репозитория
+    // compile-time: rust/ -> repo root
     out.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".."));
     out
 }
@@ -45,7 +45,7 @@ pub fn resource_dir() -> &'static Path {
     })
 }
 
-/// Каталог приложения: рядом с exe (installed/portable) или корень репозитория (dev).
+/// App dir: next to the exe (installed/portable) or repo root (dev).
 pub fn base_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
@@ -68,7 +68,7 @@ fn probe_write(dir: &Path) -> bool {
     std::fs::write(&probe, b"x").is_ok() && std::fs::remove_file(&probe).is_ok()
 }
 
-/// Кандидат LOCALAPPDATA/~/Library/Application Support/XDG_DATA_HOME.
+/// LOCALAPPDATA / ~/Library/Application Support / XDG_DATA_HOME candidate.
 fn platform_data_base() -> Option<PathBuf> {
     if cfg!(windows) {
         let root = std::env::var("LOCALAPPDATA")
@@ -110,9 +110,8 @@ pub fn user_data_dir_raw() -> PathBuf {
         })
 }
 
-/// Каталог пользовательских данных (config.json, models/, пользовательские
-/// кольца/пресеты). Установленная сборка лежит в Program Files и недоступна
-/// для записи — тогда уходим в LOCALAPPDATA (как в Python).
+/// User data dir (config.json, models/, user rings/presets).
+/// Installed builds live in Program Files (read-only), fall back to LOCALAPPDATA.
 pub fn user_data_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
@@ -155,7 +154,7 @@ pub fn pid_file() -> PathBuf {
     user_data_dir().join("app.pid")
 }
 
-/// Разовая миграция model.onnx из каталога приложения в models/.
+/// One-time migration of model.onnx into models/.
 pub fn migrate_legacy_model() {
     let legacy = base_dir().join("model.onnx");
     if !legacy.exists() {
@@ -167,7 +166,7 @@ pub fn migrate_legacy_model() {
     match std::fs::rename(&legacy, &dest) {
         Ok(()) => println!(" Модель перемещена: model.onnx -> models/"),
         Err(_) => {
-            // rename через тома падает — пробуем copy+remove
+            // cross-volume rename fails, fall back to copy+remove
             if !dest.exists()
                 && std::fs::copy(&legacy, &dest).is_ok()
                 && std::fs::remove_file(&legacy).is_ok()
@@ -180,7 +179,7 @@ pub fn migrate_legacy_model() {
     }
 }
 
-/// Путь к выбранной модели: config selected_model -> первая .onnx в models/.
+/// Selected model path: config selected_model -> first .onnx in models/.
 pub fn get_selected_model_path() -> PathBuf {
     if let Ok(cfg) = crate::config::load() {
         if let Some(sel) = cfg.get("selected_model").and_then(|v| v.as_str()) {
@@ -193,7 +192,7 @@ pub fn get_selected_model_path() -> PathBuf {
     if let Some(p) = first_onnx_in(&models_dir()) {
         return p;
     }
-    // Portable-сборки: модели рядом с exe
+    // portable builds: models next to the exe
     let legacy = base_dir().join("models");
     if !same_path(&legacy, &models_dir()) {
         if let Some(p) = first_onnx_in(&legacy) {
@@ -236,8 +235,8 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
     std::fs::canonicalize(a).ok() == std::fs::canonicalize(b).ok()
 }
 
-/// Пользовательские кольца из старого каталога (BASE_DIR/token_rings)
-/// переносим в RING_DIR — в установленной сборке BASE_DIR недоступен для записи.
+/// moved to RING_DIR; BASE_DIR is read-only in installed builds.
+/// moved to RING_DIR; BASE_DIR is read-only in installed builds.
 pub fn migrate_legacy_rings() {
     let builtin = builtin_ring_dir();
     let rings = ring_dir();

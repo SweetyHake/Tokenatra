@@ -28,7 +28,7 @@ pub fn err_json(msg: &str) -> Response {
     axum::Json(v).into_response()
 }
 
-/// Ошибка с HTTP-статусом (Flask: jsonify(...), status).
+/// Error with an HTTP status.
 pub fn err_status(code: StatusCode, msg: &str) -> Response {
     (
         code,
@@ -95,7 +95,7 @@ pub fn query_pairs(uri: &Uri) -> HashMap<String, String> {
     out
 }
 
-// ===== Guard / CORS / CSP (порт _guard_localhost_only + _connector_headers) =====
+// ===== Guard / CORS / CSP =====
 
 pub fn localhost_host_name(host: &str) -> String {
     let host = host.trim().to_lowercase();
@@ -143,7 +143,7 @@ fn origin_host(origin: &str) -> Option<String> {
     Some(localhost_host_name(rest.split('/').next().unwrap_or(rest)))
 }
 
-/// Origin localhost-семейства либо явно разрешённый в allowed_origins.
+/// Origin in the localhost family or explicitly allowed in allowed_origins.
 pub fn guard_connector_origin(origin: &str) -> bool {
     connector_origin(origin).is_some()
 }
@@ -216,7 +216,7 @@ fn forbidden() -> Response {
     err_status(StatusCode::FORBIDDEN, "Forbidden")
 }
 
-/// Порт _guard_localhost_only (before_request).
+/// The guard middleware.
 pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
     let path = req.uri().path().to_string();
     let method = req.method().clone();
@@ -241,7 +241,7 @@ pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
     let host_name = localhost_host_name(&host_hdr);
 
     if path.starts_with("/agent/v1") {
-        // Agent API: только localhost + X-Tokenatra-Agent: 1
+        // Agent API: localhost only + X-Tokenatra-Agent: 1
         let agent_ok = req
             .headers()
             .get("X-Tokenatra-Agent")
@@ -255,7 +255,7 @@ pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
     }
 
     if !is_local_host_name(&host_name) {
-        // Сетевой режим (listen_host=0.0.0.0): наружу — только студия
+        // network mode (listen_host=0.0.0.0): only the studio is exposed
         if !crate::config::network_mode() {
             return forbidden();
         }
@@ -273,7 +273,7 @@ pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
             }
             return forbidden();
         }
-        // Ужесточение с ключом: без него — только статика UI
+        // keyed hardening: without the key only UI static is served
         if (method == Method::GET || method == Method::HEAD)
             && (PUBLIC_OPEN_EXACT.contains(&path.as_str())
                 || PUBLIC_OPEN_PREFIXES.iter().any(|p| path.starts_with(p)))
@@ -283,7 +283,7 @@ pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
         return forbidden();
     }
 
-    // Модуль Foundry: localhost:30000 -> 127.0.0.1:7878 (та же машина)
+    // Foundry module: localhost:30000 -> 127.0.0.1:7878 (same machine)
     if is_connector_route(&path) && connector_origin(&origin_hdr).is_some() {
         return next.run(req).await;
     }
@@ -301,7 +301,7 @@ pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
         return next.run(req).await;
     }
 
-    // «Разрешить подключения из браузера» (по умолчанию включено)
+    // "allow browser connections" (on by default)
     if crate::config::allow_browser()
         && (is_connector_route(&path) || is_ui_asset_path(&path) || path == "/config")
     {
@@ -330,7 +330,7 @@ pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
     next.run(req).await
 }
 
-/// OPTIONS-ответ (Flask отвечает на preflight автоматически).
+/// OPTIONS response (preflight).
 pub async fn options_mw(req: Request<Body>, next: Next) -> Response {
     if req.method() == Method::OPTIONS {
         return Response::builder()
@@ -342,7 +342,7 @@ pub async fn options_mw(req: Request<Body>, next: Next) -> Response {
     next.run(req).await
 }
 
-/// Порт _connector_headers (after_request): CORS + CSP frame-ancestors.
+/// Connector headers (after_request): CORS + CSP frame-ancestors.
 pub async fn headers_mw(req: Request<Body>, next: Next) -> Response {
     let path = req.uri().path().to_string();
     let method = req.method().clone();
@@ -397,7 +397,7 @@ pub async fn headers_mw(req: Request<Body>, next: Next) -> Response {
         }
     }
 
-    // Анти-кликджеккинг
+    // anti-clickjacking
     let is_html = resp
         .headers()
         .get(header::CONTENT_TYPE)

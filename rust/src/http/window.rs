@@ -43,7 +43,7 @@ pub async fn window_action(
     ok_json(json!({ "ok": true }))
 }
 
-/// /api/window/hide_to_tray: ✕ в трей. {hidden:true} — окно спрятано.
+/// /api/window/hide_to_tray: close to tray. {hidden:true} if hidden.
 async fn hide_to_tray(_state: std::sync::Arc<AppState>) -> Response {
     let (tx, rx) = std::sync::mpsc::channel::<bool>();
     if !crate::gui_control::send(GuiCommand::HideToTray(tx.clone())) {
@@ -60,8 +60,8 @@ async fn hide_to_tray(_state: std::sync::Arc<AppState>) -> Response {
 fn window_move() -> Response {
     #[cfg(windows)]
     {
-        // Windows: Win32-хук с SetCapture (модальный цикл tao drag_window
-        // в WebView2 «прилипал» — см. историю app.py)
+        // Windows: Win32 hook with SetCapture (the tao drag_window modal
+        // loop stuck on WebView2, see the old app.py history)
         match crate::win::hwnd() {
             Some(hwnd) => {
                 crate::win::post_drag_message(hwnd);
@@ -78,7 +78,7 @@ fn window_move() -> Response {
 }
 
 pub async fn resize_begin() -> Response {
-    // Linux frameless-путь не используется (нативные декорации)
+    // Linux frameless path unused (native decorations)
     ok_json(json!({ "ok": false, "error": "native resize is unavailable on this platform" }))
 }
 
@@ -90,8 +90,8 @@ pub async fn resize_end() -> Response {
     ok_json(json!({ "ok": true }))
 }
 
-/// Ресайз за края: Windows — модальный цикл по кнопке; Linux — GTK
-/// begin_resize_drag; macOS — tao вернёт unsupported (нет системного API).
+/// Edge resize: Windows uses a modal loop per button; Linux uses GTK
+/// begin_resize_drag; macOS tao returns unsupported (no system API).
 pub async fn resize_start(body: axum::body::Bytes) -> Response {
     #[cfg(windows)]
     {
@@ -108,7 +108,7 @@ pub async fn resize_start(body: axum::body::Bytes) -> Response {
         let Some(hwnd) = crate::win::hwnd() else {
             return ok_json(json!({ "ok": false, "error": "no window" }));
         };
-        // Модальный цикл ресайза — в blocking-потоке
+        // modal resize loop runs in a blocking thread
         let send_hwnd = crate::win::SendHwnd(hwnd);
         let _ = tokio::task::spawn_blocking(move || crate::win::resize_loop(send_hwnd, edges)).await;
         ok_json(json!({ "ok": true }))

@@ -4,28 +4,28 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// Конфигурация провайдеров ONNX (итог выбора get_providers).
+/// ONNX provider configuration (result of get_providers).
 #[derive(Clone, Debug)]
 pub struct ProviderConfig {
-    /// Имена провайдеров в порядке приоритета ("CUDAExecutionProvider", ...).
+    /// Provider names in priority order.
     pub providers: Vec<String>,
-    /// device_id для DML (None = дефолтный адаптер).
+    /// DML device_id (None = default adapter).
     pub dml_device_id: Option<i32>,
 }
 
 pub struct AppState {
-    /// Имя устройства для /device и /health ("DirectML (NVIDIA ...)", "CPU"...).
+    /// Device name for /device and /health.
     pub device_name: RwLock<String>,
     pub provider_cfg: RwLock<Option<ProviderConfig>>,
-    /// Монополия на инференс: как SESSION_LOCK в Python — от получения
-    /// сессии до run() (две живые DML-сессии ломают ExecuteKernel).
+    /// Inference monopoly (session_lock equivalent): from session setup
+    /// to run(); two live DML sessions break ExecuteKernel.
     pub session_lock: Mutex<Option<crate::infer::Session>>,
-    /// Режим трея (окно спрятано).
+    /// Tray mode (window hidden).
     pub tray_mode: AtomicBool,
     pub last_activity: AtomicU64, // unix seconds
-    /// Каталоги, выбранные через диалог в этой сессии (allowlist /save_to_folder).
+    /// Folders picked via the dialog this session (save_to_folder allowlist).
     pub picked_folders: Mutex<Vec<PathBuf>>,
-    /// Реестр embed-экспорта: имя файла -> запись.
+    /// Embed export registry: filename -> entry.
     pub embed_exports: Mutex<HashMap<String, EmbedExport>>,
 }
 
@@ -74,14 +74,14 @@ impl AppState {
         self.device_name.read().unwrap().clone()
     }
 
-    /// Секретный id для embed-экспорта (аналог secrets.token_urlsafe(16)).
+    /// Secret id for embed export.
     pub fn new_embed_id() -> String {
         use base64::Engine;
         let buf: [u8; 16] = rand::random();
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
     }
 
-    /// Удаление просроченных записей (вызывается под локом embed_exports).
+    /// Drops expired entries (call under the embed_exports lock).
     pub fn embed_export_cleanup(map: &mut HashMap<String, EmbedExport>) {
         let now = Instant::now();
         let expired: Vec<String> = map
@@ -105,7 +105,7 @@ impl AppState {
         }
     }
 
-    /// Полная очистка каталога экспорта (старт приложения).
+    /// Clears the export directory (app startup).
     pub fn remember_picked_folder(&self, p: PathBuf) {
         let norm = crate::http::files::norm_folder(&p);
         let mut f = self.picked_folders.lock().unwrap();

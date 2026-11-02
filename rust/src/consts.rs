@@ -1,10 +1,10 @@
-// Статические константы приложения (порт версии.py).
+// App constants.
 pub const VERSION: &str = "26.5.0";
 pub const APP_NAME: &str = "Tokenatra";
 pub const GITHUB_REPO: &str = "SweetyHake/Tokenatra";
 pub const PORT: u16 = 7878;
 
-#[allow(dead_code)] // паритет version.py
+#[allow(dead_code)]
 pub const MODEL_FILE: &str = "model.onnx";
 
 pub fn model_download_url() -> String {
@@ -24,7 +24,7 @@ pub fn model_download_url_lite() -> String {
 const DEFAULT_MODEL_DOWNLOAD_URL: &str = "https://www.dropbox.com/scl/fi/r8yxydp1phmief0fed5k6/RMBG_2.0_fp16.onnx?rlkey=otrroli64yc3ridsz80oj9eul&st=t78dfodp&dl=1";
 const DEFAULT_MODEL_DOWNLOAD_URL_LITE: &str = "https://huggingface.co/PramaLLC/BEN2/resolve/main/BEN2_Base.onnx";
 
-/// Встроенные кольца: имя файла (casefold) -> отображаемое имя (переводится через I18n).
+/// Built-in rings: filename -> display name (i18n at runtime).
 pub fn builtin_ring_name(file_name_lower: &str) -> Option<&'static str> {
     Some(match file_name_lower {
         "steel.webp" => "Сталь",
@@ -47,14 +47,14 @@ pub const MEDIA_EXTENSIONS: &[&str] = &[
 ];
 
 pub const MAX_IMAGE_DIMENSION: u32 = 8192;
-/// Рабочее разрешение фоновой обработки (как MAX_PROCESS_DIM в Python).
+/// Processing resolution cap.
 pub const MAX_PROCESS_DIM: u32 = 4096;
 pub const MAX_MEGAPIXELS: u64 = 100_000_000;
 
-/// Версия протокола модуля-коннектора Foundry.
+/// Foundry connector protocol version.
 pub const CONNECTOR_API_VERSION: i64 = 1;
 
-// ===== Интеграция с FoundryVTT =====
+// ===== FoundryVTT integration =====
 pub const CONNECTOR_ROUTES: &[&str] = &[
     "/health", "/process", "/version", "/device", "/models_list", "/embed_export",
 ];

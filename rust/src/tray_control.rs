@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
-/// Доступность трея (как tray_manager.available(): только Windows).
+/// Tray availability (Windows only).
 #[allow(dead_code)]
 pub fn tray_available() -> bool {
     cfg!(windows)
@@ -20,7 +20,7 @@ pub fn is_created() -> bool {
 
 static HANDLER: OnceLock<Box<dyn Fn(bool) + Send + Sync>> = OnceLock::new();
 
-/// Регистрирует обработчик смены состояния модели (обновление пункта меню).
+/// Registers the model state change handler (menu label update).
 pub fn set_model_state_handler(f: Box<dyn Fn(bool) + Send + Sync>) {
     let _ = HANDLER.set(f);
 }
@@ -35,7 +35,7 @@ pub(crate) fn tray_model_state_changed(loaded: bool) {
     }
 }
 
-/// Настройки трея из config.json — делегируем config.
+/// Tray settings from config.json, delegated to config.
 #[allow(dead_code)]
 pub fn tray_settings() -> (bool, f64) {
     crate::config::tray_settings()

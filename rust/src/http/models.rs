@@ -65,7 +65,7 @@ pub async fn models_list() -> Response {
     }))
 }
 
-/// Сохранить модель выбранной и сбросить кеш сессии.
+/// Marks the model selected and resets the session cache.
 pub fn activate_model(path: &Path, state: &AppState) {
     let name = path
         .file_name()
@@ -136,7 +136,7 @@ pub async fn open_model_link(body: axum::body::Bytes) -> Response {
     }
 }
 
-/// Dropbox-ссылки превращаем в прямые (dl=1).
+/// Converts Dropbox links to direct ones (dl=1).
 fn dropbox_direct_url(url: &str) -> String {
     if !url.to_lowercase().contains("dropbox.com") {
         return url.to_string();
@@ -145,7 +145,7 @@ fn dropbox_direct_url(url: &str) -> String {
         let (base, query) = url.split_at(pos);
         let mut out = String::from(base);
         if query.contains("dl=") {
-            // заменяем dl=0 на dl=1
+            // replace dl=0 with dl=1
             let q = query.replace("dl=0", "dl=1");
             out.push_str(&q);
         } else {
@@ -250,7 +250,7 @@ pub async fn download_model_from_server(
 pub async fn load_model_from_disk(
     State(state): State<std::sync::Arc<AppState>>,
 ) -> Response {
-    // Нативный диалог выбора .onnx
+    // native .onnx picker dialog
     let picked = tokio::task::spawn_blocking(|| {
         rfd::FileDialog::new()
             .set_title("Выберите модель ONNX")

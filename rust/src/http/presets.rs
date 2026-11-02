@@ -13,7 +13,7 @@ const EXTENSIONS: &[&str] = &["png", "webp", "jpg", "jpeg"];
 pub async fn presets_list() -> Response {
     let mut presets = Vec::new();
 
-    // Встроенные пресеты (read-only в установленной сборке)
+    // built-in presets (read-only in installed builds)
     let builtin = paths::builtin_preset_dir();
     if builtin.is_dir() {
         let mut files: Vec<PathBuf> = std::fs::read_dir(&builtin)
@@ -32,7 +32,7 @@ pub async fn presets_list() -> Response {
         }
     }
 
-    // Пользовательские — сверху, новые первыми (по ctime)
+    // user presets first, newest first (by ctime)
     let user = paths::user_preset_dir();
     if user.is_dir() {
         let mut items: Vec<(std::time::SystemTime, String, PathBuf)> = Vec::new();
@@ -109,7 +109,7 @@ pub async fn add_preset(mut mp: Multipart) -> Response {
     let Some((filename, data)) = image else {
         return err_status(StatusCode::BAD_REQUEST, "Нет данных маски");
     };
-    // Проверка, что это корректное изображение
+    // validate that it is a real image
     if image::load_from_memory(&data).is_err() {
         return err_status(StatusCode::BAD_REQUEST, "Файл не является корректным изображением");
     }
@@ -117,18 +117,18 @@ pub async fn add_preset(mut mp: Multipart) -> Response {
     if std::fs::create_dir_all(&dir).is_err() {
         return err_status(StatusCode::INTERNAL_SERVER_ERROR, "Не удалось создать папку пресетов");
     }
-    // Имя «Пресет N» по первому свободному номеру
+    // "Preset N" name from the first free number
     let mut num = 1;
     while dir.join(format!("Пресет {num}.png")).exists() {
         num += 1;
     }
     let target = dir.join(format!("Пресет {num}.png"));
-    // Сохраняем как PNG независимо от входа? Python сохраняет оригинальные байты.
-    // У нас имя .png, содержимое должно быть PNG-совместимым.
+    // Save as PNG regardless of input? Python saved the original bytes.
+    // Our name is .png so the content must be PNG-compatible.
     let save_data = if super::ext_of(&filename) == "png" {
         data
     } else {
-        // перекодируем в PNG ради соответствия расширения
+        // re-encode to PNG to match the extension
         match image::load_from_memory(&data) {
             Ok(img) => {
                 let mut buf = Vec::new();
@@ -160,7 +160,7 @@ pub async fn delete_preset(body: axum::body::Bytes) -> Response {
     if !path.is_file() {
         return err_status(StatusCode::NOT_FOUND, "Пресет не найден");
     }
-    // Короткий retry: файл может быть на мгновение занят (антивирус)
+    // short retry: the file may be briefly locked (antivirus)
     let mut last_err = None;
     for attempt in 0..3 {
         match std::fs::remove_file(&path) {

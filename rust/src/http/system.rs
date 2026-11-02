@@ -82,19 +82,19 @@ pub async fn network_info() -> Response {
         }
         if let std::net::IpAddr::V4(v4) = addr {
             if v4.is_link_local() || v4.is_broadcast().into() {
-                // broadcast не бывает в if_addrs, но страховка не мешает
+                // if_addrs has no broadcast, but the guard does not hurt
             }
         } else {
             return;
         }
-        // 198.18.0.0/15 — fake-IP VPN/прокси
+        // 198.18.0.0/15 is VPN/proxy fake-IP
         if ip.starts_with("198.18.") || ip.starts_with("198.19.") {
             return;
         }
         cands.push((iface_rank, ip_tier(ip), ip.to_string()));
     };
 
-    // Адаптер по умолчанию
+    // default adapter
     if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
         if sock.connect("8.8.8.8:80").is_ok() {
             if let Ok(a) = sock.local_addr() {
@@ -102,7 +102,7 @@ pub async fn network_info() -> Response {
             }
         }
     }
-    // Полный обход адаптеров
+    // walk all adapters
     let skip_kw = [
         "loopback", "vpn", "tun", "tap", "clash", "wintun", "wireguard", "tailscale",
         "zerotier", "ppp", "virtual", "mihomo", "sing-box", "vmware", "hyper-v", "vethernet",
@@ -118,7 +118,7 @@ pub async fn network_info() -> Response {
             add(&iface.ip().to_string(), irank);
         }
     }
-    // hostbyname-экстры
+    // hostbyname extras
     
     if let Ok(name) = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")) {
         if let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(
@@ -160,7 +160,7 @@ pub async fn check_update() -> Response {
 }
 
 pub async fn shutdown() -> Response {
-    // Как в Python: werkzeug shutdown больше не существует, роут — no-op 'ok'
+    // legacy no-op 'ok' route
     "ok".into_response()
 }
 
@@ -331,7 +331,7 @@ fn apply_update_windows(src: &str) -> Response {
 #[cfg(target_os = "macos")]
 fn apply_update_macos(src: &str) -> Response {
     use std::process::Command;
-    // .app, из которого запущено приложение
+    // the .app bundle the app is running from
     let exe = std::env::current_exe().unwrap_or_default();
     let Some(exe_dir) = exe.parent() else {
         return err_status(StatusCode::BAD_REQUEST, "Обновление доступно только для установленного приложения (.app)");

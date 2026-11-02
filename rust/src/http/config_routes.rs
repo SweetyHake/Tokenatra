@@ -13,7 +13,7 @@ pub async fn get_config(headers: HeaderMap) -> Response {
     ok_json(cfg)
 }
 
-/// Чтение из браузера с неизвестным Origin — без сетевого секрета.
+/// Browser read from an unknown Origin, no network secret.
 fn strip_secret_for_origin(mut cfg: serde_json::Value, headers: &HeaderMap) -> serde_json::Value {
     let origin = headers
         .get(axum::http::header::ORIGIN)

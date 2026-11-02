@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use super::{err_status, file_response, ok_json};
 use crate::state::AppState;
 
-/// Порт /process: удаление фона.
+/// POST /process: background removal.
 pub async fn process(
     State(state): State<std::sync::Arc<AppState>>,
     mut mp: Multipart,
@@ -89,7 +89,7 @@ pub async fn process(
     match result {
         Ok(Ok((bytes, mime))) => file_response(bytes, mime, None),
         Ok(Err(msg)) => {
-            // Сообщение «Модель не найдена…» уходит с 500 (как в Python)
+            // the "model not found" message goes out with 500 (as before)
             err_status(StatusCode::INTERNAL_SERVER_ERROR, &msg)
         }
         Err(e) => {
@@ -99,7 +99,7 @@ pub async fn process(
     }
 }
 
-/// Порт /convert: перекодирование изображений и медиа.
+/// POST /convert: image and media transcoding.
 pub async fn convert_file(mut mp: Multipart) -> Response {
     let mut file: Option<(String, String, Option<String>, Vec<u8>)> = None; // name, filename, content_type, data
     let mut format_type = "webp".to_string();

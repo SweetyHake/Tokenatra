@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::state::{AppState, ProviderConfig};
 
-/// Провайдеры, слинкованные в этот бинарь (аналог ort.get_available_providers()).
+/// Providers linked into this binary.
 pub fn available_providers() -> &'static [&'static str] {
     if cfg!(windows) {
         &["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
@@ -30,7 +30,7 @@ impl Session {
         &self.input_name
     }
 
-    /// Прогон NCHW-входа (1x3x1024x1024), возвращает сырую маску f32.
+    /// Runs the NCHW input (1x3x1024x1024), returns the raw f32 mask.
     pub fn run(&mut self, tensor: Vec<f32>) -> anyhow::Result<Vec<f32>> {
         let value = ort::value::Tensor::from_array((
             vec![1i64, 3, 1024, 1024],
@@ -40,7 +40,7 @@ impl Session {
             .session
             .run(ort::inputs![self.input_name.as_str() => value])?;
         let first = &outputs[0];
-        // Модели бывают с выходом f32, f16 (BEN2/RMBG fp16) или f64
+        // models output f32, f16 (BEN2/RMBG fp16) or f64
         if let Ok(arr) = first.try_extract_array::<f32>() {
             let flat: Vec<f32> = arr.iter().copied().collect();
             return Ok(flat);
@@ -67,7 +67,7 @@ fn build_session(
     b = oe(b.with_optimization_level(opt_level))?;
     b = oe(b.with_intra_threads(intra_threads))?;
     b = oe(b.with_inter_threads(1))?;
-    // Параллельное исполнение (ORT_SEQUENTIAL в Python)
+    // parallel execution
     b = oe(b.with_parallel_execution(false))?;
 
     let mut dispatch: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
@@ -99,7 +99,7 @@ fn build_session(
             #[cfg(target_os = "macos")]
             "CoreMLExecutionProvider" => dispatch.push(ort::ep::CoreML::default().into()),
             "CPUExecutionProvider" => dispatch.push(ort::ep::CPU::default().into()),
-            _ => {} // провайдер не слинкован в этот бинарь — ORT молча откатится на CPU-узлы
+                        _ => {} // provider not linked, ORT falls back to CPU
         }
     }
     if !dispatch.is_empty() {
@@ -108,7 +108,7 @@ fn build_session(
     oe(b.commit_from_file(path))
 }
 
-/// ort-ошибки не Send/Sync (несут NonNull внутри) — в anyhow через Display.
+/// ort errors are not Send/Sync; wrapped via Display.
 fn oe<T, E: std::fmt::Display>(r: Result<T, E>) -> anyhow::Result<T> {
     r.map_err(|e| anyhow::anyhow!("{e}"))
 }
@@ -119,8 +119,8 @@ pub fn ort_env() -> &'static ort::environment::Environment {
     ORT_ENV.get_or_init(|| ort::init().with_name("Tokenatra").build().expect("ort init"))
 }
 
-/// Загрузка сессии с каскадом фолбэков (как load_session в Python):
-/// EXTENDED + провайдеры -> без device_id -> BASIC -> CPU.
+/// Loads the session with a fallback cascade:
+/// EXTENDED + providers -> no device_id -> BASIC -> CPU.
 fn load_session_inner(state: &AppState) -> anyhow::Result<Session> {
     let model_path = crate::paths::get_selected_model_path();
     if !model_path.exists() {
@@ -150,7 +150,7 @@ fn load_session_inner(state: &AppState) -> anyhow::Result<Session> {
     if let Ok(s) = try_build(&model_path, G::Level2, intra, &cur_providers, cur_dml) {
         session = Some(s);
     }
-    // 2. Без device_id (авто-выбор DML адаптера не подошёл)
+    // 2. no device_id (auto DML adapter selection failed)
     if session.is_none() && cur_dml.is_some() && cur_providers != ["CPUExecutionProvider".to_string()] {
         println!("  Адаптер #{:?} не запустился — пробуем дефолтный…", cur_dml);
         if let Ok(s) = try_build(&model_path, G::Level2, intra, &cur_providers, None) {
@@ -159,7 +159,7 @@ fn load_session_inner(state: &AppState) -> anyhow::Result<Session> {
             println!("  Дефолтный адаптер работает.");
         }
     }
-    // 3. BASIC (известный баг ORT на LayerNorm-fusion)
+    // 3. BASIC (known ORT LayerNorm-fusion bug)
     if session.is_none() {
         println!("  Оптимизация EXTENDED не загрузилась — откат на BASIC…");
         if let Ok(s) = try_build(&model_path, G::Level1, intra, &cur_providers, cur_dml) {
@@ -187,7 +187,7 @@ fn load_session_inner(state: &AppState) -> anyhow::Result<Session> {
     let input_name = s.inputs()[0].name().to_string();
     let mut sess = Session { session: s, input_name };
 
-    // Прогрев
+    // warmup
     let t0 = Instant::now();
     let zeros = vec![0f32; 3 * 1024 * 1024];
     match sess.run(zeros) {
@@ -208,7 +208,7 @@ fn try_build(
     build_session(path, level, intra, providers, dml)
 }
 
-/// Возвращает живую сессию, создавая её при необходимости (под session_lock).
+/// Returns the live session, creating it if needed (under session_lock).
 pub fn load_session(state: &Arc<AppState>) -> anyhow::Result<()> {
     let mut guard = state.session_lock.lock().unwrap();
     if guard.is_none() {
@@ -220,7 +220,7 @@ pub fn load_session(state: &Arc<AppState>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Выгрузить ONNX-сессию (трей/простой). true — если была выгружена.
+/// Unloads the ONNX session (tray idle). True if unloaded.
 pub fn unload_model(state: &Arc<AppState>) -> bool {
     let mut guard = state.session_lock.lock().unwrap();
     if guard.is_none() {
@@ -237,7 +237,7 @@ pub fn model_loaded(state: &Arc<AppState>) -> bool {
     state.session_lock.lock().unwrap().is_some()
 }
 
-/// Инференс под session_lock (от получения сессии до run).
+/// Inference under session_lock (from session setup to run).
 pub fn run_inference(state: &Arc<AppState>, tensor: Vec<f32>) -> anyhow::Result<Vec<f32>> {
     let mut guard = state.session_lock.lock().unwrap();
     if guard.is_none() {
@@ -253,7 +253,7 @@ pub fn run_inference(state: &Arc<AppState>, tensor: Vec<f32>) -> anyhow::Result<
     out
 }
 
-/// Полный конвейер remove_background (порт server.py:remove_background).
+/// Full remove_background pipeline.
 pub fn remove_background(
     state: &Arc<AppState>,
     img: image::DynamicImage,
@@ -290,7 +290,7 @@ pub fn remove_background(
     Ok(crate::imaging::composite_result(&rgb, &mask_full, &correction))
 }
 
-// ===== Детекция устройства =====
+// ===== Device detection =====
 
 fn run_cmd(cmd: &str, args: &[&str]) -> String {
     use std::process::{Command, Stdio};
@@ -368,7 +368,7 @@ fn cpu_name() -> String {
     grep.split(':').nth(1).unwrap_or_default().trim().to_string()
 }
 
-/// Классификация DXGI-адаптера: discrete | integrated | virtual | None.
+/// Classifies a DXGI adapter: discrete | integrated | virtual | None.
 pub fn classify_adapter(name: &str) -> Option<&'static str> {
     let low = name.to_lowercase();
     let contains_any = |kws: &[&str]| kws.iter().any(|k| low.contains(k));
@@ -400,7 +400,7 @@ pub fn classify_adapter(name: &str) -> Option<&'static str> {
     None
 }
 
-/// Дискретная карта (минимальный индекс DXGI) для DirectML на гибридных ноутбуках.
+/// Discrete card (lowest DXGI index) for DirectML on hybrid laptops.
 pub fn detect_discrete_dml_adapter() -> (Option<i32>, Option<String>) {
     #[cfg(windows)]
     {
@@ -473,7 +473,7 @@ fn read_device_cache() -> Option<(Vec<String>, Option<i32>, String)> {
             dml_id = Some(first as i32);
         }
     }
-    // Ручной gpu_device_id в config.json должен совпадать с кешем
+    // manual gpu_device_id in config.json must match the cache
     if let Some(dev) = crate::config::gpu_device_id() {
         if dml_id != Some(dev as i32) {
             return None;
@@ -486,7 +486,7 @@ fn read_device_cache() -> Option<(Vec<String>, Option<i32>, String)> {
     Some((names, dml_id, name))
 }
 
-/// Порт get_providers(): определяет устройство и сохраняет кеш.
+/// Detects the device and caches the result.
 pub fn detect_device(state: &AppState) {
     if let Some((providers, dml_id, name)) = read_device_cache() {
         println!("  Устройство (кеш): {name}");
@@ -497,7 +497,7 @@ pub fn detect_device(state: &AppState) {
 
     let avail = available_providers();
 
-    // macOS: CoreML определяется сразу
+    // macOS: CoreML resolves immediately
     if cfg!(target_os = "macos") && avail.contains(&"CoreMLExecutionProvider") {
         *state.device_name.write().unwrap() = "CoreML".into();
         *state.provider_cfg.write().unwrap() = Some(ProviderConfig {
@@ -538,7 +538,7 @@ pub fn detect_device(state: &AppState) {
         return;
     }
 
-    // ROCm — только на AMD: с Intel GPU нельзя (EP упадёт), там CPU
+    // ROCm is AMD-only; Intel GPU falls back to CPU
     let is_amd_gpu = gpu_name
         .as_ref()
         .map(|g| {
@@ -596,7 +596,7 @@ pub fn detect_device(state: &AppState) {
     save_device_cache(&["CPUExecutionProvider".into()], None, &name);
 }
 
-/// Фоновый подбор адаптера DirectML в отдельном процессе (как _spawn_tune_child).
+/// Background DirectML adapter tuning in a child process.
 fn spawn_tune_child(state: &Arc<AppState>) {
     let cfg = state.provider_cfg.read().unwrap().clone();
     let Some(c) = cfg else { return };
@@ -624,7 +624,7 @@ fn spawn_tune_child(state: &Arc<AppState>) {
     });
 }
 
-/// CLI: --tune-gpu — подбор самого быстрого адаптера DirectML.
+/// CLI --tune-gpu: picks the fastest DirectML adapter.
 pub fn cli_tune_gpu() {
     if !available_providers().contains(&"DmlExecutionProvider") {
         return;

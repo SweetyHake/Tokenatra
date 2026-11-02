@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use super::{err_status, file_response, ok_json};
 use crate::state::{AppState, EmbedExport, EMBED_EXPORT_MAX_BYTES, EMBED_EXPORT_MAX_ITEMS, EMBED_EXPORT_TTL};
 
-/// Порт /embed_export POST: принять готовое изображение из embed-редактора.
+/// POST /embed_export: receives the finished image from the embed editor.
 pub async fn embed_export_save(
     State(state): State<std::sync::Arc<AppState>>,
     mut mp: Multipart,
@@ -57,7 +57,7 @@ pub async fn embed_export_save(
     {
         let mut map = state.embed_exports.lock().unwrap();
         AppState::embed_export_cleanup(&mut map);
-        // LRU-вытеснение при переполнении
+        // LRU eviction on overflow
         while map.len() >= EMBED_EXPORT_MAX_ITEMS {
             let oldest = map
                 .iter()
@@ -84,7 +84,7 @@ pub async fn embed_export_save(
     ok_json(json!({ "id": file_id, "url": format!("/embed_export/{file_name}") }))
 }
 
-/// Порт /embed_export/<file_name> GET: модуль забирает блоб fetch'ем с CORS.
+/// GET /embed_export/<file_name>: the module fetches the blob with CORS.
 pub async fn embed_export_get(
     State(state): State<std::sync::Arc<AppState>>,
     Path(file_name): Path<String>,
@@ -111,7 +111,7 @@ pub async fn embed_export_get(
     let Some(entry) = entry else {
         return err_status(StatusCode::NOT_FOUND, "Not found");
     };
-    // Прямые GET с чужих страниц (<img> без Origin) — cross-site режем
+    // direct GETs from foreign pages (<img> without Origin) are cut as cross-site
     let connector_ok = headers
         .get(axum::http::header::ORIGIN)
         .and_then(|v| v.to_str().ok())

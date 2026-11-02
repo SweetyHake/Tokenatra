@@ -320,7 +320,7 @@ pub fn download_update() {
             "Tokenatra_update{}",
             expected_update_extension().unwrap_or("")
         ));
-        // Чистим старые файлы обновлений
+        // clean up old update files
         if let Ok(rd) = std::fs::read_dir(update_dir()) {
             for e in rd.filter_map(|e| e.ok()) {
                 let name = e.file_name().to_string_lossy().to_string();

@@ -1,6 +1,6 @@
-// Agent API (/agent/v1/*) — порт Python agent_api.py + agent_pipeline.py.
-// Инвариант: операции не исполняют код, не читают конфиг/секреты, не пишут на диск,
-// не ходят в сеть; источники — только base64/data_url.
+// Agent API (/agent/v1/*).
+// Invariant: ops never execute code, read config or secrets, write to
+// disk or touch the network; inputs are base64/data_url only.
 
 use std::sync::Mutex;
 use std::time::Instant;
@@ -20,9 +20,8 @@ const OPS_LIMIT: u32 = 200;
 const SESSION_TTL_MIN: u64 = 30;
 const MAX_SESSIONS: usize = 4;
 const MAX_BASE_DIM: u32 = 2048;
- // поле поиска не используется здесь (маски задаются явно)
 
-// ---------- сессии ----------
+// ---------- sessions ----------
 
 pub struct AgentSession {
     pub id: String,
@@ -66,7 +65,7 @@ fn with_store<T>(f: impl FnOnce(&mut Vec<AgentSession>) -> T) -> T {
         *guard = Some(Vec::new());
     }
     let v = guard.as_mut().unwrap();
-    // TTL-эвикшн
+    // TTL eviction
     let now = Instant::now();
     v.retain(|s| now.duration_since(s.last_used).as_secs() < SESSION_TTL_MIN * 60);
     f(v)
@@ -74,7 +73,7 @@ fn with_store<T>(f: impl FnOnce(&mut Vec<AgentSession>) -> T) -> T {
 
 fn store_create(base: RgbaImage) -> String {
     with_store(|v| {
-        // LRU: старше 4 — удаляем самые старые по last_used
+        // LRU: keep at most 4, drop oldest by last_used
         while v.len() >= MAX_SESSIONS {
             let oldest = v
                 .iter()
@@ -118,7 +117,7 @@ fn store_get(sid: &str) -> Option<AgentSession> {
     with_store(|v| {
         let s = v.iter_mut().find(|s| s.id == sid)?;
         s.touch();
-        // глубокое копирование нужных полей
+        // copy the fields we need
         Some(AgentSession {
             id: s.id.clone(),
             base: s.base.clone(),
@@ -173,7 +172,7 @@ fn store_remove(sid: &str) {
     with_store(|v| v.retain(|s| s.id != sid));
 }
 
-// ---------- ошибки / ответы ----------
+// ---------- errors / responses ----------
 
 fn agent_err(status: StatusCode, code: &str, message: &str) -> Response {
     (
@@ -199,7 +198,7 @@ fn file_response(bytes: Vec<u8>, mime: &str) -> Response {
         .into_response()
 }
 
-// ---------- ресурсы ----------
+// ---------- assets ----------
 
 fn find_ring_file(name: &str) -> Option<std::path::PathBuf> {
     let stem = name.to_lowercase();
@@ -222,7 +221,7 @@ fn find_ring_file(name: &str) -> Option<std::path::PathBuf> {
             }
         }
     }
-    // прямой суффиксный поиск: name -> name.webp/png
+    // direct suffix lookup: name -> name.webp/png
     for ext in ["webp", "png", "jpg", "jpeg"] {
         for d in [paths::builtin_ring_dir(), paths::ring_dir()] {
             let p = d.join(format!("{name}.{ext}"));
@@ -277,7 +276,7 @@ fn list_dir_images(dir: &std::path::Path, builtin: bool) -> Vec<Value> {
     out
 }
 
-// ---------- декодирование источника ----------
+// ---------- source decoding ----------
 
 fn decode_source(data: &str) -> Result<RgbaImage, Response> {
     let b64 = match data.find("base64,") {
@@ -301,7 +300,7 @@ fn decode_source(data: &str) -> Result<RgbaImage, Response> {
     Ok(img)
 }
 
-// ---------- маски / геометрия ----------
+// ---------- masks / geometry ----------
 
 fn mask_apply_shapes(mask: &mut image::GrayImage, shapes: &Value, value: u8) {
     if let Some(arr) = shapes.as_array() {
@@ -394,7 +393,7 @@ fn compose(session: &AgentSession, size: u32, scale_mode: &str, with_ring: bool)
         }
     }
 
-    // субъект: base -> 1024*s, центр + offset, поворот
+    // subject: base -> 1024*s, center + offset, rotation
     let s_f = session.scale;
     let big = (LOGICAL * s_f) as u32;
     let subj = image::imageops::resize(
@@ -414,20 +413,20 @@ fn compose(session: &AgentSession, size: u32, scale_mode: &str, with_ring: bool)
     } else {
         subj
     };
-    // маска субъекта
+    // subject mask
     let mask_full = resize_mask(&session.mask, subj.width(), subj.height());
     for (p, m) in subj.pixels_mut().zip(mask_full.pixels()) {
         p.0[3] = ((p.0[3] as u32) * (m.0[0] as u32) / 255) as u8;
     }
 
-    // логическая позиция: центр субъекта = 512 + offset; 1px субъекта = s3/1024 px
+    // logical position: subject center = 512 + offset; 1 subject px = s3/1024 px
     let scale3 = s3 as f32 / LOGICAL;
     let cx = (512.0 + session.offset_x) * scale3;
     let cy = (512.0 + session.offset_y) * scale3;
     let px0 = (cx - subj.width() as f32 / 2.0).round() as i64;
     let py0 = (cy - subj.height() as f32 / 2.0).round() as i64;
 
-    // цветокоррекция
+    // color correction
     if session.color_enabled {
         let sat = 1.0 + session.color_sat / 100.0;
         let light = 1.0 + session.color_light / 100.0;
@@ -446,7 +445,7 @@ fn compose(session: &AgentSession, size: u32, scale_mode: &str, with_ring: bool)
         }
     }
 
-    // тень
+    // shadow
     if session.shadow_enabled {
         let sh = session;
         let rad = sh.shadow_angle.to_radians();
@@ -459,7 +458,7 @@ fn compose(session: &AgentSession, size: u32, scale_mode: &str, with_ring: bool)
         let mut sil_shift = image::GrayImage::new(s3, s3);
         image::imageops::overlay(&mut sil_shift, &sil, dx, dy);
         let sil = image::imageops::blur(&sil_shift, (sh.shadow_blur as f32 * scale3 / 2.0).max(0.1));
-        // чёрный слой с альфой тени, композит ДО субъекта
+        // black layer with shadow alpha, composited before the subject
         let mut shadow_layer = image::RgbaImage::new(s3, s3);
         for (p, sp) in shadow_layer.pixels_mut().zip(sil.pixels()) {
             *p = image::Rgba([0, 0, 0, ((sp.0[0] as f32) * sh.shadow_opacity) as u8]);
@@ -467,7 +466,7 @@ fn compose(session: &AgentSession, size: u32, scale_mode: &str, with_ring: bool)
         image::imageops::overlay(&mut canvas, &shadow_layer, 0, 0);
     }
 
-    // субъект поверх
+    // subject on top
     image::imageops::overlay(&mut canvas, &subj, px0, py0);
 
     // scale mode
@@ -476,7 +475,7 @@ fn compose(session: &AgentSession, size: u32, scale_mode: &str, with_ring: bool)
         "2" => 2,
         "3" => 3,
         _ => {
-            // auto: bbox альфы субъекта на скане 512, порог 15, дилатация 1
+            // auto: subject alpha bbox on a 512 scan, threshold 15, dilate 1
             let scan = 512u32;
             let small = image::imageops::resize(
                 &subj,
@@ -595,7 +594,7 @@ fn round1(v: f32) -> f64 {
     ((v * 10.0).round() / 10.0) as f64
 }
 
-// ---------- обработчики ----------
+// ---------- handlers ----------
 
 pub async fn ping() -> Response {
     ok_json(json!({"pong": true, "agent": true}))
@@ -734,7 +733,7 @@ pub async fn op_remove_bg(
     let dyn_img = image::DynamicImage::ImageRgba8(s.base.clone());
     match crate::infer::remove_background(&state, dyn_img, edge_blur) {
         Ok(rgba) => {
-            // альфа вырезки -> в маску (субъект = альфа модели)
+            // cutout alpha -> mask (subject = model alpha)
             let mask = image::imageops::resize(
                 &image::imageops::grayscale(&rgba),
                 s.base.width(),
@@ -802,7 +801,7 @@ pub async fn op_mask(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -
                 return bad("bad_request", "preset decode failed");
             };
             let preset = preset.to_rgba8();
-            // альфа пресета растягивается на весь канвас и заменяет маску
+            // preset alpha stretches over the canvas and replaces the mask
             let a = resize_mask(&image::imageops::grayscale(&preset), s.mask.width(), s.mask.height());
             s.mask = a;
         }

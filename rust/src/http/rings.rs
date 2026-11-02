@@ -56,7 +56,7 @@ pub async fn rings_list() -> Response {
     collect(&paths::ring_dir(), false);
 
     ring_files.sort_by(|a, b| {
-        // builtin первыми, затем старые первыми
+        // builtin first, then oldest first
         b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2))
     });
 
@@ -65,7 +65,7 @@ pub async fn rings_list() -> Response {
         let name_str = f.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
         let lower = name_str.to_lowercase();
         let stem = f.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
-        // Поиск связанной маски <stem>.mask<ext>
+        // find the related mask <stem>.mask<ext>
         let mut mask_file: Option<String> = None;
         let orig_ext = super::ext_of(&name_str);
         for ext in [&orig_ext[..], "png", "webp", "jpg", "jpeg"] {

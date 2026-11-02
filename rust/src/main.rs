@@ -1,7 +1,5 @@
-// Release-сборка: GUI-подсистема Windows — без консольного окна у процесса
-// (это окно и видно при запуске). Debug остаётся консольным: println и
-// --server видны в терминале. При перенаправлении вывода (stdout в файл)
-// GUI-подсистема пишет в хендлы как обычно.
+// Release builds use the Windows GUI subsystem (no console window).
+// Debug builds keep the console for println and --server output.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod cli;
@@ -80,8 +78,8 @@ fn wait_for_server(deadline_secs: u64) {
     }
 }
 
-/// Монитор простоя трея (порт _tray_monitor_loop): чистит embed-экспорт
-/// и выгружает модель в простое. Стартует ЛЕНИВО (как set_tray_mode(True)).
+/// Idle tray monitor: cleans embed exports and unloads the model
+/// when idle. Starts lazily.
 fn ensure_tray_monitor(state: &Arc<AppState>) {
     static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -113,7 +111,7 @@ fn ensure_tray_monitor(state: &Arc<AppState>) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    // CLI-глаголы контекстного меню (как context_menu_helper.py)
+    // Explorer context menu verbs
     let mut i = 1;
     while i < args.len() {
         let code = match args[i].as_str() {
@@ -137,7 +135,7 @@ fn main() {
 
     let server_only = args.iter().any(|a| a == "--server" || a == "--headless");
 
-    // Linux (WSLg/виртуалки): принудительный X11 и мягкий рендеринг WebKit
+    // Linux (WSLg/VMs): force X11 and software WebKit rendering
     if !cfg!(windows) {
         unsafe { std::env::set_var("GDK_BACKEND", "x11") };
         unsafe { std::env::set_var("GTK_THEME", "Adwaita-dark") };
@@ -148,7 +146,7 @@ fn main() {
     let state = AppState::new();
     state.purge_embed_export_dir();
 
-    // Определение устройства (PowerShell/DXGI) и кеш провайдеров
+    // device detection (PowerShell/DXGI) and provider cache
     infer::detect_device(&state);
 
     if !server_only {
@@ -159,7 +157,7 @@ fn main() {
         #[cfg(windows)]
         win::enable_windows_dark_dialogs();
 
-        // PID прошлого экземпляра + освобождение порта
+        // previous instance PID + free the port
         let pid_file = paths::pid_file();
         if let Ok(old) = std::fs::read_to_string(&pid_file) {
             if let Ok(old_pid) = old.trim().parse::<u32>() {
@@ -185,7 +183,7 @@ fn main() {
         win::register_context_menu();
     }
 
-    // Фоновая проверка обновлений (раз за сессию — реальная)
+    // background update check (once per session)
     updater::start_background_tasks(true, 15);
 
     let server = spawn_server(state.clone());

@@ -1,7 +1,7 @@
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Mutex, OnceLock};
 
-/// Команды GUI из HTTP-обработчиков (порт app.window_ref + js_api).
+/// GUI commands from HTTP handlers.
 #[derive(Debug)]
 pub enum GuiCommand {
     Minimize,
@@ -14,9 +14,9 @@ pub enum GuiCommand {
     Show,
     #[allow(dead_code)]
     EvalJs(String),
-    /// Перетаскивание окна за хедер (Linux/macOS; Windows — через Win32-хук).
+    /// Window drag by header (Linux/macOS; Windows uses a Win32 hook).
     DragWindow,
-    /// Ресайз за края (Linux/macOS; macOS вернёт unsupported).
+    /// Edge resize (Linux/macOS; macOS returns unsupported).
     DragResize(tao::window::ResizeDirection),
 }
 
@@ -45,10 +45,9 @@ pub fn send(cmd: GuiCommand) -> bool {
     ok
 }
 
-/// Вызывается ТОЛЬКО в потоке event loop.
+/// Must run on the event loop thread.
 pub fn try_recv() -> Result<GuiCommand, std::sync::mpsc::TryRecvError> {
-    // Receiver не Sync, но живёт в Mutex — безопасно при использовании
-    // из одного потока event loop.
+    // Receiver is not Sync; kept in a Mutex and used on the
     let guard = channel().rx.lock().unwrap();
     if let Some(rx) = guard.as_ref() {
         return rx.try_recv();
@@ -56,7 +55,7 @@ pub fn try_recv() -> Result<GuiCommand, std::sync::mpsc::TryRecvError> {
     Err(std::sync::mpsc::TryRecvError::Disconnected)
 }
 
-/// Уведомление о смене состояния модели (иконка/меню трея).
+/// Notifies the tray about model state changes.
 pub mod model_state {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::OnceLock;

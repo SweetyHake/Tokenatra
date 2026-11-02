@@ -29,9 +29,8 @@ impl std::fmt::Display for ImgError {
     }
 }
 
-/// Декодирование изображения с проверкой размеров ДО полной распаковки
-/// (защита от decompression bomb). AVIF, который image-декодер не понимает,
-/// прогоняем через системный ffmpeg.
+/// Decodes images, checking dimensions before full decompression
+/// (decompression bomb guard). AVIF falls back to system ffmpeg.
 pub fn open_image(bytes: &[u8]) -> Result<DynamicImage, ImgError> {
     let reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
@@ -58,7 +57,7 @@ pub fn open_image(bytes: &[u8]) -> Result<DynamicImage, ImgError> {
 }
 
 fn looks_like_avif(bytes: &[u8]) -> bool {
-    // ISO-BMFF: ftyp box с brand avif/avis
+    // ISO-BMFF: ftyp box with an avif/avis brand
     bytes.len() > 12
         && &bytes[4..8] == b"ftyp"
         && (bytes[8..16].starts_with(b"avif") || bytes[8..16].starts_with(b"avis"))
@@ -86,7 +85,7 @@ pub fn is_media_ext(filename: &str, mime: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-/// Ограничение до MAX_IMAGE_DIMENSION (LANCZOS).
+/// Downscales to MAX_IMAGE_DIMENSION (Lanczos).
 pub fn validate_image(img: DynamicImage) -> DynamicImage {
     let (w, h) = img.dimensions();
     if w > MAX_IMAGE_DIMENSION || h > MAX_IMAGE_DIMENSION {
@@ -98,7 +97,7 @@ pub fn validate_image(img: DynamicImage) -> DynamicImage {
     img
 }
 
-/// Даунскейл рабочего изображения до MAX_PROCESS_DIM (BILINEAR — быстро).
+/// Downscales the working image to MAX_PROCESS_DIM (bilinear).
 pub fn cap_process_size(img: DynamicImage) -> DynamicImage {
     let (w, h) = img.dimensions();
     if w.max(h) > MAX_PROCESS_DIM {
@@ -110,8 +109,8 @@ pub fn cap_process_size(img: DynamicImage) -> DynamicImage {
     img
 }
 
-/// Альфу нельзя просто выбросить: прозрачные пиксели почти чёрные —
-/// по краям объекта появится тёмная кайма. Композитим на белый.
+/// Alpha cannot be dropped: transparent pixels are near-black and
+/// would leave a dark halo. Composite over white.
 pub fn flatten_to_rgb(img: &DynamicImage) -> image::RgbImage {
     if img.color().has_alpha() {
         let rgba = img.to_rgba8();
@@ -135,7 +134,7 @@ pub fn flatten_to_rgb(img: &DynamicImage) -> image::RgbImage {
     }
 }
 
-/// 3x3 минимальный фильтр (аналог PIL MinFilter(3), края — повторением).
+/// 3x3 min filter (PIL MinFilter(3) equivalent, edge-replicated).
 pub fn min_filter3(gray: &image::GrayImage) -> image::GrayImage {
     let (w, h) = gray.dimensions();
     let mut out = image::GrayImage::new(w, h);
@@ -158,7 +157,7 @@ pub fn min_filter3(gray: &image::GrayImage) -> image::GrayImage {
     out
 }
 
-/// Порт refine_mask: рефайн на уменьшенной копии, результат в target_size.
+/// Refines the mask on a downscaled copy, upscales to target size.
 pub fn refine_mask(
     mask: &image::GrayImage,
     edge_blur: f64,
@@ -226,8 +225,8 @@ pub fn refine_mask(
     }
 }
 
-/// Готовит NCHW f32 вход модели (1024x1024) из RGB-изображения.
-/// BEN2 ждёт plain 0..1, остальные — ImageNet-нормализацию.
+/// Builds the NCHW f32 model input (1024x1024) from RGB.
+/// BEN2 expects plain 0..1, others use ImageNet normalization.
 pub fn prepare_model_input(rgb: &image::RgbImage, imagenet_norm: bool) -> Vec<f32> {
     let square = image::imageops::resize(rgb, 1024, 1024, FilterType::Lanczos3);
     let mut out = vec![0f32; 3 * 1024 * 1024];
@@ -239,7 +238,7 @@ pub fn prepare_model_input(rgb: &image::RgbImage, imagenet_norm: bool) -> Vec<f3
     } else {
         ([0.0f32; 3], [1.0f32; 3])
     };
-    // NCHW: план C, строка y, столбец x
+    // NCHW: channel, row, column
     for (x, y, px) in square.enumerate_pixels() {
         let idx = (y as usize * 1024) + x as usize;
         for c in 0..3 {
@@ -250,8 +249,8 @@ pub fn prepare_model_input(rgb: &image::RgbImage, imagenet_norm: bool) -> Vec<f3
     out
 }
 
-/// Постобработка сырой маски: sigmoid или clip, растяжка в 0-255.
-/// None => модель не нашла объект (почти однородная маска) — пустая маска.
+/// Raw mask postprocessing: sigmoid or clip, stretched to 0-255.
+/// None => no object found (near-uniform mask), empty mask.
 pub fn mask_from_output(raw: &[f32]) -> Option<image::GrayImage> {
     let mn = raw.iter().cloned().fold(f32::INFINITY, f32::min);
     let mx = raw.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -276,9 +275,9 @@ pub fn mask_from_output(raw: &[f32]) -> Option<image::GrayImage> {
     Some(img)
 }
 
-/// White-penalty: яркие почти-фоновые пиксели (wp>220 при alpha<180)
-/// подавляются поправкой коррекции альфы. Возвращает маску поправки в
-/// размере изображения.
+/// White penalty: bright near-background pixels (wp>220, alpha<180)
+/// are suppressed via an alpha correction. Returns the correction
+/// mask at image size.
 pub fn white_penalty_correction(
     rgb: &image::RgbImage,
     alpha: &image::GrayImage,
@@ -303,7 +302,7 @@ pub fn white_penalty_correction(
     image::imageops::resize(&corr, w, h, FilterType::Triangle)
 }
 
-/// Финальный композитинг: RGBA с альфой = mask - correction.
+/// Final composite: RGBA with alpha = mask - correction.
 pub fn composite_result(
     rgb: &image::RgbImage,
     alpha: &image::GrayImage,
@@ -318,7 +317,7 @@ pub fn composite_result(
     out
 }
 
-/// Порт save_image: возвращает (байты, mime).
+/// Encodes to (bytes, mime).
 pub fn save_image(
     img: &DynamicImage,
     format_type: &str,
@@ -331,7 +330,7 @@ pub fn save_image(
             Ok((buf, "image/webp"))
         }
         "avif" => {
-            // image::AvifEncoder (ravif) — 8-битный AVIF
+            // image::AvifEncoder (ravif), 8-bit AVIF
             let mut c = Cursor::new(&mut buf);
             let enc = image::codecs::avif::AvifEncoder::new_with_speed_quality(&mut c, 10, quality);
             let rgba = img.to_rgba8();
@@ -415,7 +414,7 @@ pub fn save_image(
     }
 }
 
-/// Lossy WebP через libwebp (PIL-совместимый quality).
+/// Lossy WebP via libwebp (PIL-compatible quality).
 pub fn encode_webp(img: &DynamicImage, quality: u8, out: &mut Vec<u8>) -> Result<(), ImgError> {
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
@@ -424,7 +423,7 @@ pub fn encode_webp(img: &DynamicImage, quality: u8, out: &mut Vec<u8>) -> Result
     Ok(())
 }
 
-/// Кольцо по умолчанию (серый эллис), если файл не найден.
+/// Fallback ring (grey ellipse) when the file is missing.
 pub fn create_default_ring(size: u32) -> RgbaImage {
     let scale = size as f32 / 1024.0;
     let w = (40.0 * scale) as i32;

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-/// Ищет FFmpeg рядом с приложением, в tools/ или в PATH.
+/// Locates FFmpeg next to the app, in tools/ or on PATH.
 pub fn find_ffmpeg() -> Option<PathBuf> {
     let resource = crate::paths::resource_dir();
     let base = crate::paths::base_dir();
@@ -37,7 +37,7 @@ fn no_window(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
-/// Конвертирует первый аудиопоток в OGG Vorbis (порт convert_media_to_ogg).
+/// Converts the first audio stream to OGG Vorbis.
 pub fn convert_media_to_ogg(data: &[u8], src_ext: &str, quality: u8) -> Result<Vec<u8>, String> {
     let ffmpeg = find_ffmpeg().ok_or_else(|| {
         "FFmpeg не найден. Установите FFmpeg или добавьте его в PATH".to_string()
@@ -75,12 +75,12 @@ pub fn convert_media_to_ogg(data: &[u8], src_ext: &str, quality: u8) -> Result<V
     result
 }
 
-/// Vorbis-качество из UI-качества 10..100 -> -1..10 (как в Python).
+/// Maps UI quality 10..100 to Vorbis -1..10.
 pub fn vorbis_quality(quality: u8) -> i32 {
     (((quality as f32 - 10.0) * 10.0 / 90.0) as f64).round() as i32
 }
 
-/// Декодирование AVIF в PNG через системный ffmpeg (когда недоступен Rust-декодер).
+/// Decodes AVIF to PNG via system ffmpeg.
 pub fn decode_to_png(data: &[u8]) -> Option<Vec<u8>> {
     let ffmpeg = find_ffmpeg()?;
     let tmp = std::env::temp_dir();
@@ -133,7 +133,7 @@ pub fn notify(message: &str) {
     });
 }
 
-/// Записать файл атомарно (temp + rename), как в context_menu_helper.
+/// Atomic file write (temp + rename).
 pub fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension(format!(
         "{}.tmp",

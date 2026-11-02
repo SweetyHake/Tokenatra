@@ -1,5 +1,5 @@
-//! GUI-оболочка: wry/tao окно + мост window.pywebview поверх HTTP-роутов.
-//! Фронтенд не меняется ни на байт: js_api pywebview эмулируется init-скриптом.
+//! GUI shell: wry/tao window with a pywebview bridge over the HTTP routes.
+//! The frontend is unchanged; pywebview js_api is emulated by an init script.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -80,12 +80,12 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(800.0, 600.0))
         .with_resizable(true)
-        // Единый кастомный тайтлбар на всех ОС: нативные декорации выключены,
-        // кнопки/перетаскивание/ресайз — наши (Windows: Win32-хук; Linux/macOS:
-        // tao drag_window/drag_resize_window + краевой ресайз из фронтенда)
+        // Unified custom titlebar: native decorations off, we handle buttons,
+        // drag and resize ourselves (Windows: Win32 hook; Linux/macOS:
+        // tao drag_window/drag_resize_window + edge resize from the frontend)
         .with_decorations(false)
-        // Windows: прячем до настройки тайтлбара/иконки (как pywebview);
-        // Linux/macOS — окно видно сразу
+        // Windows: hidden until titlebar and icon are set (like pywebview);
+        // Linux/macOS show the window immediately
         .with_visible(!cfg!(windows))
         .build(&event_loop)
         .expect("create window");
@@ -98,7 +98,7 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
         .build_as_child(&window)
         .expect("create webview");
 
-    // Windows: кастомный тайтлбар (тёмная рамка, DWM NC off, WndProc-хук)
+    // Windows: custom titlebar (dark frame, DWM NC off, WndProc hook)
     #[cfg(windows)]
     let (window, webview) = {
         use tao::platform::windows::WindowExtWindows as _;
@@ -107,9 +107,9 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
         crate::win::customize_window(hwnd);
         crate::win::set_window_icon(hwnd, &crate::paths::resource_dir().join("icon.ico"));
         window.set_visible(true);
-        // Регистрируем вебвью для ресайза из хука (WM_SIZE) и сразу
-        // растягиваем: wry создал вебвью при СКРЫТОМ окне и снял неверный
-        // клиентский размер — без этого child остаётся ~280px квадратом.
+        // Register the webview for resize from the hook (WM_SIZE) and stretch
+        // it right away: wry created the webview while the window was hidden
+        // and captured a wrong client size; without this it stays a ~280px square.
         let webview = Arc::new(webview);
         crate::win::set_resize_target(webview.clone());
         crate::win::resize_webview_to_client();
@@ -118,7 +118,7 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
     #[cfg(not(windows))]
     let (window, webview) = (window, Arc::new(webview));
 
-    // ===== Трей: иконка живёт весь цикл приложения (как у Discord) =====
+    // ===== Tray: the icon lives for the whole app lifetime =====
     #[cfg(windows)]
     let tray = crate::tray::create(&state);
     #[cfg(not(windows))]
@@ -197,7 +197,7 @@ fn handle_gui_command(
             EXIT_REQUESTED.store(true, Ordering::SeqCst);
         }
         GuiCommand::Show => {
-            // Из трея окно может быть и спрятано, и свернуто — восстанавливаем
+            // the window may be hidden or minimized from the tray; restore it
             window.set_minimized(false);
             window.set_visible(true);
             window.set_focus();
@@ -205,9 +205,9 @@ fn handle_gui_command(
             let _ = webview.evaluate_script(exit_idle_js());
         }
         GuiCommand::ToggleFullscreen => {
-            // Windows: честный Win32-fullscreen (win.rs) — tao Borderless
-            // оставляет WS_CAPTION и не прячет панель задач;
-            // Linux/macOS: нативный borderless tao работает корректно.
+            // Linux/macOS: native tao borderless works fine.
+            // same as _final_exit/_nuclear_exit in the old app.py
+            // Linux/macOS: native tao borderless works fine.
             #[cfg(windows)]
             if let Some(hwnd) = crate::win::hwnd() {
                 crate::win::toggle_fullscreen(hwnd);
@@ -252,7 +252,7 @@ fn handle_gui_command(
 }
 
 fn final_exit() {
-    // Как _final_exit/_nuclear_exit в app.py
+    // same as _final_exit/_nuclear_exit in the old app.py
     #[cfg(windows)]
     {
         crate::win::unregister_context_menu();

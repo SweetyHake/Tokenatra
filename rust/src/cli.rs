@@ -1,4 +1,4 @@
-//! CLI-глаголы контекстного меню Explorer (порт context_menu_helper.py).
+//! Explorer context menu verbs.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -31,7 +31,7 @@ pub fn remove_bg(file: &str) -> i32 {
         return 1;
     }
 
-    // Настройки удаления фона — те же, что выбраны в приложении
+    // background removal settings mirror the app config
     let (mut fmt, mut quality, mut edge_blur) = ("webp".to_string(), "90".to_string(), "1".to_string());
     if let Ok(cfg) = crate::config::load() {
         if let Some(r) = cfg.get("remover").and_then(|v| v.as_object()) {
@@ -94,7 +94,7 @@ pub fn remove_bg(file: &str) -> i32 {
         .unwrap_or("webp");
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
     let out_path = path.with_file_name(format!("{stem}.{out_ext}"));
-    // Атомарная запись
+    // atomic write
     if crate::ffmpeg::atomic_write(&out_path, &result).is_err() {
         return 1;
     }

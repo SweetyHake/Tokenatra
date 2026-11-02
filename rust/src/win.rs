@@ -1,6 +1,6 @@
 #![cfg(windows)]
-//! Windows-специфика: кастомный тайтлбар (DWM + WndProc), DXGI, контекстное
-//! меню, GPU-настройки WebView2, тёмные диалоги, освобождение порта.
+//! Windows specifics: custom titlebar (DWM + WndProc), DXGI, Explorer
+//! context menu, WebView2 GPU settings, dark dialogs, port release.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Mutex;
@@ -22,7 +22,7 @@ pub fn store_hwnd(hwnd: isize) {
     HWND_STORED.store(hwnd, Ordering::SeqCst);
 }
 
-/// HWND-обёртка для переноса в blocking-потоки (resize_loop).
+/// HWND wrapper for moving into blocking threads (resize_loop).
 pub struct SendHwnd(pub HWND);
 unsafe impl Send for SendHwnd {}
 
@@ -35,25 +35,25 @@ pub fn hwnd() -> Option<HWND> {
     }
 }
 
-// ===== WndProc: NCCALCSIZE/NCHITTEST + перетаскивание из WebView =====
+// ===== WndProc: NCCALCSIZE/NCHITTEST + WebView drag =====
 
 static ORIG_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 
-/// Вебвью для ресайза из хука. Хук всегда вызывается на потоке event loop —
-/// тот же, где создан Arc<WebView>, поэтому thread_local безопасен и не
-/// требует Sync от COM-обёртки wry.
+/// Webview for resize from the hook. The hook always runs on the event
+/// loop thread where the Arc<WebView> was created, so thread_local is
+/// safe and avoids requiring Sync from the wry COM wrapper.
 thread_local! {
     static RESIZE_TARGET: std::cell::RefCell<Option<std::sync::Arc<wry::WebView>>> =
         const { std::cell::RefCell::new(None) };
 }
 
-/// Регистрирует вебвью, который hook_proc растягивает по WM_SIZE.
+/// Registers the webview that hook_proc stretches on WM_SIZE.
 pub fn set_resize_target(webview: std::sync::Arc<wry::WebView>) {
     RESIZE_TARGET.with(|c| *c.borrow_mut() = Some(webview));
 }
 
-/// Растянуть вебвью по клиентской области родителя (вызывается из хука на
-/// WM_SIZE и из shell при показе окна). Возвращает false, если цели нет.
+/// Stretches the webview over the parent client area (called from the
+/// hook on WM_SIZE and from shell on window show). False if no target.
 pub fn resize_webview_to_client() -> bool {
     let Some(hwnd) = hwnd() else { return false };
     let mut rect = RECT::default();
@@ -80,12 +80,12 @@ pub fn post_drag_message(hwnd: HWND) {
     }
 }
 
-// ===== Полноэкранный режим F11 =====
-// tao Borderless оставляет окну WS_CAPTION и не поднимает его над панелью
-// задач: Windows не считает такое окно полноэкранным и панель задач остаётся
-// видимой. Здесь честный Win32-переход: снять WS_CAPTION|WS_THICKFRAME и
-// растянуть на монитор; при выходе восстановить стили, границы и
-// развёрнутость. Состояние живёт только здесь — event loop-поток.
+// ===== F11 fullscreen =====
+// tao Borderless keeps WS_CAPTION and does not raise the window above
+// the taskbar: Windows does not treat it as fullscreen. Real Win32
+// transition here: drop WS_CAPTION|WS_THICKFRAME, stretch over the
+// monitor; on exit restore styles, borders and maximized state.
+// State lives only on the event loop thread.
 
 struct FullscreenState {
     rect: RECT,
@@ -102,7 +102,7 @@ pub fn is_fullscreen() -> bool {
 pub fn toggle_fullscreen(hwnd: HWND) {
     unsafe {
         if let Some(prev) = FULLSCREEN.lock().unwrap().take() {
-            // Выход: вернуть стили, границы и (если было) развёрнутое состояние
+            // exit: restore styles, borders and (if it was) maximized state
             let _ = SetWindowLongPtrW(hwnd, GWL_STYLE, prev.style);
             let _ = SetWindowPos(
                 hwnd,
@@ -130,8 +130,8 @@ pub fn toggle_fullscreen(hwnd: HWND) {
                 style
                     & !(WS_CAPTION.0 as isize
                         | WS_THICKFRAME.0 as isize
-                        // иначе останется IsZoomed() и NCCALCSIZE-инсет развернутого
-                        // окна съест 10px по краям полноэкранного кадра
+                        // otherwise IsZoomed() and the maximized NCCALCSIZE inset would eat
+                        // 10px around the fullscreen frame
                         | WS_MAXIMIZE.0 as isize),
             );
             let mut mi = MONITORINFO {
@@ -197,9 +197,9 @@ unsafe extern "system" fn hook_proc(
         }
     }
     if msg == WM_NCCALCSIZE && wp.0 != 0 {
-        // Полный клиент-арей: содержимое WebView2 покрывает всё окно.
-        // При maximize Windows раздувает окно на ширину невидимой рамки —
-        // компенсируем, иначе верхняя часть тайтлбара уезжает за экран.
+        // Full client area: WebView2 covers the whole window. On maximize
+        // Windows inflates the window by the invisible frame width;
+        // compensate or the titlebar top moves off-screen.
         if IsZoomed(hwnd).as_bool() {
             let frame =
                 GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
@@ -213,17 +213,16 @@ unsafe extern "system" fn hook_proc(
         return LRESULT(0);
     }
     if msg == WM_SIZE && wp.0 != SIZE_MINIMIZED as usize {
-        // Сабкласс wry не получает WM_SIZE через нашу цепочку хуков —
-        // растягиваем вебвью сами (hook гарантированно первый в цепочке)
+        // the wry subclass does not get WM_SIZE through our hook chain;
+        // stretch the webview ourselves (our hook is first in the chain)
         resize_webview_to_client();
     }
     if msg == WM_APP + 1 {
-        // Нативный модальный цикл перемещения вместо ручного SetCapture-цикла:
-        // система сама двигает окно, поэтому работают Aero Snap (перетягивание
-        // к краям — половина экрана, вверх — в максимум, с флайаутом Snap
-        // Layouts в Win11) и перетягивание развёрнутого окна. ReleaseCapture
-        // обязателен: без него WebView2 держит захват мыши и цикл «прилипает»
-        // (история app.py), не получая WM_LBUTTONUP.
+        // Native modal move loop instead of a manual SetCapture loop: the
+        // system moves the window, so Aero Snap (edge snap to half screen,
+        // up to maximize, Win11 Snap Layouts flyout) and dragging a maximized
+        // window work. ReleaseCapture is required: without it WebView2 keeps
+        // mouse capture and the loop sticks without WM_LBUTTONUP.
         use windows::Win32::UI::WindowsAndMessaging::{HTCAPTION, SC_MOVE};
         let swap = GetSystemMetrics(SM_SWAPBUTTON);
         let vk_primary = if swap != 0 { VK_RBUTTON } else { VK_LBUTTON };
@@ -252,7 +251,7 @@ unsafe extern "system" fn hook_proc(
     }
 }}
 
-/// Применить кастомный тайтлбар: тёмная рамка, скрытие NC-рендера, хук.
+/// Applies the custom titlebar: dark frame, hides NC rendering, hook.
 pub fn customize_window(hwnd_val: isize) {
     let hwnd = HWND(hwnd_val as *mut _);
     unsafe {
@@ -281,7 +280,7 @@ pub fn customize_window(hwnd_val: isize) {
     }
 }
 
-/// Иконка окна из icon.ico (панель задач 16px, Alt+Tab 32px).
+/// Window icon from icon.ico (taskbar 16px, Alt+Tab 32px).
 pub fn set_window_icon(hwnd_val: isize, icon_path: &std::path::Path) {
     let hwnd = HWND(hwnd_val as *mut _);
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -334,7 +333,7 @@ pub fn set_window_icon(hwnd_val: isize, icon_path: &std::path::Path) {
     }
 }
 
-/// Модальный цикл ресайза (порт /api/window/resize_start).
+/// Modal resize loop (/api/window/resize_start).
 pub fn resize_loop(h: SendHwnd, edges: (bool, bool, bool, bool)) {
     let hwnd = h.0;
     use windows::Win32::Foundation::SIZE;
@@ -420,7 +419,7 @@ pub fn enumerate_dxgi_adapters() -> Option<Vec<(i32, String)>> {
     }
 }
 
-// ===== AppUserModelID / тёмные диалоги / WebView2 GPU =====
+// ===== AppUserModelID / dark dialogs / WebView2 GPU =====
 
 pub fn set_taskbar_identity() {
     unsafe {
@@ -440,7 +439,7 @@ pub fn enable_windows_dark_dialogs() {
             let name = windows::core::PCSTR(ord as usize as *const u8);
             windows::Win32::System::LibraryLoader::GetProcAddress(ux, name).map(|p| p as *mut _)
         };
-        // Функции экспортируются по ординалам 135/136 на актуальных сборках
+        // functions exported by ordinals 135/136 on current builds
         let pam = make(135)
             .or_else(|| windows::Win32::System::LibraryLoader::GetProcAddress(ux, windows::core::s!("SetPreferredAppMode")).map(|p| p as *mut _));
         let flush = make(136)
@@ -457,7 +456,7 @@ pub fn enable_windows_dark_dialogs() {
 }
 
 pub fn setup_webview2_gpu() {
-    // Аппаратное ускорение WebView2 (ANGLE d3d11) через официальные аргументы
+    // WebView2 hardware acceleration (ANGLE d3d11) via official args
     let args = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
     let mut args = args;
     for sw in ["--use-angle=d3d11", "--enable-gpu-rasterization"] {
@@ -467,7 +466,7 @@ pub fn setup_webview2_gpu() {
     }
     unsafe { std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args) };
 
-    // GpuPreference=2 по ПОЛНОМУ пути процесса (приложение + msedgewebview2)
+    // GpuPreference=2 by FULL process path (app + msedgewebview2)
     use winreg::enums::*;
     use winreg::RegKey;
     let set_pref = |exe: &str| -> anyhow::Result<()> {
@@ -516,7 +515,7 @@ pub fn setup_webview2_gpu() {
     }
 }
 
-// ===== Контекстное меню Explorer =====
+// ===== Explorer context menu =====
 
 const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp", "gif", "tiff", "tif"];
 const MEDIA_EXTS: &[&str] = &[
@@ -607,7 +606,7 @@ pub fn register_context_menu() {
         Err(_) => return,
     };
 
-    // Чистка ключей старых версий
+    // clean up keys from older versions
     for reg_path in LEGACY_REG_ENTRIES {
         for root in [&hkcu, &hklm] {
             if reg_path.contains("CLSID") {
@@ -629,7 +628,7 @@ pub fn register_context_menu() {
         }
     }
 
-    // Глаголы на *\shell + AppliesTo (Windows 11 25H2)
+    // verbs on *\shell + AppliesTo (Windows 11 25H2)
     for (entries, applies) in [
         (file_reg_entries(), applies_to(IMAGE_EXTS)),
         (media_reg_entries(), applies_to(MEDIA_EXTS)),
@@ -691,7 +690,7 @@ pub fn unregister_context_menu() {
     }
 }
 
-/// Освобождение порта от чужого процесса (netstat + taskkill).
+/// Frees the port from a foreign process (netstat + taskkill).
 pub fn kill_process_on_port(port: u16) {
     use std::process::{Command, Stdio};
     let target = format!("127.0.0.1:{port}");
@@ -719,7 +718,7 @@ pub fn kill_process_on_port(port: u16) {
     }
 }
 
-/// Убить процесс по PID (app.pid прошлого экземпляра).
+/// Kills a process by PID (previous instance app.pid).
 pub fn terminate_process(pid: u32) -> bool {
     if pid == 0 || pid == std::process::id() {
         return false;

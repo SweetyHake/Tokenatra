@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use serde_json::{json, Map, Value};
 
-/// Чтение config.json (пустой объект при отсутствии/повреждении).
+/// Reads config.json (empty object if missing or corrupt).
 pub fn load() -> anyhow::Result<Value> {
     load_from(&crate::paths::config_file())
 }
@@ -18,7 +18,7 @@ pub fn load_from(path: &Path) -> anyhow::Result<Value> {
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn to_string(cfg: &Value) -> String {
-    // ensure_ascii=False + indent 2, как в Python
+    // pretty-print, 2-space indent
     serde_json::to_string_pretty(cfg).unwrap_or_else(|_| "{}".into())
 }
 
@@ -28,7 +28,7 @@ pub fn save(cfg: &Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Атомарный read-modify-write. mutator возвращает Some(new) для записи.
+/// Atomic read-modify-write; the mutator returns Some(new) to save.
 pub fn update<R>(
     mutator: impl FnOnce(&mut Value) -> Option<R>,
 ) -> anyhow::Result<(Value, Option<R>)> {
@@ -100,7 +100,7 @@ pub fn allow_browser() -> bool {
     cfg.get("allow_browser").and_then(|v| v.as_bool()) != Some(false)
 }
 
-/// Настройки трея (серверные ключи, клиент их не хранит).
+/// Tray settings (server-side keys).
 pub fn tray_settings() -> (bool, f64) {
     let cfg = load().unwrap_or_else(|_| json!({}));
     let close = cfg.get("close_to_tray").and_then(|v| v.as_bool()) != Some(false);
@@ -119,19 +119,19 @@ pub fn gpu_device_id() -> Option<i64> {
         .filter(|v| *v >= 0)
 }
 
-/// Серверные ключи, которые клиентский снапшот /config не может затереть.
+/// Server keys the client snapshot must not overwrite.
 pub fn merge_client_config(data: &Map<String, Value>, origin_is_foreign: bool) -> Value {
     let existing = load().unwrap_or_else(|_| json!({}));
     let mut merged = Value::Object(data.clone());
 
     if let Value::Object(m) = &mut merged {
-        // selected_model / gpu_device_id меняются только /select_model и tune-gpu
+        // selected_model / gpu_device_id change only via select_model and tune-gpu
         for key in ["selected_model", "gpu_device_id"] {
             if let Some(v) = existing.get(key) {
                 m.insert(key.into(), v.clone());
             }
         }
-        // Серверные ключи, которых нет в теле — берём существующие
+        // server keys missing from the body keep their values
         for key in [
             "close_to_tray",
             "tray_idle_unload_min",
@@ -150,7 +150,7 @@ pub fn merge_client_config(data: &Map<String, Value>, origin_is_foreign: bool) -
                 }
             }
         }
-        // Чужой origin не может менять сетевые ключи безопасности
+        // foreign origins cannot touch network security keys
         if origin_is_foreign {
             for key in [
                 "shared_secret",
@@ -166,7 +166,7 @@ pub fn merge_client_config(data: &Map<String, Value>, origin_is_foreign: bool) -
     merged
 }
 
-/// Записать значение в config.json (merge на верхнем уровне).
+/// Writes config.json (top-level merge).
 pub fn set_key(key: &str, value: Value) -> anyhow::Result<()> {
     update(|cfg| {
         if let Some(obj) = cfg.as_object_mut() {
