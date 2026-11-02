@@ -202,11 +202,12 @@ fn handle_gui_command(
             window.set_visible(true);
             window.set_focus();
             state.set_tray_mode(false);
+            // the DPI or resolution may have changed while hidden to the tray
+            #[cfg(windows)]
+            crate::win::resize_webview_to_client();
             let _ = webview.evaluate_script(exit_idle_js());
         }
         GuiCommand::ToggleFullscreen => {
-            // Linux/macOS: native tao borderless works fine.
-            // same as _final_exit/_nuclear_exit in the old app.py
             // Linux/macOS: native tao borderless works fine.
             #[cfg(windows)]
             if let Some(hwnd) = crate::win::hwnd() {

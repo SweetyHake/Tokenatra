@@ -217,6 +217,42 @@ unsafe extern "system" fn hook_proc(
         // stretch the webview ourselves (our hook is first in the chain)
         resize_webview_to_client();
     }
+    if msg == WM_DPICHANGED {
+        // move to the monitor-suggested rect so the client rect and WebView2
+        // DPI stay in sync; WM_SIZE fires afterwards and stretches the webview
+        if let Some(r) = (lp.0 as *const RECT).as_ref() {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                r.left,
+                r.top,
+                r.right - r.left,
+                r.bottom - r.top,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+    if msg == WM_DISPLAYCHANGE && is_fullscreen() {
+        // resolution changed while in custom fullscreen: re-fit to the
+        // current monitor rect (the stored rect is restored on exit as-is)
+        let mut mi = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut mi).as_bool() {
+            let rc = mi.rcMonitor;
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOP),
+                rc.left,
+                rc.top,
+                rc.right - rc.left,
+                rc.bottom - rc.top,
+                SWP_FRAMECHANGED,
+            );
+        }
+        let _ = resize_webview_to_client();
+    }
     if msg == WM_APP + 1 {
         // Native modal move loop instead of a manual SetCapture loop: the
         // system moves the window, so Aero Snap (edge snap to half screen,
