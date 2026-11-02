@@ -310,10 +310,15 @@ function initTheme() {
     // legacy per-theme classes removed. Kept as no-op for compat.
 }
 
-// auto UI scale from the window size: 720p -> 75%, 1080p -> 100%, 1440p -> 125%, 4K -> 150%
+// auto UI scale from the window size measured in PHYSICAL pixels
+// (CSS size x devicePixelRatio): 720p -> 75%, 1080p -> 100%, 1440p -> 125%,
+// 4K -> 150%. OS display scaling (Windows 125/140%) shrinks the CSS viewport,
+// so CSS-only measurement would miss the anchors; monitors are compared by
+// their real resolution.
 function autoUiScale() {
-    var w = window.innerWidth || 1920;
-    var h = window.innerHeight || 1080;
+    var dpr = window.devicePixelRatio || 1;
+    var w = (window.innerWidth || 1920) * dpr;
+    var h = (window.innerHeight || 1080) * dpr;
     var pts = [[720, 0.75], [1080, 1.0], [1440, 1.25], [2160, 1.5]];
     function interp(v) {
         if (v <= pts[0][0]) return pts[0][1];
