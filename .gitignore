@@ -14,3 +14,4 @@ models/
 .last_update_check
 
 /.playwright-cli
+/rust/target

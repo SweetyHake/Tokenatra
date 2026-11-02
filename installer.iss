@@ -1,10 +1,11 @@
-; Tokenatra Inno Setup script
+; Tokenatra Inno Setup script (Rust edition)
 ; Install Inno Setup from https://jrsoftware.org/isdl.php first
+; Build: cargo build --release (in rust/) -> rust\target\release\tokenatra.exe
 
 #define MyAppName "Tokenatra"
 #ifndef MyAppVersion
-; Fallback ?????? ?????????????????? ???????????? ?????? /DMyAppVersion; CI ???????????????? ???????????? ???? version.py
-#define MyAppVersion "26.2.2"
+; Fallback: CI передаёт версию через /DMyAppVersion (from rust/src/consts.rs VERSION)
+#define MyAppVersion "26.4.0"
 #endif
 #define MyAppPublisher "SweetyHake"
 #define MyAppURL "https://github.com/SweetyHake/Tokenatra"
@@ -14,6 +15,7 @@
 AppId={{F0A1B2C3-D4E5-6789-ABCD-EF0123456789}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+UninstallDisplayName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
@@ -35,10 +37,16 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 
 [Files]
-Source: "dist\Tokenatra\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; MCP-прокси для ИИ-агентов (Claude/OpenCode/DeepSeek): отдельный каталог,
-; чтобы _internal не пересекался с основным приложением
-Source: "dist\TokenatraMCP\*"; DestDir: "{app}\TokenatraMCP"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Один нативный бинарник + ресурсы. Никакого Python-окружения.
+Source: "rust\target\release\tokenatra.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: "static\*"; DestDir: "{app}\static"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "templates\*"; DestDir: "{app}\templates"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "token_rings\*"; DestDir: "{app}\token_rings"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "presets\*"; DestDir: "{app}\presets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "logo.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "mask.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "example.png"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -46,13 +54,6 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Code]
-function IsPythonInstalled: Boolean;
-var
-  ResultCode: Integer;
-begin
-  Result := Exec('cmd.exe', '/C python --version', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
-end;
-
 function IsSilentUpdate: Boolean;
 var
   CmdTail: String;
@@ -61,9 +62,17 @@ begin
   Result := (Pos('/SILENT', CmdTail) > 0) or (Pos('/VERYSILENT', CmdTail) > 0);
 end;
 
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+  // При деинсталляции молча убиваем запущенное приложение (0 = успешно).
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM {#MyAppExeName}',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode = 0 then
+    Sleep(1000);
+end;
+
 [Run]
-; ?????? ?????????? ?????????????????? (/SILENT ??? ???????????????????????????? ???? ????????????????????) pip-???????? ????????????????????????:
-; ???????????? ???? ?????????? ?????????????????????????? exe, ?? ???????????? ???? ???? ???????????? ?????????????? ??????????.
-Filename: "{cmd}"; Parameters: "/C python -m pip install numpy Pillow flask pywebview psutil imageio-ffmpeg --quiet"; StatusMsg: "Installing Python packages..."; Flags: runhidden; Check: IsPythonInstalled and not IsSilentUpdate
-Filename: "{cmd}"; Parameters: "/C python -m pip install onnxruntime-directml --quiet || python -m pip install onnxruntime --quiet"; StatusMsg: "Installing AI backend..."; Flags: runhidden; Check: IsPythonInstalled and not IsSilentUpdate
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

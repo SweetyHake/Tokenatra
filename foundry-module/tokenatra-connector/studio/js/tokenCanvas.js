@@ -1844,20 +1844,30 @@ var TokenCanvas = {
         target.onwheel = function(e) {
             e.preventDefault();
             if (!state.userImage) return;
+            // Колесо мыши шлёт дискретные ~±100 px за щелчок, тачпад — поток
+            // мелких дельт (в т.ч. deltaX для горизонтального свайпа), поэтому
+            // зум и панорама масштабируются величиной дельты, а не знаком
+            var unit = e.deltaMode === 1 ? 16 : (e.deltaMode === 2 ? (self.area.clientHeight || 600) : 1);
+            var dx = e.deltaX * unit;
+            var dy = e.deltaY * unit;
             if (e.ctrlKey || e.metaKey) {
+                var zdy = dy !== 0 ? dy : dx;
                 var canvasRect = self.canvas.getBoundingClientRect();
                 var mouseX = e.clientX - canvasRect.left - canvasRect.width / 2;
                 var mouseY = e.clientY - canvasRect.top - canvasRect.height / 2;
-                var zoomFactor = e.deltaY > 0 ? 0.95 : 1.05;
+                var zoomFactor = Math.pow(1.05, -zdy / 100);
+                var oldZoom = state.viewZoom;
                 var newZoom = clamp(state.viewZoom * zoomFactor, CONFIG.MIN_ZOOM, CONFIG.MAX_ZOOM);
-                var zoomRatio = newZoom / state.viewZoom;
-                state.viewPanX = state.viewPanX - mouseX * (zoomRatio - 1) / newZoom;
-                state.viewPanY = state.viewPanY - mouseY * (zoomRatio - 1) / newZoom;
+                // Точка канваса под курсором = q'/zoom (q' — курсор от центра
+                // трансформированного прямоугольника). Чтобы она осталась под
+                // курсором: pan1 = pan0·zoom0/zoom1 + q'·(1/zoom1 - 1/zoom0)
+                state.viewPanX = state.viewPanX * oldZoom / newZoom + mouseX * (1 / newZoom - 1 / oldZoom);
+                state.viewPanY = state.viewPanY * oldZoom / newZoom + mouseY * (1 / newZoom - 1 / oldZoom);
                 state.viewZoom = newZoom;
                 self.updateViewTransform();
                 if (state.currentTool === 'eraser' || state.currentTool === 'mask') self.updateEraserCursor(e);
             } else if (e.altKey && state.userImage) {
-                var delta = e.deltaY > 0 ? -1 : 1;
+                var delta = dy !== 0 ? (dy > 0 ? -1 : 1) : (dx > 0 ? -1 : 1);
                 var newScale = clamp(state.imageScale * 100 + delta, CONFIG.MIN_SCALE, CONFIG.MAX_SCALE);
                 state.imageScale = newScale / 100;
                 self._imageBrushCache = null;
@@ -1867,12 +1877,15 @@ var TokenCanvas = {
                 self.requestRender();
                 if (self._debouncedSave) self._debouncedSave();
             } else if (e.shiftKey) {
-                var panAmount = CONFIG.PAN_AMOUNT / state.viewZoom;
-                state.viewPanX -= e.deltaY > 0 ? panAmount : -panAmount;
+                // Shift+колесо: браузеры сводят жест к горизонтальной дельте
+                // (deltaY = 0) — панорамируем по ненулевой оси
+                var sdx = dx !== 0 ? dx : dy;
+                state.viewPanX -= sdx * CONFIG.PAN_AMOUNT / 100 / state.viewZoom;
                 self.updateViewTransform();
             } else {
-                var panAmount2 = CONFIG.PAN_AMOUNT / state.viewZoom;
-                state.viewPanY -= e.deltaY > 0 ? panAmount2 : -panAmount2;
+                var panPerUnit = CONFIG.PAN_AMOUNT / 100 / state.viewZoom;
+                if (dx) state.viewPanX -= dx * panPerUnit;
+                if (dy) state.viewPanY -= dy * panPerUnit;
                 self.updateViewTransform();
             }
         };
@@ -1939,10 +1952,12 @@ var TokenCanvas = {
             state.showingOriginal = false;
             TokenEditor.updateRemoveBgButton();
 
-            // Каждый импорт равномерно вписывает изображение в границы
-            // масштаба 1x (логический канвас 1024): крупное уменьшается,
-            // мелкое растягивается; позиция — по центру, поворот — 0
-            self.fitToFrame();
+            // Каждый импорт вписывает изображение в зону экспорта
+            // CONFIG.OPEN_SCALE (2 — центральные 2/3 кадра, пунктир ×2 на
+            // канвасе): источник растягивается или сжимается под неё;
+            // позиция — по центру, поворот — 0. «Сброс трансформации»
+            // в редакторе по-прежнему вписывает в весь кадр (×3)
+            self.fitToFrame(CONFIG.OPEN_SCALE);
 
             self.updateScaleUI();
             self.updateRotationUI();
@@ -2036,14 +2051,16 @@ var TokenCanvas = {
         ctx.globalAlpha = 1;
     },
 
-    // Равномерно вписать изображение в границы масштаба 1x
-    // (логический канвас 1024): центр, без поворота
-    fitToFrame: function() {
+    // Равномерно вписать изображение в зону экспорта: 1 — центральная
+    // треть кадра (кольцо), 2 — центральные 2/3 (токен 2×2), 3 — весь
+    // логический канвас 1024. Центр, без поворота
+    fitToFrame: function(zone) {
         if (!state.userImage) return;
+        var frac = clamp(zone || 3, 1, 3) / 3;
         var imgMaxDim = Math.max(state.userImage.width, state.userImage.height);
         state.imageScale = Math.min(
             CONFIG.MAX_SCALE / 100,
-            Math.max(CONFIG.MIN_SCALE / 100, 1024 / imgMaxDim)
+            Math.max(CONFIG.MIN_SCALE / 100, 1024 * frac / imgMaxDim)
         );
         state.imageX = 0;
         state.imageY = 0;
