@@ -310,30 +310,20 @@ function initTheme() {
     // legacy per-theme classes removed. Kept as no-op for compat.
 }
 
-// auto UI scale from the window size measured in PHYSICAL pixels
-// (CSS size x devicePixelRatio): 720p -> 75%, 1080p -> 100%, 1440p -> 125%,
-// 4K -> 150%. OS display scaling (Windows 125/140%) shrinks the CSS viewport,
-// so CSS-only measurement would miss the anchors; monitors are compared by
-// their real resolution.
+// auto UI scale: the UI keeps a constant VISUAL share of the window at any
+// resolution and OS display scaling (etalon: 125% at 1440p, i.e. a 1440p
+// monitor at 100% scale shows zoom 1.25). Physical fraction of the screen =
+// zoom / CSS size, so zoom must be proportional to the CSS window size:
+// height/1152, width/2048 (identical at 16:9, width limits narrow windows).
+var __lastAutoScale = 1;
 function autoUiScale() {
-    var dpr = window.devicePixelRatio || 1;
-    var w = (window.innerWidth || 1920) * dpr;
-    var h = (window.innerHeight || 1080) * dpr;
-    var pts = [[720, 0.75], [1080, 1.0], [1440, 1.25], [2160, 1.5]];
-    function interp(v) {
-        if (v <= pts[0][0]) return pts[0][1];
-        var last = pts[pts.length - 1];
-        if (v >= last[0]) return last[1];
-        for (var i = 1; i < pts.length; i++) {
-            if (v <= pts[i][0]) {
-                var a = pts[i - 1], b = pts[i];
-                return a[1] + (v - a[0]) * (b[1] - a[1]) / (b[0] - a[0]);
-            }
-        }
-        return 1;
-    }
-    // 16:9-equivalent: both width and height count (a narrow window limits the scale)
-    return Math.min(interp(h), interp(w * 1080 / 1920));
+    var w = window.innerWidth || 0;
+    var h = window.innerHeight || 0;
+    if (w < 120 || h < 120) return __lastAutoScale; // degenerate (minimized)
+    // floor: below ~half a 720p window the exact proportion would make the
+    // UI unreadably small; identity still holds for every normal window size
+    __lastAutoScale = Math.max(0.5, Math.min(h / 1152, w / 2048));
+    return __lastAutoScale;
 }
 
 function applyUiScale(val) {
