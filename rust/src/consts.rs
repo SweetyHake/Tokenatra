@@ -1,5 +1,5 @@
 // Статические константы приложения (порт версии.py).
-pub const VERSION: &str = "26.4.0";
+pub const VERSION: &str = "26.5.0";
 pub const APP_NAME: &str = "Tokenatra";
 pub const GITHUB_REPO: &str = "SweetyHake/Tokenatra";
 pub const PORT: u16 = 7878;

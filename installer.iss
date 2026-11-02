@@ -5,7 +5,7 @@
 #define MyAppName "Tokenatra"
 #ifndef MyAppVersion
 ; Fallback: CI передаёт версию через /DMyAppVersion (from rust/src/consts.rs VERSION)
-#define MyAppVersion "26.4.0"
+#define MyAppVersion "26.5.0"
 #endif
 #define MyAppPublisher "SweetyHake"
 #define MyAppURL "https://github.com/SweetyHake/Tokenatra"
