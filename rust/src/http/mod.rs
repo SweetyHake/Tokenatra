@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod assets;
 pub mod config_routes;
 pub mod embed;
@@ -239,6 +240,20 @@ pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
         .to_lowercase();
     let host_name = localhost_host_name(&host_hdr);
 
+    if path.starts_with("/agent/v1") {
+        // Agent API: только localhost + X-Tokenatra-Agent: 1
+        let agent_ok = req
+            .headers()
+            .get("X-Tokenatra-Agent")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim() == "1")
+            .unwrap_or(false);
+        if is_local_host_name(&host_name) && agent_ok {
+            return next.run(req).await;
+        }
+        return forbidden();
+    }
+
     if !is_local_host_name(&host_name) {
         // Сетевой режим (listen_host=0.0.0.0): наружу — только студия
         if !crate::config::network_mode() {
@@ -422,6 +437,26 @@ pub async fn headers_mw(req: Request<Body>, next: Next) -> Response {
 
 pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
     use axum::routing::{get, post};
+    let agent_routes = axum::Router::new()
+        .route("/ping", get(agent::ping))
+        .route("/manifest", get(agent::manifest))
+        .route("/assets", get(agent::assets))
+        .route("/tools_schema", get(agent::tools_schema))
+        .route("/sessions", post(agent::create_session))
+        .route(
+            "/sessions/{sid}",
+            get(agent::get_session).delete(agent::close_session),
+        )
+        .route("/sessions/{sid}/remove_bg", post(agent::op_remove_bg))
+        .route("/sessions/{sid}/mask", post(agent::op_mask))
+        .route("/sessions/{sid}/transform", post(agent::op_transform))
+        .route("/sessions/{sid}/ring", post(agent::op_ring))
+        .route("/sessions/{sid}/effects", post(agent::op_effects))
+        .route("/sessions/{sid}/preview", get(agent::op_preview))
+        .route("/sessions/{sid}/inspect", get(agent::op_inspect))
+        .route("/sessions/{sid}/export", post(agent::op_export))
+        .with_state(state.clone());
+
     let mut r = axum::Router::new()
         .route("/", get(assets::index))
         .route("/splash", get(assets::splash))
@@ -470,7 +505,8 @@ pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
         .route("/shutdown", post(system::shutdown))
         .route("/embed_export", post(embed::embed_export_save))
         .route("/embed_export/{file_name}", get(embed::embed_export_get))
-        .route("/static/{*path}", get(assets::static_file));
+        .route("/static/{*path}", get(assets::static_file))
+        .nest("/agent/v1", agent_routes);
 
     r = r
         .layer(axum::middleware::from_fn(guard_mw))
