@@ -48,6 +48,10 @@ Source: "logo.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "mask.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "example.png"; DestDir: "{app}"; Flags: ignoreversion
 
+[InstallDelete]
+; хвосты старой Python-сборки (PyInstaller)
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
@@ -60,6 +64,43 @@ var
 begin
   CmdTail := Uppercase(GetCmdTail);
   Result := (Pos('/SILENT', CmdTail) > 0) or (Pos('/VERYSILENT', CmdTail) > 0);
+end;
+
+// Миграция с Python-установки: config.json и модели жили в {app},
+// Rust-версия хранит их в %APPDATA%\Tokenatra. Переносим один раз.
+procedure MigrateFromPython;
+var
+  appDir, dataDir, srcFile, dstFile: String;
+  FindRec: TFindRec;
+begin
+  appDir := ExpandConstant('{app}');
+  dataDir := ExpandConstant('{userappdata}\Tokenatra');
+  ForceDirectories(dataDir);
+
+  if (FileExists(appDir + '\config.json')) and (not FileExists(dataDir + '\config.json')) then
+    CopyFile(appDir + '\config.json', dataDir + '\config.json', False);
+
+  if DirExists(appDir + '\models') then
+  begin
+    ForceDirectories(dataDir + '\models');
+    if FindFirst(appDir + '\models\*.onnx', FindRec) then
+    try
+      repeat
+        srcFile := appDir + '\models\' + FindRec.Name;
+        dstFile := dataDir + '\models\' + FindRec.Name;
+        if not FileExists(dstFile) then
+          CopyFile(srcFile, dstFile, False);
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    MigrateFromPython;
 end;
 
 function InitializeUninstall(): Boolean;
