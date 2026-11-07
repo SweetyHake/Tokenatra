@@ -31,7 +31,6 @@ tower-http = { version = "0.7", features = ["fs"] }
 url = "2.5"
 webp = "0.3"
 which = "8"
-winreg = "0.56"
 wry = "0.57"
 
 # ONNX Runtime (pyke io). Execution providers per target (unified below):
@@ -46,6 +45,8 @@ half = "2.7.1"
 ort = { version = "2.0.0-rc.15", features = ["directml", "cuda"] }
 tray-icon = "0.21"
 muda = "0.17"
+# registry verbs / context menu (win.rs); module itself is cfg(windows)-gated
+winreg = "0.56"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
