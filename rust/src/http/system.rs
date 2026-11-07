@@ -19,9 +19,7 @@ pub async fn version_info() -> Response {
 pub async fn model_status() -> Response {
     let p = paths::get_selected_model_path();
     let exists = p.exists();
-    let size = exists
-        .then(|| std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0))
-        .unwrap_or(0);
+    let size = if exists { std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0) } else { 0 };
     ok_json(json!({
         "exists": exists,
         "size": size,
@@ -81,7 +79,7 @@ pub async fn network_info() -> Response {
             return;
         }
         if let std::net::IpAddr::V4(v4) = addr {
-            if v4.is_link_local() || v4.is_broadcast().into() {
+            if v4.is_link_local() || v4.is_broadcast() {
                 // if_addrs has no broadcast, but the guard does not hurt
             }
         } else {
@@ -95,13 +93,11 @@ pub async fn network_info() -> Response {
     };
 
     // default adapter
-    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        if sock.connect("8.8.8.8:80").is_ok() {
-            if let Ok(a) = sock.local_addr() {
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0")
+        && sock.connect("8.8.8.8:80").is_ok()
+            && let Ok(a) = sock.local_addr() {
                 add(&a.ip().to_string(), 2);
             }
-        }
-    }
     // walk all adapters
     let skip_kw = [
         "loopback", "vpn", "tun", "tap", "clash", "wintun", "wireguard", "tailscale",
@@ -120,15 +116,14 @@ pub async fn network_info() -> Response {
     }
     // hostbyname extras
     
-    if let Ok(name) = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")) {
-        if let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(
+    if let Ok(name) = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME"))
+        && let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(
             &format!("{name}:0"),
         ) {
             for a in addrs {
                 add(&a.ip().to_string(), 2);
             }
         }
-    }
 
     cands.sort();
     let mut ips: Vec<String> = Vec::new();

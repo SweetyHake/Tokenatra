@@ -35,22 +35,19 @@ pub fn open_image(bytes: &[u8]) -> Result<DynamicImage, ImgError> {
     let reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| ImgError::Decode(e.to_string()))?;
-    if let Ok((w, h)) = reader.into_dimensions() {
-        if (w as u64) * (h as u64) > MAX_MEGAPIXELS {
+    if let Ok((w, h)) = reader.into_dimensions()
+        && (w as u64) * (h as u64) > MAX_MEGAPIXELS {
             return Err(ImgError::TooLarge);
         }
-    }
     match image::load_from_memory(bytes) {
         Ok(img) => Ok(img),
         Err(e) => {
             let sniff = looks_like_avif(bytes);
-            if sniff {
-                if let Some(png) = crate::ffmpeg::decode_to_png(bytes) {
-                    if let Ok(img) = image::load_from_memory(&png) {
+            if sniff
+                && let Some(png) = crate::ffmpeg::decode_to_png(bytes)
+                    && let Ok(img) = image::load_from_memory(&png) {
                         return Ok(img);
                     }
-                }
-            }
             Err(ImgError::Decode(e.to_string()))
         }
     }
@@ -419,7 +416,7 @@ pub fn encode_webp(img: &DynamicImage, quality: u8, out: &mut Vec<u8>) -> Result
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     let mem = webp::Encoder::from_rgba(rgba.as_raw(), w, h).encode(f32::from(quality));
-    out.extend_from_slice(&*mem);
+    out.extend_from_slice(&mem);
     Ok(())
 }
 

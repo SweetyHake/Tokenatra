@@ -25,11 +25,9 @@ fn strip_secret_for_origin(mut cfg: serde_json::Value, headers: &HeaderMap) -> s
     if !origin.is_empty()
         && !crate::config::allowed_origins().contains(&origin)
         && !crate::http::guard_connector_origin(&origin)
-    {
-        if let Some(obj) = cfg.as_object_mut() {
+        && let Some(obj) = cfg.as_object_mut() {
             obj.remove("shared_secret");
         }
-    }
     cfg
 }
 

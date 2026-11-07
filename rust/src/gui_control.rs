@@ -15,8 +15,10 @@ pub enum GuiCommand {
     #[allow(dead_code)]
     EvalJs(String),
     /// Window drag by header (Linux/macOS; Windows uses a Win32 hook).
+    #[allow(dead_code)]
     DragWindow,
     /// Edge resize (Linux/macOS; macOS returns unsupported).
+    #[allow(dead_code)]
     DragResize(tao::window::ResizeDirection),
 }
 

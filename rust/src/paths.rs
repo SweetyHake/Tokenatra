@@ -7,11 +7,10 @@ use crate::consts;
 /// target/debug runs) -> compile-time repo root.
 fn resource_dir_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    if let Ok(cfg) = std::env::var("TOKENATRA_RESOURCE_DIR") {
-        if !cfg.trim().is_empty() {
+    if let Ok(cfg) = std::env::var("TOKENATRA_RESOURCE_DIR")
+        && !cfg.trim().is_empty() {
             out.push(PathBuf::from(cfg));
         }
-    }
     if let Ok(exe) = std::env::current_exe() {
         let exe_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         out.push(exe_dir.clone());
@@ -49,16 +48,14 @@ pub fn resource_dir() -> &'static Path {
 pub fn base_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
-        if let Ok(v) = std::env::var("TOKENMAKER_DIR") {
-            if !v.trim().is_empty() {
+        if let Ok(v) = std::env::var("TOKENMAKER_DIR")
+            && !v.trim().is_empty() {
                 return PathBuf::from(v);
             }
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(d) = exe.parent() {
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(d) = exe.parent() {
                 return d.to_path_buf();
             }
-        }
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
     })
 }
@@ -181,24 +178,22 @@ pub fn migrate_legacy_model() {
 
 /// Selected model path: config selected_model -> first .onnx in models/.
 pub fn get_selected_model_path() -> PathBuf {
-    if let Ok(cfg) = crate::config::load() {
-        if let Some(sel) = cfg.get("selected_model").and_then(|v| v.as_str()) {
+    if let Ok(cfg) = crate::config::load()
+        && let Some(sel) = cfg.get("selected_model").and_then(|v| v.as_str()) {
             let p = models_dir().join(Path::new(sel).file_name().unwrap_or_default());
             if p.exists() {
                 return p;
             }
         }
-    }
     if let Some(p) = first_onnx_in(&models_dir()) {
         return p;
     }
     // portable builds: models next to the exe
     let legacy = base_dir().join("models");
-    if !same_path(&legacy, &models_dir()) {
-        if let Some(p) = first_onnx_in(&legacy) {
+    if !same_path(&legacy, &models_dir())
+        && let Some(p) = first_onnx_in(&legacy) {
             return p;
         }
-    }
     models_dir().join("model.onnx")
 }
 
@@ -223,7 +218,7 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
     let norm = |p: &Path| -> String {
         let s = p.to_string_lossy().to_lowercase();
         let c = s.replace('/', "\\");
-        let c = if c.starts_with("\\\\?\\") { c[4..].to_string() } else { c };
+        let c = c.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(c);
         c.trim_end_matches('\\').to_string()
     };
     std::fs::canonicalize(a).map(|p| norm(&p)).unwrap_or_else(|_| norm(a))

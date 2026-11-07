@@ -159,9 +159,9 @@ fn main() {
 
         // previous instance PID + free the port
         let pid_file = paths::pid_file();
-        if let Ok(old) = std::fs::read_to_string(&pid_file) {
-            if let Ok(old_pid) = old.trim().parse::<u32>() {
-                if old_pid != std::process::id() {
+        if let Ok(old) = std::fs::read_to_string(&pid_file)
+            && let Ok(old_pid) = old.trim().parse::<u32>()
+                && old_pid != std::process::id() {
                     #[cfg(windows)]
                     win::terminate_process(old_pid);
                     #[cfg(not(windows))]
@@ -170,8 +170,6 @@ fn main() {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(300));
                 }
-            }
-        }
         #[cfg(windows)]
         win::kill_process_on_port(consts::PORT);
         #[cfg(not(windows))]

@@ -138,7 +138,7 @@ pub fn drain_model_labels(tray: &Tray) {
     if let Some(rx) = guard.as_ref() {
         while let Ok(loaded) = rx.try_recv() {
             let label = if loaded { "Выгрузить модель" } else { "Загрузить модель" };
-            let _ = tray.model_item.set_text(label);
+            tray.model_item.set_text(label);
         }
     }
 }

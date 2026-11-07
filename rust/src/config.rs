@@ -144,11 +144,10 @@ pub fn merge_client_config(data: &Map<String, Value>, origin_is_foreign: bool) -
                 .get(key)
                 .map(|v| v.is_null())
                 .unwrap_or(true);
-            if absent {
-                if let Some(v) = existing.get(key) {
+            if absent
+                && let Some(v) = existing.get(key) {
                     m.insert(key.into(), v.clone());
                 }
-            }
         }
         // foreign origins cannot touch network security keys
         if origin_is_foreign {

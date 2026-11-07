@@ -39,9 +39,9 @@ pub fn hwnd() -> Option<HWND> {
 
 static ORIG_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 
-/// Webview for resize from the hook. The hook always runs on the event
-/// loop thread where the Arc<WebView> was created, so thread_local is
-/// safe and avoids requiring Sync from the wry COM wrapper.
+// Webview for resize from the hook. The hook always runs on the event
+// loop thread where the Arc<WebView> was created, so thread_local is
+// safe and avoids requiring Sync from the wry COM wrapper.
 thread_local! {
     static RESIZE_TARGET: std::cell::RefCell<Option<std::sync::Arc<wry::WebView>>> =
         const { std::cell::RefCell::new(None) };
@@ -529,13 +529,11 @@ pub fn setup_webview2_gpu() {
     let mut versions: Vec<String> = Vec::new();
     for hive in [RegKey::predef(HKEY_LOCAL_MACHINE), RegKey::predef(HKEY_CURRENT_USER)] {
         for sub in clients_keys {
-            if let Ok(k) = hive.open_subkey(sub) {
-                if let Ok(ver) = k.get_value::<String, _>("pv") {
-                    if !ver.is_empty() && !versions.contains(&ver) {
+            if let Ok(k) = hive.open_subkey(sub)
+                && let Ok(ver) = k.get_value::<String, _>("pv")
+                    && !ver.is_empty() && !versions.contains(&ver) {
                         versions.push(ver);
                     }
-                }
-            }
         }
     }
     let webview_root = r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application";
@@ -747,9 +745,9 @@ pub fn kill_process_on_port(port: u16) {
     .unwrap_or_default();
     let my_pid = std::process::id().to_string();
     for line in out.lines() {
-        if line.contains("LISTENING") && line.contains(&target) {
-            if let Some(pid) = line.split_whitespace().last() {
-                if !pid.is_empty() && pid != "0" && *pid != my_pid {
+        if line.contains("LISTENING") && line.contains(&target)
+            && let Some(pid) = line.split_whitespace().last()
+                && !pid.is_empty() && pid != "0" && *pid != my_pid {
                     let mut c = Command::new("taskkill");
                     c.args(["/F", "/PID", pid])
                         .stdout(Stdio::null())
@@ -757,8 +755,6 @@ pub fn kill_process_on_port(port: u16) {
                     c.creation_flags(0x0800_0000);
                     let _ = c.output();
                 }
-            }
-        }
     }
 }
 

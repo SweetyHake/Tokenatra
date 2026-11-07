@@ -39,18 +39,16 @@ pub async fn process(
                 }
             }
             "quality" => {
-                if let Ok(b) = field.bytes().await {
-                    if let Ok(v) = String::from_utf8_lossy(&b).trim().parse::<i64>() {
+                if let Ok(b) = field.bytes().await
+                    && let Ok(v) = String::from_utf8_lossy(&b).trim().parse::<i64>() {
                         quality = v.clamp(10, 100) as u8;
                     }
-                }
             }
             "edge_blur" => {
-                if let Ok(b) = field.bytes().await {
-                    if let Ok(v) = String::from_utf8_lossy(&b).trim().parse::<f64>() {
+                if let Ok(b) = field.bytes().await
+                    && let Ok(v) = String::from_utf8_lossy(&b).trim().parse::<f64>() {
                         edge_blur = v.clamp(0.0, 10.0);
                     }
-                }
             }
             _ => {}
         }
@@ -125,11 +123,10 @@ pub async fn convert_file(mut mp: Multipart) -> Response {
                 }
             }
             "quality" => {
-                if let Ok(b) = field.bytes().await {
-                    if let Ok(v) = String::from_utf8_lossy(&b).trim().parse::<i64>() {
+                if let Ok(b) = field.bytes().await
+                    && let Ok(v) = String::from_utf8_lossy(&b).trim().parse::<i64>() {
                         quality = v.clamp(10, 100) as u8;
                     }
-                }
             }
             _ => {}
         }

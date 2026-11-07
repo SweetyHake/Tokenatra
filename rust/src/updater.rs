@@ -348,9 +348,8 @@ pub fn download_update() {
             }
             std::io::Write::write_all(&mut file, &buf[..n])?;
             downloaded += n as u64;
-            if total > 0 {
-                let pct = (downloaded * 100 / total) as i64;
-                state().lock().unwrap().download_progress = pct.min(100);
+            if let Some(pct) = (downloaded * 100).checked_div(total) {
+                state().lock().unwrap().download_progress = (pct as i64).min(100);
             }
         }
         drop(file);

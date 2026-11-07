@@ -48,7 +48,7 @@ pub async fn index(uri: axum::http::Uri) -> Response {
         let mut valid = false;
         {
             let secret = crate::config::shared_secret();
-            if !secret.is_empty() && !key.is_empty() && key.as_bytes().len() == secret.as_bytes().len()
+            if !secret.is_empty() && !key.is_empty() && key.len() == secret.len()
             {
                 valid = key.bytes().zip(secret.bytes()).all(|(a, b)| a == b);
             }
@@ -132,9 +132,9 @@ pub async fn ring(uri: axum::http::Uri) -> Response {
 
 pub async fn mask() -> Response {
     let mask = paths::mask_path();
-    if mask.exists() {
-        if let Ok(bytes) = std::fs::read(&mask) {
-            if let Ok(img) = image::load_from_memory(&bytes) {
+    if mask.exists()
+        && let Ok(bytes) = std::fs::read(&mask)
+            && let Ok(img) = image::load_from_memory(&bytes) {
                 let rgba = img.to_rgba8();
                 let mut buf = Vec::new();
                 if image::DynamicImage::write_to(
@@ -147,8 +147,6 @@ pub async fn mask() -> Response {
                     return file_response(buf, "image/png", Some("public, max-age=86400"));
                 }
             }
-        }
-    }
     let img = image::RgbaImage::new(1024, 1024);
     let mut buf = Vec::new();
     let _ = image::DynamicImage::write_to(

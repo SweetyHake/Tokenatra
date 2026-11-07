@@ -163,7 +163,7 @@ fn download_model_sync(url: &str, state: &AppState) -> Result<PathBuf, String> {
     let models = paths::models_dir();
     let _ = std::fs::create_dir_all(&models);
     let path_part = url.split('?').next().unwrap_or(url);
-    let decoded = percent_encoding::percent_decode_str(path_part.split('/').last().unwrap_or(""))
+    let decoded = percent_encoding::percent_decode_str(path_part.split('/').next_back().unwrap_or(""))
         .decode_utf8_lossy()
         .to_string();
     let mut filename = decoded;

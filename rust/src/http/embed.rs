@@ -115,7 +115,7 @@ pub async fn embed_export_get(
     let connector_ok = headers
         .get(axum::http::header::ORIGIN)
         .and_then(|v| v.to_str().ok())
-        .map(|o| super::guard_connector_origin(o))
+        .map(super::guard_connector_origin)
         .unwrap_or(false);
     if !connector_ok {
         let sfs = headers

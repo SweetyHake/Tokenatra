@@ -82,7 +82,7 @@ pub fn remove_bg(file: &str) -> i32 {
     };
     if !resp.status().is_success() {
         let err = resp.text().unwrap_or_default();
-        crate::ffmpeg::notify(&format!("Ошибка сервера: {}", &err.chars().take(200).collect::<String>()));
+        crate::ffmpeg::notify(&format!("Ошибка сервера: {}", err.chars().take(200).collect::<String>()));
         return 1;
     }
     let result = resp.bytes().unwrap_or_default().to_vec();
