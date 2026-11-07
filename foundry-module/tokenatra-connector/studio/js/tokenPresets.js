@@ -216,6 +216,13 @@ const TokenPresets = {
             const sCtx = snap.getContext('2d');
             sCtx.imageSmoothingEnabled = true;
             sCtx.imageSmoothingQuality = 'high';
+            // Файл пресета хранится в семантике, обратной маске: непрозрачные
+            // тёмные пиксели = вырез, прозрачные = остаётся (как у встроенных).
+            // maskCanvas наоборот (белое = остаётся), поэтому инвертируем:
+            // заливаем цветом выреза и вырезаем область сохранённой маски
+            sCtx.fillStyle = '#9833ff';
+            sCtx.fillRect(0, 0, snapSize, snapSize);
+            sCtx.globalCompositeOperation = 'destination-out';
             sCtx.drawImage(state.maskCanvas, 0, 0, state.maskCanvas.width, state.maskCanvas.height, 0, 0, snapSize, snapSize);
             const blob = await new Promise(resolve => snap.toBlob(resolve, 'image/png'));
             if (!blob) throw new Error('Не удалось закодировать маску');

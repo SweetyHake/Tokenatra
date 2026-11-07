@@ -130,10 +130,15 @@ const TokenEditor = {
     },
 
     async pickImageViaServer() {
+        // Ре-ентри-гард: двойной клик по дропзоне шлёт два click — второй диалог
+        // rfd возвращает мусор/None и ломает текущий выбор («иногда не грузится»)
+        if (this._pickingImage) return;
+        this._pickingImage = true;
         try {
             const res = await fetch('/pick_image_to_open');
             const data = await res.json();
             if (data.cancelled) return;
+            if (!data.path) throw new Error(data.error || 'Не удалось открыть файл');
 
             const fileRes = await fetch('/get_image_by_path?path=' + encodeURIComponent(data.path));
             if (!fileRes.ok) throw new Error('Не удалось загрузить файл');
@@ -143,6 +148,8 @@ const TokenEditor = {
             TokenCanvas.loadImage(file, data.path);
         } catch (err) {
             toast('Ошибка: ' + err.message, true);
+        } finally {
+            this._pickingImage = false;
         }
     },
 
@@ -426,7 +433,9 @@ const TokenEditor = {
         const scaleInput = $('scaleInput');
         if (scaleInput) {
             scaleInput.onchange = e => {
-                let val = clamp(parseInt(e.target.value) || CONFIG.DEFAULT_SCALE, CONFIG.MIN_SCALE, CONFIG.MAX_SCALE);
+                // Границы от размера источника и холста (см. TokenCanvas.scaleBounds)
+                const b = TokenCanvas.scaleBounds();
+                let val = clamp(parseInt(e.target.value) || CONFIG.DEFAULT_SCALE, b.min, b.max);
                 state.imageScale = val / 100;
                 const slider = $('scaleSlider');
                 if (slider) { slider.value = val; setSliderFill(slider); }
@@ -692,9 +701,10 @@ const TokenEditor = {
         const sliders = [
             { id: 'ccSaturation', valId: 'ccSaturationVal', key: 'saturation' },
             { id: 'ccLightness',  valId: 'ccLightnessVal',  key: 'lightness'  },
+            { id: 'ccContrast',   valId: 'ccContrastVal',   key: 'contrast'   },
         ];
         const cc = AppConfig.colorCorrection;
-        const initVals = { ccSaturation: cc.saturation, ccLightness: cc.lightness };
+        const initVals = { ccSaturation: cc.saturation, ccLightness: cc.lightness, ccContrast: cc.contrast ?? 0 };
         sliders.forEach(({ id, valId, key }) => {
             const el = $(id); const valEl = $(valId);
             if (!el) return;
@@ -718,7 +728,7 @@ const TokenEditor = {
             resetBtn.onclick = () => {
                 AppConfig.resetColorCorrection();
                 const cc2 = AppConfig.colorCorrection;
-                $('ccSaturation').value = cc2.saturation; $('ccLightness').value = cc2.lightness;
+                $('ccSaturation').value = cc2.saturation; $('ccLightness').value = cc2.lightness; $('ccContrast').value = cc2.contrast ?? 0;
                 sliders.forEach(({ id, valId }) => { const s = $(id); const valEl = $(valId); if (valEl) valEl.value = s.value; setSliderFill(s); });
                 TokenCanvas.invalidateAllCaches();
                 TokenCanvas.render();

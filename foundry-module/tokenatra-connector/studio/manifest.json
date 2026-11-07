@@ -97,6 +97,11 @@
       "name": "preset3",
       "file": "preset3.png",
       "builtin": true
+    },
+    {
+      "name": "preset4",
+      "file": "preset4.png",
+      "builtin": true
     }
   ]
 }

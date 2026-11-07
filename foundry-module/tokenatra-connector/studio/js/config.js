@@ -8,6 +8,9 @@ const CONFIG = {
     DEFAULT_SCALE: 100,
     OPEN_SCALE: 2,
     MIN_SCALE: 10,
+    // Минимально осмысленный размер изображения на канвасе (px) — от него
+    // считается динамический минимум масштаба (см. minScalePercent)
+    MIN_IMAGE_PX: 8,
     MAX_SCALE: 500,
     MIN_ZOOM: 0.5,
     MAX_ZOOM: 20,
@@ -53,7 +56,7 @@ const AppConfig = {
         return {
             theme: 'dark',
             language: 'system',
-            uiScale: 1,
+            uiScale: 1.1,
             canvasScale: 2,
             historyLimit: 30,
             eraserSize: 50,
@@ -62,7 +65,7 @@ const AppConfig = {
             dropShadowEnabled: false,
             colorCorrectionEnabled: false,
             dropShadow: { angle: 135, distance: 7, blur: 3, opacity: 0.40 },
-            colorCorrection: { saturation: 5, lightness: -5 },
+            colorCorrection: { saturation: 5, lightness: -5, contrast: 0 },
             lastFolders: {
                 quickSave: null,
                 portrait: null,
@@ -122,7 +125,7 @@ const AppConfig = {
             this._data = {
                 theme: saved.theme || def.theme,
                 language: ['system', 'ru', 'en'].includes(saved.language) ? saved.language : def.language,
-                uiScale: [0.5, 0.75, 0.9, 1, 1.25, 1.5].includes(parseFloat(saved.uiScale)) ? parseFloat(saved.uiScale) : def.uiScale,
+                uiScale: [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3].includes(parseFloat(saved.uiScale)) ? parseFloat(saved.uiScale) : def.uiScale,
                 canvasScale: [1, 2, 3].includes(saved.canvasScale) ? saved.canvasScale : def.canvasScale,
                 historyLimit: [10, 20, 30, 50, 100].includes(saved.historyLimit) ? saved.historyLimit : def.historyLimit,
                 eraserSize: Math.min(300, Math.max(1, parseInt(saved.eraserSize) || def.eraserSize)),
@@ -199,7 +202,7 @@ get colorCorrectionEnabled() { return this._data.colorCorrectionEnabled; },
 
     setTheme(val) { this._data.theme = val; this.save(); },
     setLanguage(val) { this._data.language = ['system', 'ru', 'en'].includes(val) ? val : 'system'; this.save(); },
-    setUiScale(val) { val = parseFloat(val); this._data.uiScale = [0.5, 0.75, 0.9, 1, 1.25, 1.5].includes(val) ? val : 1; this.save(); },
+    setUiScale(val) { val = parseFloat(val); this._data.uiScale = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3].includes(val) ? val : 1.1; this.save(); },
     setCanvasScale(val) { this._data.canvasScale = val; this.save(); },
     setHistoryLimit(val) { this._data.historyLimit = [10, 20, 30, 50, 100].includes(val) ? val : 30; this.save(); },
     setEraserSize(val) { this._data.eraserSize = Math.min(300, Math.max(1, parseInt(val) || 50)); this.save(); },

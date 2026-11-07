@@ -30,6 +30,9 @@ var state = {
     eraserSize: 50,
     isRestoring: false,
     imageScale: 1,
+    // Динамический минимум масштаба (доля, не проценты) — пересчитывается
+    // при загрузке изображения от его размера
+    minScale: 0.1,
     imageX: 0,
     imageY: 0,
     imageRotation: 0,

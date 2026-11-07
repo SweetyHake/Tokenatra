@@ -83,6 +83,14 @@ function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
+// Динамический минимум масштаба в процентах: изображение не может
+// уменьшиться сильнее, чем до MIN_IMAGE_PX по большей стороне. До
+// загрузки изображения (maxDim неизвестен) — CONFIG.MIN_SCALE
+function minScalePercent(maxDim) {
+    if (!maxDim || maxDim <= 0) return CONFIG.MIN_SCALE;
+    return Math.max(1, Math.ceil(CONFIG.MIN_IMAGE_PX / maxDim * 100));
+}
+
 function setSliderFill(el) {
     if (!el) return;
     const val = parseFloat(el.value);

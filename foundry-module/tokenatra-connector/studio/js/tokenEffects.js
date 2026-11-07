@@ -43,8 +43,10 @@ function colorCorrectionFilter() {
     const s = state.colorCorrectionSettings;
     const sat = (s.saturation || 0) / 100;
     const light = (s.lightness || 0) / 100;
+    const con = (s.contrast || 0) / 100;
     const parts = [];
     if (sat !== 0) parts.push(`saturate(${1 + sat})`);
     if (light !== 0) parts.push(`brightness(${1 + light})`);
+    if (con !== 0) parts.push(`contrast(${1 + con})`);
     return parts.join(' ');
 }
