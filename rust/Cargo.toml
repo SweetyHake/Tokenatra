@@ -65,3 +65,9 @@ ort = { version = "2.0.0-rc.15", features = ["coreml"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 # ROCm for AMD, CUDA for NVIDIA
 ort = { version = "2.0.0-rc.15", features = ["rocm", "cuda"] }
+
+[target.'cfg(windows)'.build-dependencies]
+# Embeds icon.ico into the exe: Explorer, shortcuts (installer.iss points
+# at the exe), "Apps & Features" (UninstallDisplayIcon) and registry verbs
+# (win.rs sets Icon = exe path) all take the icon from the exe resource.
+winresource = "0.1"

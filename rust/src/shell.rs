@@ -46,13 +46,11 @@ pub enum UserEvent {
 static PROXY: OnceLock<Mutex<Option<tao::event_loop::EventLoopProxy<UserEvent>>>> = OnceLock::new();
 
 pub fn wake() {
-    if let Some(m) = PROXY.get() {
-        if let Ok(guard) = m.lock() {
-            if let Some(p) = guard.as_ref() {
+    if let Some(m) = PROXY.get()
+        && let Ok(guard) = m.lock()
+            && let Some(p) = guard.as_ref() {
                 let _ = p.send_event(UserEvent::Wake);
             }
-        }
-    }
 }
 
 fn enter_idle_js() -> &'static str {
@@ -63,10 +61,36 @@ fn exit_idle_js() -> &'static str {
     "window.TokenTray && window.TokenTray.exitIdle && window.TokenTray.exitIdle()"
 }
 
+/// Taskbar/dock icon on Linux/macOS, loaded from logo.png like the tray one.
+/// Windows skips this: the icon is set later via WM_SETICON from icon.ico
+/// (win::set_window_icon), which also covers the titlebar and Alt+Tab.
+#[cfg(not(windows))]
+fn load_window_icon() -> Option<tao::window::Icon> {
+    let logo = crate::paths::resource_dir().join("logo.png");
+    let bytes = std::fs::read(logo).ok()?;
+    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    let resized = image::imageops::resize(&img, 128, 128, image::imageops::FilterType::Lanczos3);
+    tao::window::Icon::from_rgba(resized.into_raw(), 128, 128).ok()
+}
+
 pub fn run_gui(state: Arc<AppState>) -> i32 {
     use tao::event::{Event, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoopBuilder};
     use tao::window::WindowBuilder;
+
+    // WebView2 defaults its user data folder next to the exe; in Program
+    // Files that is unwritable and environment creation fails with
+    // E_ACCESSDENIED. Point the loader at a per-user folder instead (the
+    // loader reads this variable when the options leave it unset).
+    #[cfg(windows)]
+    if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none_or(|v| v.is_empty())
+        && let Some(base) = std::env::var_os("LOCALAPPDATA")
+    {
+        let dir = std::path::PathBuf::from(base).join("Tokenatra").join("WebView2");
+        let _ = std::fs::create_dir_all(&dir);
+        // Main thread, before the event loop spawns any other thread.
+        unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &dir) };
+    }
 
     let port = crate::consts::PORT;
     let splash_url = format!("http://localhost:{port}/splash");
@@ -74,6 +98,11 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy_slot = PROXY.get_or_init(|| Mutex::new(None));
     *proxy_slot.lock().unwrap() = Some(event_loop.create_proxy());
+
+    #[cfg(windows)]
+    let window_icon = None;
+    #[cfg(not(windows))]
+    let window_icon = load_window_icon();
 
     let window = WindowBuilder::new()
         .with_title(crate::consts::APP_NAME)
@@ -87,6 +116,7 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
         // Windows: hidden until titlebar and icon are set (like pywebview);
         // Linux/macOS show the window immediately
         .with_visible(!cfg!(windows))
+        .with_window_icon(window_icon)
         .build(&event_loop)
         .expect("create window");
 
@@ -110,12 +140,14 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
         // Register the webview for resize from the hook (WM_SIZE) and stretch
         // it right away: wry created the webview while the window was hidden
         // and captured a wrong client size; without this it stays a ~280px square.
+        #[allow(clippy::arc_with_non_send_sync)] // wry::WebView is !Sync, hook runs on this thread
         let webview = Arc::new(webview);
         crate::win::set_resize_target(webview.clone());
         crate::win::resize_webview_to_client();
         (window, webview)
     };
     #[cfg(not(windows))]
+    #[allow(clippy::arc_with_non_send_sync)]
     let (window, webview) = (window, Arc::new(webview));
 
     // ===== Tray: the icon lives for the whole app lifetime =====
@@ -208,20 +240,18 @@ fn handle_gui_command(
             // state: cancel fullscreen first or it leaks (the next F11 would
             // "exit" a fullscreen the user never saw and teleport the window).
             #[cfg(windows)]
-            if crate::win::is_fullscreen() {
-                if let Some(hwnd) = crate::win::hwnd() {
+            if crate::win::is_fullscreen()
+                && let Some(hwnd) = crate::win::hwnd() {
                     crate::win::toggle_fullscreen(hwnd);
                 }
-            }
             window.set_maximized(true)
         }
         GuiCommand::Restore => {
             #[cfg(windows)]
-            if crate::win::is_fullscreen() {
-                if let Some(hwnd) = crate::win::hwnd() {
+            if crate::win::is_fullscreen()
+                && let Some(hwnd) = crate::win::hwnd() {
                     crate::win::toggle_fullscreen(hwnd);
                 }
-            }
             window.set_maximized(false);
         }
         GuiCommand::Destroy | GuiCommand::Quit => {

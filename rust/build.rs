@@ -11,4 +11,17 @@ fn main() {
                 .display()
         );
     }
+
+    // Embed icon.ico into the exe (Explorer, pinned shortcuts, uninstall
+    // entry, registry verbs). Keyed on the TARGET, not the host, so
+    // cross-compiles stay correct.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let icon = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("../icon.ico");
+        let mut res = winresource::WindowsResource::new();
+        if let Some(icon) = icon.to_str() {
+            res.set_icon(icon);
+            res.compile().expect("embed icon.ico into the exe");
+        }
+    }
 }
