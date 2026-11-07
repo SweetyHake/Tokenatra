@@ -12,6 +12,17 @@ var TokenCanvas = {
     _compositedImageCache: null,
     _compositedImageDirty: true,
 
+    // Кэш слоя изображения (композит + розовая маска) на время перетаскивания:
+    // собирается один раз, дальше кадры драга только сдвигают его
+    _dragLayer: null,
+    _dragLayerCx: 0,
+    _dragLayerCy: 0,
+    _dragLayerGen: -1,
+    _dragLayerW: 0,
+    _dragLayerH: 0,
+    _dragLayerRotation: 0,
+    _compositeGen: 0,
+
     _ccDirty: true,
     _ccImageCache: null,
     _ccCacheKey: null,
@@ -32,6 +43,9 @@ var TokenCanvas = {
 
     _zonesCanvas: null,
     _zonesDirty: true,
+    // Троттлинг пересборки оверлея зон внутри штриха ластика (мс)
+    _zonesRebuildMs: 90,
+    _lastZonesRebuild: 0,
 
     _protectionOverlayCache: null,
     _protectionOverlayDirty: true,
@@ -56,6 +70,9 @@ var TokenCanvas = {
 
     _renderRafId: null,
     _maskGen: 0,
+    // Поколение загрузки изображения: устаревшие onload/onerror декода
+    // отбрасываются (см. loadImage)
+    _loadGen: 0,
 
     requestRender: function() {
         var self = this;
@@ -188,6 +205,8 @@ var TokenCanvas = {
                 // перерисовки изображения целиком — главная цена кадра при стирании
                 this._patchCompositedRegion(d.regionX, d.regionY, d.regionWidth, d.regionHeight);
             }
+            // Розовая маска в кэш слоя драга не запечена (накладывается по кадру
+            // из maskCanvas), поэтому её изменение слой драга не инвалидирует
             this._zonesDirty = true;
             this._shadowDirty = true;
             this._strokeChanged = true;
@@ -395,6 +414,7 @@ var TokenCanvas = {
             this._tempCanvas.width = size;
             this._tempCanvas.height = size;
         }
+        this._dragLayer = null;
         this._compositedImageDirty = true;
         this._zonesDirty = true;
         this._rectDirty = true;
@@ -415,6 +435,8 @@ var TokenCanvas = {
         this.createMask();
         this.createEraserBrush();
         TokenPresets.reloadProtectionMaskForScale();
+        // Диапазон слайдера масштаба следует за размером холста
+        this.updateScaleUI();
         this._forceFullRender();
         this.render();
         toast(I18n.t('Масштаб канваса: ' + scale + '×'));
@@ -588,6 +610,9 @@ var TokenCanvas = {
         ctx.drawImage(state.imageMaskCanvas, rx, ry, rw, rh, rx, ry, rw, rh);
         ctx.globalCompositeOperation = 'source-over';
         ctx.restore();
+        // Региональный патч меняет содержимое композита так же, как полный
+        // ребилд, — кэш слоя драга инвалидируется одинаково
+        this._compositeGen++;
     },
 
     _invalidateComposite: function() {
@@ -628,6 +653,41 @@ var TokenCanvas = {
         }
 
         this._compositedImageDirty = false;
+        // Любой ребилд композита (маска, цветокор, новое изображение)
+        // инвалидирует кэш слоя драга
+        this._compositeGen++;
+    },
+
+    // Слой изображения для кадров перетаскивания: композит с текущим
+    // масштабом/поворотом БЕЗ розовой маски. Маска накладывается по кадру
+    // в координатах канваса (как в полном пути и экспорте): вырез остаётся
+    // на месте канваса, пока картинка сдвигается. Позиция якорится на
+    // (_dragLayerCx/Cy), кадры жеста восстанавливают её сдвигом
+    _buildDragLayer: function(cx, cy) {
+        var size = this.internalSize;
+        if (!this._dragLayer || this._dragLayer.width !== size) {
+            this._dragLayer = document.createElement('canvas');
+            this._dragLayer.width = size;
+            this._dragLayer.height = size;
+        }
+        var scale = size / 1024;
+        var w = state.userImage.width * state.imageScale * scale;
+        var h = state.userImage.height * state.imageScale * scale;
+        var ctx = this._dragLayer.getContext('2d');
+        ctx.clearRect(0, 0, size, size);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(state.imageRotation * Math.PI / 180);
+        ctx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
+        ctx.restore();
+        this._dragLayerCx = cx;
+        this._dragLayerCy = cy;
+        this._dragLayerGen = this._compositeGen;
+        this._dragLayerW = state.userImage.width * state.imageScale;
+        this._dragLayerH = state.userImage.height * state.imageScale;
+        this._dragLayerRotation = state.imageRotation;
     },
 
     updateEraserCursor: function(e) {
@@ -846,12 +906,12 @@ var TokenCanvas = {
                 // Статичные оверлеи (зоны стирания, защита, границы, пример)
                 // обязаны переживать патч: раньше он стирал их в зоне штриха,
                 // и они «моргали» до финального кадра
-                if (state.showErasedZones && this._zonesCanvas) {
+                if (state.showErasedZones) {
                     cctx.save();
                     cctx.beginPath();
                     cctx.rect(dr.x, dr.y, dr.w, dr.h);
                     cctx.clip();
-                    cctx.drawImage(this._zonesCanvas, 0, 0);
+                    this._maybeRebuildZones(size, scale, w, h, cx, cy);
                     cctx.restore();
                 }
                 if (state.userImage && state.exampleEnabled && state.exampleImage) {
@@ -869,66 +929,108 @@ var TokenCanvas = {
                     cctx.restore();
                 }
             } else {
-                var tempCtx = this._tempCtx;
-                tempCtx.clearRect(0, 0, size, size);
-                tempCtx.imageSmoothingEnabled = true;
-                tempCtx.imageSmoothingQuality = 'high';
+                // Быстрый путь перетаскивания: слой с трансформом собран в кэш
+                // на первом кадре жеста, дальние кадры сдвигают его в temp и
+                // накладывают розовую маску в координатах канваса — тот же
+                // порядок, что в полном пути (дорогой поворот + downscale
+                // исходника из горячего пути уходит). Кэш валиден, пока не
+                // менялись композит (gen), масштаб/поворот и разрешение; при
+                // effectsEnabled (таймаут scheduleEffects посреди паузы) нужен
+                // полный кадр с тенью
+                var dragLayerValid = !erasing && this._dragLayer &&
+                    this._dragLayer.width === size &&
+                    this._dragLayerGen === this._compositeGen &&
+                    this._dragLayerW === state.userImage.width * state.imageScale &&
+                    this._dragLayerH === state.userImage.height * state.imageScale &&
+                    this._dragLayerRotation === state.imageRotation;
 
-                // Кольцо сюда НЕ рисуем: ниже цельноканвасный destination-in
-                // вырезал бы его по розовой маске, тогда как кольцо — базовая
-                // подложка на this.ctx (см. выше) и в экспорте renderForSave
-                // маскируется только изображение, но не кольцо.
-
-                tempCtx.save();
-                tempCtx.translate(cx, cy);
-                tempCtx.rotate(state.imageRotation * Math.PI / 180);
-                tempCtx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
-                tempCtx.restore();
-
-                if (state.showHidden) this._snapHiddenSource(this._tempCanvas);
-                tempCtx.globalCompositeOperation = 'destination-in';
-                tempCtx.drawImage(state.maskCanvas, 0, 0, size, size, 0, 0, size, size);
-                tempCtx.globalCompositeOperation = 'source-over';
-                if (state.showHidden) {
-                    this._drawHiddenLayer(tempCtx, this._tempCanvas, state.maskCanvas, size, size, true);
-                }
-
-                // Полный кадр: в конце штриха или обычный рендер
-                this._strokeFullDirty = false;
-                this._strokeDirtyRect = null;
-
-                if (erasing) {
-                    // Кадр в начале штриха: оверлей зон рисуем из кэша без
-                    // пересборки (зоны меняются штрихом — пересборка на каждый
-                    // кадр дорога, актуализируется на финальном кадре)
-                    this.ctx.imageSmoothingEnabled = true;
-                    this.ctx.imageSmoothingQuality = 'high';
-                    // Старая тень живёт весь штрих: рисуем устаревший кэш,
-                    // перерасчёт — только на отпускании (иначе токен «прыгает»
-                    // в момент касания)
-                    if (state.dropShadowEnabled && this._shadowCache) {
-                        this.ctx.drawImage(this._shadowCache, 0, 0, this._shadowCache.width, this._shadowCache.height, 0, 0, size, size);
+                if (dragLayerValid && !state.effectsEnabled) {
+                    var dragCtx = this._tempCtx;
+                    dragCtx.clearRect(0, 0, size, size);
+                    dragCtx.drawImage(this._dragLayer, cx - this._dragLayerCx, cy - this._dragLayerCy);
+                    // Призрак «Показать скрытое» строится из снимка слоя ДО маски:
+                    // обновляем его в позиции текущего кадра, иначе во время
+                    // драга призрак отстаёт на жест (снимок делается только на
+                    // полных кадрах)
+                    if (state.showHidden) this._snapHiddenSource(this._tempCanvas);
+                    dragCtx.globalCompositeOperation = 'destination-in';
+                    dragCtx.drawImage(state.maskCanvas, 0, 0, size, size, 0, 0, size, size);
+                    dragCtx.globalCompositeOperation = 'source-over';
+                    if (state.showHidden) {
+                        this._drawHiddenLayer(dragCtx, this._tempCanvas, state.maskCanvas, size, size, true);
                     }
                     this.ctx.drawImage(this._tempCanvas, 0, 0);
-                    if (state.showErasedZones && this._zonesCanvas) {
-                        this.ctx.drawImage(this._zonesCanvas, 0, 0);
-                    }
-                } else {
-                    if (state.effectsEnabled && state.dropShadowEnabled) {
-                        if (this._shadowDirty || !this._shadowCache) {
-                            // Кэш тени — пониженное разрешение; экспорт не затронут
-                            this._shadowCache = createDropShadow(this._tempCanvas, true);
-                            this._shadowDirty = false;
-                        }
-                        if (this._shadowCache) {
-                            this.ctx.drawImage(this._shadowCache, 0, 0, this._shadowCache.width, this._shadowCache.height, 0, 0, size, size);
-                        }
-                    }
-
-                    this.ctx.drawImage(this._tempCanvas, 0, 0);
-
                     if (state.showErasedZones) {
                         this._renderErasedZonesCached(size, scale, w, h, cx, cy);
+                    }
+                } else {
+                    var tempCtx = this._tempCtx;
+                    tempCtx.clearRect(0, 0, size, size);
+                    tempCtx.imageSmoothingEnabled = true;
+                    tempCtx.imageSmoothingQuality = 'high';
+
+                    // Кольцо сюда НЕ рисуем: ниже цельноканвасный destination-in
+                    // вырезал бы его по розовой маске, тогда как кольцо — базовая
+                    // подложка на this.ctx (см. выше) и в экспорте renderForSave
+                    // маскируется только изображение, но не кольцо.
+
+                    tempCtx.save();
+                    tempCtx.translate(cx, cy);
+                    tempCtx.rotate(state.imageRotation * Math.PI / 180);
+                    tempCtx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
+                    tempCtx.restore();
+
+                    if (state.showHidden) this._snapHiddenSource(this._tempCanvas);
+                    tempCtx.globalCompositeOperation = 'destination-in';
+                    tempCtx.drawImage(state.maskCanvas, 0, 0, size, size, 0, 0, size, size);
+                    tempCtx.globalCompositeOperation = 'source-over';
+                    if (state.showHidden) {
+                        this._drawHiddenLayer(tempCtx, this._tempCanvas, state.maskCanvas, size, size, true);
+                    }
+
+                    // Полный кадр: в конце штриха или обычный рендер
+                    this._strokeFullDirty = false;
+                    this._strokeDirtyRect = null;
+
+                    // Первый кадр жеста перетаскивания: собираем слой в кэш,
+                    // остальные кадры жеста идут по быстрому пути
+                    if (state.isDragging && state.currentTool === 'move' && !erasing) {
+                        this._buildDragLayer(cx, cy);
+                    }
+
+                    if (erasing) {
+                        // Кадр в начале штриха: оверлей зон рисуем из кэша без
+                        // пересборки (зоны меняются штрихом — пересборка на каждый
+                        // кадр дорога, актуализируется на финальном кадре)
+                        this.ctx.imageSmoothingEnabled = true;
+                        this.ctx.imageSmoothingQuality = 'high';
+                        // Старая тень живёт весь штрих: рисуем устаревший кэш,
+                        // перерасчёт — только на отпускании (иначе токен «прыгает»
+                        // в момент касания)
+                        if (state.dropShadowEnabled && this._shadowCache) {
+                            this.ctx.drawImage(this._shadowCache, 0, 0, this._shadowCache.width, this._shadowCache.height, 0, 0, size, size);
+                        }
+                        this.ctx.drawImage(this._tempCanvas, 0, 0);
+                        if (state.showErasedZones) {
+                            this._maybeRebuildZones(size, scale, w, h, cx, cy);
+                        }
+                    } else {
+                        if (state.effectsEnabled && state.dropShadowEnabled) {
+                            if (this._shadowDirty || !this._shadowCache) {
+                                // Кэш тени — пониженное разрешение; экспорт не затронут
+                                this._shadowCache = createDropShadow(this._tempCanvas, true);
+                                this._shadowDirty = false;
+                            }
+                            if (this._shadowCache) {
+                                this.ctx.drawImage(this._shadowCache, 0, 0, this._shadowCache.width, this._shadowCache.height, 0, 0, size, size);
+                            }
+                        }
+
+                        this.ctx.drawImage(this._tempCanvas, 0, 0);
+
+                        if (state.showErasedZones) {
+                            this._renderErasedZonesCached(size, scale, w, h, cx, cy);
+                        }
                     }
                 }
             }
@@ -1029,6 +1131,21 @@ var TokenCanvas = {
                 TokenCanvas._zoneHelpersDirty = true;
             }
         });
+    },
+
+    // Оверлей зон внутри штриха: полная пересборка на каждый кадр дорога,
+    // но и кэш, мёртвый до отпускания кнопки, не нужен. Перестраиваем
+    // троттлингом (~10 раз/с), финальный кадр штриха пересобирает точно.
+    // Вызывать под clip, если рисуется в патч: _renderErasedZonesCached
+    // сама делает финальный ctx.drawImage(_zonesCanvas).
+    _maybeRebuildZones: function(size, scale, w, h, cx, cy) {
+        var now = performance.now();
+        if (this._zonesDirty && (!this._zonesCanvas || now - this._lastZonesRebuild >= this._zonesRebuildMs)) {
+            this._renderErasedZonesCached(size, scale, w, h, cx, cy);
+            this._lastZonesRebuild = now;
+        } else if (this._zonesCanvas) {
+            this.ctx.drawImage(this._zonesCanvas, 0, 0);
+        }
     },
 
     _renderErasedZonesCached: function(size, scale, w, h, cx, cy) {
@@ -1313,11 +1430,43 @@ var TokenCanvas = {
         this.updateViewTransform();
     },
 
+    // Границы слайдера масштаба от размера источника И размера холста.
+    // Проценты означают долю исходника, композиция и экспорт от холста не
+    // зависят — адаптируется только диапазон. Минимум: изображение не мельче
+    // ~MIN_IMAGE_PX пикселей холста. Максимум: не крупнее ~10/3 ширины холста
+    // (на «Качестве» для источника 4096px это ровно 500%).
+    scaleBounds: function() {
+        var srcMax = state.userImage ? Math.max(state.userImage.width, state.userImage.height) : 0;
+        if (!srcMax) return { min: CONFIG.MIN_SCALE, max: CONFIG.MAX_SCALE };
+        var minPct = Math.max(1, Math.ceil(100 * CONFIG.MIN_IMAGE_PX * 1024 / (this.internalSize * srcMax)));
+        var maxPct = Math.round(100 * (10 / 3) * this.internalSize / srcMax);
+        maxPct = clamp(maxPct, Math.max(minPct, CONFIG.DEFAULT_SCALE), CONFIG.MAX_SCALE);
+        return { min: minPct, max: maxPct };
+    },
+
     updateScaleUI: function() {
         var slider = $('scaleSlider');
         var input = $('scaleInput');
+        var b = this.scaleBounds();
+        // Границы слайдера следуют за изображением и размером холста;
+        // значение не клампится: state.imageScale (и композиция) при смене
+        // холста не меняется, выход за новый диапазон виден по слайдеру
+        if (slider) {
+            if (parseFloat(slider.min) !== b.min) slider.min = b.min;
+            if (parseFloat(slider.max) !== b.max) slider.max = b.max;
+        }
+        if (input) {
+            if (parseFloat(input.min) !== b.min) input.min = b.min;
+            if (parseFloat(input.max) !== b.max) input.max = b.max;
+        }
         var val = Math.round(state.imageScale * 100);
-        if (slider) { slider.value = val; slider.style.setProperty('--p', ((val - parseFloat(slider.min)) / (parseFloat(slider.max) - parseFloat(slider.min)) * 100) + '%'); }
+        if (slider) {
+            // Позиция бегунка клампится диапазоном (значение может выходить
+            // за новые границы, но state.imageScale при смене холста не меняется)
+            var pv = clamp(val, b.min, b.max);
+            slider.value = pv;
+            slider.style.setProperty('--p', ((pv - parseFloat(slider.min)) / (parseFloat(slider.max) - parseFloat(slider.min)) * 100) + '%');
+        }
         if (input) input.value = val;
     },
 
@@ -1643,6 +1792,8 @@ var TokenCanvas = {
         }
         this._shadowDirty = true;
         this._zonesDirty = true;
+        // Первый кадр штриха перестраивает зоны сразу, дальше — троттлинг
+        this._lastZonesRebuild = 0;
 
         this.addErasePoint(pos.x, pos.y, state.isRestoring);
     },
@@ -1868,7 +2019,8 @@ var TokenCanvas = {
                 if (state.currentTool === 'eraser' || state.currentTool === 'mask') self.updateEraserCursor(e);
             } else if (e.altKey && state.userImage) {
                 var delta = dy !== 0 ? (dy > 0 ? -1 : 1) : (dx > 0 ? -1 : 1);
-                var newScale = clamp(state.imageScale * 100 + delta, CONFIG.MIN_SCALE, CONFIG.MAX_SCALE);
+                var wb = self.scaleBounds();
+                var newScale = clamp(state.imageScale * 100 + delta, wb.min, wb.max);
                 state.imageScale = newScale / 100;
                 self._imageBrushCache = null;
                 self.updateScaleUI();
@@ -1938,10 +2090,16 @@ var TokenCanvas = {
         if (fileNameInput) fileNameInput.value = state.tokenFileName;
 
         var self = this;
+        // Токен поколения: декод предыдущего файла может быть ещё в полёте,
+        // когда началась новая загрузка. Отзыв его URL рвёт декод, но onload
+        // уже декодированной картинки может сработать позже и затереть state
+        // старым изображением — устаревшие колбэки отбрасываем по gen
+        var loadGen = ++this._loadGen;
         urlManager.revoke('userImage-decode');
         var decodeUrl = urlManager.create(file, 'userImage-decode');
         var img = new Image();
         img.onload = function() {
+            if (loadGen !== self._loadGen) return;
             urlManager.revoke('userImage-decode');
             var finalImg = self._capImage(img);
 
@@ -1950,6 +2108,9 @@ var TokenCanvas = {
             state.userImageWithoutBg = null;
             state.backgroundRemoved = false;
             state.showingOriginal = false;
+            // Минимум масштаба — от размера источника: крупное изображение
+            // (4K и больше) должно уменьшаться сильнее фиксированных 10%
+            state.minScale = minScalePercent(Math.max(finalImg.width, finalImg.height)) / 100;
             TokenEditor.updateRemoveBgButton();
 
             // Каждый импорт вписывает изображение в зону экспорта
@@ -1995,6 +2156,7 @@ var TokenCanvas = {
             }
         };
         img.onerror = function() {
+            if (loadGen !== self._loadGen) return;
             urlManager.revoke('userImage-decode');
             toast('Не удалось прочитать изображение', true);
         };
@@ -2058,9 +2220,13 @@ var TokenCanvas = {
         if (!state.userImage) return;
         var frac = clamp(zone || 3, 1, 3) / 3;
         var imgMaxDim = Math.max(state.userImage.width, state.userImage.height);
+        // Клампим на динамический минимум, а не на CONFIG.MIN_SCALE:
+        // для крупного источника нужный масштаб может быть ниже 10%
+        // (зона 1 для 4K — 8.3%), и жёсткий пол ломал бы вписывание
+        var bounds = this.scaleBounds();
         state.imageScale = Math.min(
-            CONFIG.MAX_SCALE / 100,
-            Math.max(CONFIG.MIN_SCALE / 100, 1024 * frac / imgMaxDim)
+            bounds.max / 100,
+            Math.max(state.minScale, 1024 * frac / imgMaxDim)
         );
         state.imageX = 0;
         state.imageY = 0;
