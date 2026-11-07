@@ -96,10 +96,9 @@ jobs:
   macos:
     name: macOS arm64
     runs-on: macos-latest
-    # ort's static archive (incl. coreml objects) calls the Apple
-    # compiler-rt symbol Rust does not link by default
-    env:
-      RUSTFLAGS: -C link-arg=-lclang_rt.osx
+    # ort static archive fails to link on macos (see the coreml feature note
+    # in Cargo.toml); excluded from the release until that is resolved
+    if: false
     steps:
       - uses: actions/checkout@v4
 
@@ -132,7 +131,7 @@ jobs:
   release:
     name: Publish release assets
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux, macos]
+    needs: [windows, linux]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tag

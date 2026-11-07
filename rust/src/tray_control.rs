@@ -9,6 +9,7 @@ pub fn tray_available() -> bool {
 
 static CREATED: AtomicBool = AtomicBool::new(false);
 
+#[cfg_attr(not(windows), allow(dead_code))] // tray exists on windows only
 pub fn set_created(v: bool) {
     CREATED.store(v, Ordering::SeqCst);
 }
@@ -21,6 +22,7 @@ pub fn is_created() -> bool {
 static HANDLER: OnceLock<Box<dyn Fn(bool) + Send + Sync>> = OnceLock::new();
 
 /// Registers the model state change handler (menu label update).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn set_model_state_handler(f: Box<dyn Fn(bool) + Send + Sync>) {
     let _ = HANDLER.set(f);
 }

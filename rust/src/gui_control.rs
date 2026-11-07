@@ -11,6 +11,7 @@ pub enum GuiCommand {
     ToggleFullscreen,
     HideToTray(Sender<bool>),
     Quit,
+    #[allow(dead_code)] // constructed on windows only
     Show,
     #[allow(dead_code)]
     EvalJs(String),

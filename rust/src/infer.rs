@@ -55,6 +55,7 @@ impl Session {
     }
 }
 
+#[cfg_attr(not(windows), allow(unused_variables))] // dml_device_id feeds windows-only EP arms
 fn build_session(
     path: &Path,
     opt_level: ort::session::builder::GraphOptimizationLevel,
@@ -212,6 +213,7 @@ fn try_build(
 }
 
 /// Returns the live session, creating it if needed (under session_lock).
+#[cfg_attr(not(windows), allow(dead_code))] // windows-only DirectML tuning path
 pub fn load_session(state: &Arc<AppState>) -> anyhow::Result<()> {
     let mut guard = state.session_lock.lock().unwrap();
     if guard.is_none() {
@@ -372,6 +374,7 @@ fn cpu_name() -> String {
 }
 
 /// Classifies a DXGI adapter: discrete | integrated | virtual | None.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn classify_adapter(name: &str) -> Option<&'static str> {
     let low = name.to_lowercase();
     let contains_any = |kws: &[&str]| kws.iter().any(|k| low.contains(k));
@@ -597,6 +600,7 @@ pub fn detect_device(state: &AppState) {
 }
 
 /// Background DirectML adapter tuning in a child process.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn spawn_tune_child(state: &Arc<AppState>) {
     let cfg = state.provider_cfg.read().unwrap().clone();
     let Some(c) = cfg else { return };
@@ -657,7 +661,7 @@ pub fn cli_tune_gpu() {
     #[cfg(windows)]
     let adapter_count = crate::win::enumerate_dxgi_adapters().map(|a| a.len()).unwrap_or(2);
     #[cfg(not(windows))]
-    let adapter_count = 2;
+    let adapter_count = 2usize;
     let limit = adapter_count.clamp(2, 4);
     let mut best: Option<(i32, f64)> = None;
     for did in 0..limit {

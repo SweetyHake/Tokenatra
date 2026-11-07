@@ -53,6 +53,7 @@ pub fn wake() {
             }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))] // idle js rides the windows tray
 fn enter_idle_js() -> &'static str {
     "window.TokenTray && window.TokenTray.enterIdle && window.TokenTray.enterIdle(true)"
 }
