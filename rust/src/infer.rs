@@ -80,7 +80,8 @@ fn build_session(
                 }
                 dispatch.push(dml.into());
             }
-            #[cfg(feature = "cuda")]
+            // ort ships the CUDA EP on Windows and Linux (target deps in Cargo.toml)
+            #[cfg(any(windows, target_os = "linux"))]
             "CUDAExecutionProvider" => {
                 let mut cuda = ort::ep::CUDA::default();
                 if let Some(id) = dml_device_id {
@@ -88,7 +89,7 @@ fn build_session(
                 }
                 dispatch.push(cuda.into());
             }
-            #[cfg(feature = "rocm")]
+            #[cfg(target_os = "linux")]
             "ROCMExecutionProvider" => {
                 let mut rocm = ort::ep::ROCm::default();
                 if let Some(id) = dml_device_id {
@@ -408,11 +409,10 @@ pub fn detect_discrete_dml_adapter() -> (Option<i32>, Option<String>) {
             Some(list) => {
                 let mut best: Option<(i32, String)> = None;
                 for (idx, name) in &list {
-                    if classify_adapter(name) == Some("discrete") {
-                        if best.as_ref().map(|b| *idx < b.0).unwrap_or(true) {
+                    if classify_adapter(name) == Some("discrete")
+                        && best.as_ref().map(|b| *idx < b.0).unwrap_or(true) {
                             best = Some((*idx, name.clone()));
                         }
-                    }
                 }
                 match best {
                     Some((i, n)) => (Some(i), Some(n)),
@@ -467,18 +467,16 @@ fn read_device_cache() -> Option<(Vec<String>, Option<i32>, String)> {
         return None;
     }
     let mut dml_id = None;
-    if let Some(opts) = c.get("provider_options").and_then(|v| v.as_array()) {
-        if let Some(first) = opts.first().and_then(|o| o.get("device_id")).and_then(|v| v.as_i64())
+    if let Some(opts) = c.get("provider_options").and_then(|v| v.as_array())
+        && let Some(first) = opts.first().and_then(|o| o.get("device_id")).and_then(|v| v.as_i64())
         {
             dml_id = Some(first as i32);
         }
-    }
     // manual gpu_device_id in config.json must match the cache
-    if let Some(dev) = crate::config::gpu_device_id() {
-        if dml_id != Some(dev as i32) {
+    if let Some(dev) = crate::config::gpu_device_id()
+        && dml_id != Some(dev as i32) {
             return None;
         }
-    }
     let name = c.get("device_name")?.as_str()?.to_string();
     if name.is_empty() {
         return None;
