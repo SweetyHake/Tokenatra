@@ -99,7 +99,7 @@ fn build_session(
                 }
                 dispatch.push(rocm.into());
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "coreml"))]
             "CoreMLExecutionProvider" => dispatch.push(ort::ep::CoreML::default().into()),
             "CPUExecutionProvider" => dispatch.push(ort::ep::CPU::default().into()),
                         _ => {} // provider not linked, ORT falls back to CPU

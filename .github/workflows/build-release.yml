@@ -54,6 +54,9 @@ jobs:
   linux:
     name: Linux x86_64
     runs-on: ubuntu-22.04
+    # rust-lld (default since 1.90) fails to resolve the static ort archive
+    env:
+      RUSTFLAGS: -C linker-features=-lld
     steps:
       - uses: actions/checkout@v4
 
