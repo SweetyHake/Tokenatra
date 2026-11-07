@@ -28,6 +28,7 @@ jobs:
         include:
           - os: windows-latest
             artifact: tokenatra-windows-x86_64
+            experimental: false
           - os: macos-latest
             artifact: tokenatra-macos
             # ort static archive fails to link on macos (see coreml feature note)
@@ -35,6 +36,7 @@ jobs:
           - os: ubuntu-24.04
             artifact: tokenatra-linux-x86_64
             # ort prebuilt needs glibc 2.38+ / libstdc++ 14
+            experimental: false
 
     continue-on-error: ${{ matrix.experimental }}
 
