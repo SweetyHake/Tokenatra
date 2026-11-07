@@ -53,7 +53,7 @@ jobs:
 
   linux:
     name: Linux x86_64
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -96,6 +96,10 @@ jobs:
   macos:
     name: macOS arm64
     runs-on: macos-latest
+    # ort's static archive (incl. coreml objects) calls the Apple
+    # compiler-rt symbol Rust does not link by default
+    env:
+      RUSTFLAGS: -C link-arg=-lclang_rt.osx
     steps:
       - uses: actions/checkout@v4
 

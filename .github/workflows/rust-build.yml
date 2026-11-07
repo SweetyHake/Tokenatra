@@ -30,8 +30,15 @@ jobs:
             artifact: tokenatra-windows-x86_64
           - os: macos-latest
             artifact: tokenatra-macos
-          - os: ubuntu-22.04
+            # ort's static archive (incl. coreml objects) calls the Apple
+            # compiler-rt symbol Rust does not link by default
+            rustflags: "-C link-arg=-lclang_rt.osx"
+          - os: ubuntu-24.04
             artifact: tokenatra-linux-x86_64
+            # ort prebuilt needs glibc 2.38+ / libstdc++ 14
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
 
     steps:
       - uses: actions/checkout@v4
