@@ -66,8 +66,10 @@ ort = { version = "2.0.0-rc.15", features = ["coreml"] }
 # ROCm for AMD, CUDA for NVIDIA
 ort = { version = "2.0.0-rc.15", features = ["rocm", "cuda"] }
 
-[target.'cfg(windows)'.build-dependencies]
+[build-dependencies]
 # Embeds icon.ico into the exe: Explorer, shortcuts (installer.iss points
 # at the exe), "Apps & Features" (UninstallDisplayIcon) and registry verbs
 # (win.rs sets Icon = exe path) all take the icon from the exe resource.
+# Plain section (not cfg(windows)): build.rs must compile on linux/mac
+# runners too; embedding itself is gated there by CARGO_CFG_TARGET_OS.
 winresource = "0.1"
