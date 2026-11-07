@@ -190,7 +190,7 @@ fn apply_update_sync() -> Response {
         if kind != "dmg" {
             return err_status(StatusCode::BAD_REQUEST, "Ожидался DMG или tar.gz файл обновления");
         }
-        return apply_update_macos(&src);
+        apply_update_macos(&src)
     }
     #[cfg(target_os = "linux")]
     {
