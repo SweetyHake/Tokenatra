@@ -73,6 +73,8 @@ fn build_session(
     let mut dispatch: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
     for p in providers {
         match p.as_str() {
+            // ort ships the DirectML EP only with the windows dep (Cargo.toml)
+            #[cfg(windows)]
             "DmlExecutionProvider" => {
                 let mut dml = ort::ep::DirectML::default();
                 if let Some(id) = dml_device_id {
@@ -651,9 +653,11 @@ pub fn cli_tune_gpu() {
             return;
         }
     };
-    let adapter_count = cfg!(windows)
-        .then(|| crate::win::enumerate_dxgi_adapters().map(|a| a.len()).unwrap_or(2))
-        .unwrap_or(2);
+    // DXGI есть только на Windows; иначе тюнинг идёт по двум device id
+    #[cfg(windows)]
+    let adapter_count = crate::win::enumerate_dxgi_adapters().map(|a| a.len()).unwrap_or(2);
+    #[cfg(not(windows))]
+    let adapter_count = 2;
     let limit = adapter_count.clamp(2, 4);
     let mut best: Option<(i32, f64)> = None;
     for did in 0..limit {

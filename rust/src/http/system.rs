@@ -386,7 +386,9 @@ rm -f "$0"
         return err_status(StatusCode::INTERNAL_SERVER_ERROR, "Не удалось записать скрипт обновления");
     }
     use std::os::unix::fs::PermissionsExt;
-    let mut perms = std::fs::metadata(&script).map(|m| m.permissions()).unwrap_or_default();
+    let mut perms = std::fs::metadata(&script)
+        .map(|m| m.permissions())
+        .unwrap_or_else(|_| std::fs::Permissions::from_mode(0o644));
     perms.set_mode(0o755);
     let _ = std::fs::set_permissions(&script, perms);
 
