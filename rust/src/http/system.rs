@@ -195,7 +195,7 @@ fn apply_update_sync() -> Response {
         if kind != "appimage" {
             return err_status(StatusCode::BAD_REQUEST, "Ожидался AppImage-файл обновления");
         }
-        return apply_update_linux(&src);
+        apply_update_linux(&src)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
