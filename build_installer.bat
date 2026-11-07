@@ -22,8 +22,10 @@ if not exist %ISCC% (
 )
 
 echo [2/3] Версия из rust\src\consts.rs
-for /f "tokens=3 delims== " %%v in ('findstr /C:"pub const VERSION" "%ROOT%rust\src\consts.rs"') do set APPVER=%%~v
+for /f "tokens=2 delims==" %%v in ('findstr /C:"pub const VERSION" "%ROOT%rust\src\consts.rs"') do set APPVER=%%~v
 set APPVER=%APPVER:"=%
+set APPVER=%APPVER:;=%
+set APPVER=%APPVER: =%
 echo   VERSION=%APPVER%
 
 echo [3/3] ISCC installer.iss
