@@ -11,6 +11,8 @@ const PortraitGenerator = {
     imageY: 0,
     imageScale: 1,
     imageRotation: 0,
+    // Динамический минимум масштаба в процентах — от размера изображения
+    minScalePct: 10,
 
     isDragging: false,
     dragStartX: 0,
@@ -137,13 +139,13 @@ const PortraitGenerator = {
             scaleSlider.addEventListener('wheel', ev => {
                 ev.preventDefault();
                 const step = 1;
-                scaleSlider.value = clamp(parseInt(scaleSlider.value) + (ev.deltaY < 0 ? step : -step), 10, 500);
+                scaleSlider.value = clamp(parseInt(scaleSlider.value) + (ev.deltaY < 0 ? step : -step), this.minScalePct, 500);
                 scaleSlider.dispatchEvent(new Event('input'));
             }, { passive: false });
         }
         if (scaleInput) {
             scaleInput.onchange = e => {
-                const v = clamp(parseInt(e.target.value) || 100, 10, 500);
+                const v = clamp(parseInt(e.target.value) || 100, this.minScalePct, 500);
                 this.imageScale = v / 100;
                 if (scaleSlider) scaleSlider.value = v;
                 scaleInput.value = v;
@@ -211,7 +213,7 @@ const PortraitGenerator = {
             const delta = e.deltaY > 0 ? -2 : 2;
             const scaleSlider = $('portraitScaleSlider');
             const scaleInput = $('portraitScaleInput');
-            const newVal = clamp(Math.round(this.imageScale * 100) + delta, 10, 500);
+            const newVal = clamp(Math.round(this.imageScale * 100) + delta, this.minScalePct, 500);
             this.imageScale = newVal / 100;
             if (scaleSlider) scaleSlider.value = newVal;
             if (scaleInput) scaleInput.value = newVal;
@@ -322,10 +324,14 @@ const PortraitGenerator = {
         const img = this.getImage();
         if (img) {
             const maxDim = Math.max(img.width, img.height);
-            // Клампим в диапазон слайдера 10-500%, иначе мелкие картинки
-            // дают масштаб вне слайдера: UI и рендер расходятся
-            this.imageScale = clamp(this.SIZE / maxDim, 0.1, 5);
+            // Динамический минимум масштаба от размера источника: крупное
+            // изображение (4K и больше) должно уменьшаться сильнее 10%
+            this.minScalePct = minScalePercent(maxDim);
+            // Клампим в диапазон слайдера, иначе мелкие картинки дают
+            // масштаб вне слайдера: UI и рендер расходятся
+            this.imageScale = clamp(this.SIZE / maxDim, this.minScalePct / 100, 5);
         } else {
+            this.minScalePct = 10;
             this.imageScale = 1;
         }
         this.imageX = 0;
@@ -336,8 +342,8 @@ const PortraitGenerator = {
         const scaleInput = $('portraitScaleInput');
         const rotSlider = $('portraitRotationSlider');
         const rotInput = $('portraitRotationInput');
-        if (scaleSlider) scaleSlider.value = v;
-        if (scaleInput) scaleInput.value = v;
+        if (scaleSlider) { scaleSlider.min = this.minScalePct; scaleSlider.value = v; }
+        if (scaleInput) { scaleInput.min = this.minScalePct; scaleInput.value = v; }
         if (rotSlider) rotSlider.value = 0;
         if (rotInput) rotInput.value = 0;
         this.render();

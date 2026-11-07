@@ -262,6 +262,7 @@
                         <div class="accordion-body" id="colorCorrectionSettings">
                             <div class="slider-row"><span class="slider-label">Насыщенность</span><input type="range" id="ccSaturation" min="-100" max="100" step="1" value="5"><input type="number" class="slider-value" id="ccSaturationVal" value="5" min="-100" max="100" step="1"><span class="slider-unit">%</span></div>
                             <div class="slider-row"><span class="slider-label">Яркость</span><input type="range" id="ccLightness" min="-100" max="100" step="1" value="-5"><input type="number" class="slider-value" id="ccLightnessVal" value="-5" min="-100" max="100" step="1"><span class="slider-unit">%</span></div>
+                            <div class="slider-row"><span class="slider-label">Контраст</span><input type="range" id="ccContrast" min="-100" max="100" step="1" value="0"><input type="number" class="slider-value" id="ccContrastVal" value="0" min="-100" max="100" step="1"><span class="slider-unit">%</span></div>
                         </div>
 
                         <div class="ctx-divider"></div>
@@ -827,14 +828,11 @@
         const hint = document.getElementById('saveInfoHint');
         if (!hint) return;
         quality = parseInt(quality);
-        // Предпросмотр коррекции масштаба: при «Авто» — распознанное значение
-        const eff = scale === 'auto' ? (window.TokenCanvas ? TokenCanvas.detectUsedScale() : 1) : parseInt(scale);
-        const tag = '(' + I18n.t('Масштаб:') + ' ' + eff + ')';
         if (scale === 'auto') {
-            hint.textContent = I18n.t('Подбирается автоматически по размеру изображения на холсте') + ' ' + tag;
+            hint.textContent = I18n.t('Подбирается автоматически по размеру изображения на холсте');
         } else {
             const s = parseInt(scale);
-            hint.textContent = I18n.t(quality + 'px × ' + s + ' = ' + (quality * s) + 'px итоговый файл') + ' ' + tag;
+            hint.textContent = I18n.t(quality + 'px × ' + s + ' = ' + (quality * s) + 'px итоговый файл');
         }
     }
     document.addEventListener('languagechange', function() {

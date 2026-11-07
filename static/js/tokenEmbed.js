@@ -102,7 +102,8 @@ var TokenEmbed = (function() {
                 colorCorrection: {
                     enabled: !!state.colorCorrectionEnabled,
                     saturation: AppConfig.colorCorrection.saturation,
-                    lightness: AppConfig.colorCorrection.lightness
+                    lightness: AppConfig.colorCorrection.lightness,
+                    contrast: AppConfig.colorCorrection.contrast ?? 0
                 }
             };
         } catch (err) { return null; }
@@ -173,7 +174,7 @@ var TokenEmbed = (function() {
         if (s.colorCorrection) {
             var ccCheck = document.getElementById('colorCorrectionCheck');
             if (ccCheck) { ccCheck.checked = !!s.colorCorrection.enabled; ccCheck.dispatchEvent(new Event('change')); }
-            [['ccSaturation', 'saturation'], ['ccLightness', 'lightness']].forEach(function(pair) {
+            [['ccSaturation', 'saturation'], ['ccLightness', 'lightness'], ['ccContrast', 'contrast']].forEach(function(pair) {
                 var v = s.colorCorrection[pair[1]];
                 if (typeof v !== 'number') return;
                 var el = document.getElementById(pair[0]);

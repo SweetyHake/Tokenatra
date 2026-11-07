@@ -8,6 +8,9 @@ const CONFIG = {
     DEFAULT_SCALE: 100,
     OPEN_SCALE: 2,
     MIN_SCALE: 10,
+    // Минимально осмысленный размер изображения на канвасе (px) — от него
+    // считается динамический минимум масштаба (см. minScalePercent)
+    MIN_IMAGE_PX: 8,
     MAX_SCALE: 500,
     MIN_ZOOM: 0.5,
     MAX_ZOOM: 20,
@@ -62,7 +65,7 @@ const AppConfig = {
             dropShadowEnabled: false,
             colorCorrectionEnabled: false,
             dropShadow: { angle: 135, distance: 7, blur: 3, opacity: 0.40 },
-            colorCorrection: { saturation: 5, lightness: -5 },
+            colorCorrection: { saturation: 5, lightness: -5, contrast: 0 },
             lastFolders: {
                 quickSave: null,
                 portrait: null,

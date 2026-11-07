@@ -83,6 +83,7 @@ const I18n = {
         'Сбросить цветокоррекцию': 'Reset color correction',
         'Насыщенность': 'Saturation',
         'Яркость': 'Brightness',
+        'Контраст': 'Contrast',
         'Превью': 'Preview',
         'Пример': 'Example',
         'Портрет': 'Portrait',

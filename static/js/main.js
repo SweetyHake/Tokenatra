@@ -462,12 +462,7 @@ function initWindowControls() {
 
     const maxBtn = $('wcMaximize');
     if (maxBtn) {
-        const setIcon = () => {
-            const isMax = document.documentElement.classList.contains('is-maximized');
-            maxBtn.innerHTML = isMax
-                ? '<svg viewBox="0 0 24 24"><rect x="7" y="7" width="14" height="14" rx="1"/><rect x="3" y="3" width="14" height="14" rx="1"/></svg>'
-                : '<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>';
-        };
+        // Иконка постоянная: обычный квадрат независимо от состояния окна
         maxBtn.addEventListener('click', () => {
             if (document.documentElement.classList.contains('is-maximized')) {
                 document.documentElement.classList.remove('is-maximized');
@@ -478,7 +473,6 @@ function initWindowControls() {
                 if (getApi()?.maximize) getApi().maximize();
                 else flask('maximize');
             }
-            setIcon();
         });
     }
 
