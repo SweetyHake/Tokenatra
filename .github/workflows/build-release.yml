@@ -1,0 +1,163 @@
+name: Build desktop releases
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path src/consts.rs -Pattern 'VERSION:\s*&str\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$ver" ../installer.iss
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tokenatra-windows
+          path: dist/installer/Tokenatra_v*_windows_x86_64_setup.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies (webkit2gtk + gtk)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build (release)
+        working-directory: rust
+        run: cargo build --release
+
+      - name: Package portable archive
+        run: |
+          VER="$(grep -oP 'VERSION:\s*&str\s*=\s*"\K[^"]+' rust/src/consts.rs)"
+          mkdir -p dist
+          cp rust/target/release/tokenatra dist/
+          cp -r templates static token_rings presets icon.ico logo.png mask.png example.png dist/ 2>/dev/null || true
+          tar -C dist -czf "Tokenatra_v${VER}_linux_x86_64.tar.gz" .
+          mv "Tokenatra_v${VER}_linux_x86_64.tar.gz" dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tokenatra-linux-x86_64
+          path: dist/Tokenatra_v*_linux_x86_64.tar.gz
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build (release)
+        working-directory: rust
+        run: cargo build --release
+
+      - name: Package portable archive
+        run: |
+          VER="$(grep -oE 'VERSION: &str = "[^"]+"' rust/src/consts.rs | grep -oE '"[^"]+"' | tr -d '"')"
+          mkdir -p dist
+          cp rust/target/release/tokenatra dist/
+          cp -r templates static token_rings presets icon.ico logo.png mask.png example.png dist/ 2>/dev/null || true
+          tar -C dist -czf "Tokenatra_v${VER}_macos_arm64.tar.gz" .
+          mv "Tokenatra_v${VER}_macos_arm64.tar.gz" dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tokenatra-macos-arm64
+          path: dist/Tokenatra_v*_macos_arm64.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish release assets
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Pillow (ring thumbnails)
+        run: python -m pip install pillow
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Package Foundry module
+        run: |
+          python build_studio.py
+          cd foundry-module
+          zip -r ../release-assets/tokenatra-connector.zip tokenatra-connector
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" --verify-tag --generate-notes
+          fi
+          gh release upload "${GITHUB_REF_NAME}" release-assets/* --clobber
