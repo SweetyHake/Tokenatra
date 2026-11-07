@@ -31,8 +31,7 @@ jobs:
             experimental: false
           - os: macos-latest
             artifact: tokenatra-macos
-            # ort static archive fails to link on macos (see coreml feature note)
-            experimental: true
+            experimental: false
           - os: ubuntu-24.04
             artifact: tokenatra-linux-x86_64
             # ort prebuilt needs glibc 2.38+ / libstdc++ 14
@@ -74,7 +73,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/tokenatra.exe dist/
-          cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../example.png dist/ 2>/dev/null || true
+          cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../ring.png ../example.png dist/ 2>/dev/null || true
           7z a -tzip "${{ matrix.artifact }}.zip" dist
       - name: Package (macOS/Linux)
         if: runner.os != 'Windows'
@@ -82,7 +81,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/tokenatra dist/
-          cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../example.png dist/ 2>/dev/null || true
+          cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../ring.png ../example.png dist/ 2>/dev/null || true
           tar czf "${{ matrix.artifact }}.tar.gz" dist
 
       - uses: actions/upload-artifact@v4

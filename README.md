@@ -1,112 +1,114 @@
 # Tokenatra
 
-Редактор токенов для Foundry VTT и фоновым удалением (AI ONNX): загрузи арта → вырезка фона → кольцо → экспорт.
+Настольное приложение для подготовки токенов и портретов в Foundry VTT со встроенным удалением фона на базе ONNX Runtime. Собирается в один исполняемый файл на Rust (`axum` + `ort` + `wry`/`tao`) без внешних зависимостей от Python.
 
-Нативное приложение: axum (HTTP) + ort (ONNX Runtime: DirectML/CUDA/CoreML/ROCm) + wry/tao (GUI).
-Один бинарник, без Python-окружения.
+## Основные возможности
 
----
+- Удаление фона локальными моделями RMBG-2.0, BEN2 и BiRefNet с аппаратным ускорением (DirectML и CUDA на Windows, CoreML на macOS, CPU/CUDA/ROCm на Linux).
+- Редактор токенов: масштабирование, поворот, маски и ластик (по холсту и по слою), каталог колец, тени, цветокоррекция, сохранение пресетов.
+- Генератор портретов и пакетный конвертер изображений (PNG, WebP, JPG, AVIF) и аудио (OGG через FFmpeg).
+- Модуль-коннектор для Foundry VTT с возможностью открывать студию прямо внутри игрового мира.
+- Локальный HTTP API `/agent/v1/*` для автоматизации сборки токенов.
 
-## Возможности
+## Установка и запуск
 
-- **AI-удаление фона** (RMBG-2.0 / BEN2 / BiRefNet, ONNX) с GPU-ускорением
-- **Редактор токенов**: масштаб/поворот, ластик, кольца, тени, цветокоррекция, пресеты
-- **Горячие клавиши**, портретный генератор, конвертер (PNG/WebP/JPG/AVIF)
-- **Foundry VTT коннектор**: хостинг студии в мире, GUI-препроцессинг у игроков
-- **Экспорт**: PNG / WebP / JPG, встроенный апдейтер
-- **Агентский API** `/agent/v1/*` (JSON) + MCP-прокси — для ИИ-агентов (Claude, OpenCode, DeepSeek)
+Готовые сборки публикуются на странице [Releases](https://github.com/SweetyHake/Tokenatra/releases):
 
-## Установка
+- Windows: установщик `Tokenatra_v*_windows_x86_64_setup.exe`.
+- macOS (Apple Silicon): образ `Tokenatra_v*_macos_arm64.dmg` или архив `Tokenatra_v*_macos_arm64.tar.gz`.
+- Linux (x86_64): архив `Tokenatra_v*_linux_x86_64.tar.gz`.
 
-### Windows (установщик)
-Скачай `Tokenatra_v*_windows_x86_64_setup.exe` со страницы
-[Releases](https://github.com/SweetyHake/Tokenatra/releases) и установи.
-Модель `.onnx` кладётся вручную в `models/` рядом с приложением (или выбери в Настройках).
+Модели `.onnx` можно скачать прямо в разделе «Настройки» внутри приложения или положить вручную в каталог `models/` в папке пользовательских данных:
+- Windows: `%LOCALAPPDATA%\Tokenatra\models`
+- macOS: `~/Library/Application Support/Tokenatra/models`
+- Linux: `~/.local/share/Tokenatra/models`
 
-### Из исходников (Rust)
-Требуется Rust toolchain (https://rustup.rs). На Linux — WebKit2GTK и GTK3.
+## Сборка из исходников
+
+Потребуется установленный Rust ([rustup.rs](https://rustup.rs)).
+
+На Linux (Ubuntu 24.04+ / Debian / производные) перед сборкой установите системные пакеты GTK3 и WebKit2GTK:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libgtk-3-dev \
+  libwebkit2gtk-4.1-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev \
+  libxdo-dev
+```
+
+Запуск приложения с графическим окном:
+
+```bash
+cd rust
 cargo run --release
 ```
 
-Интерфейс откроется в окне приложения; сервер слушает `http://127.0.0.1:7878`.
+После запуска откроется окно приложения, а локальный HTTP-сервер будет доступен по адресу `http://127.0.0.1:7878`.
 
-Headless-режим (только сервер, без окна):
+Запуск только HTTP-сервера без графического окна:
 
 ```bash
+cd rust
 cargo run --release -- --server
 ```
 
-## Agent API (для ИИ-агентов)
-
-Все операции — JSON поверх HTTP на `http://127.0.0.1:7878/agent/v1/*`
-с заголовком `X-Tokenatra-Agent: 1` (только localhost).
-
-```
-GET  /agent/v1/manifest                 # возможности и лимиты
-POST /agent/v1/sessions                 {image: base64}     -> session_id
-POST /agent/v1/sessions/<id>/remove_bg  {edge_blur}
-POST /agent/v1/sessions/<id>/transform  {scale, offset_x, offset_y}
-POST /agent/v1/sessions/<id>/mask       {op: erase|restore|feather|grow|...}
-POST /agent/v1/sessions/<id>/ring       {name}
-POST /agent/v1/sessions/<id>/export     {format, size, scale_mode, with_ring}
-GET  /agent/v1/sessions/<id>/preview
-DELETE /agent/v1/sessions/<id>
-```
-
-Полное руководство с якорями композиции и рецептами:
-[`W:\Images\STokens\TOKEN_STYLE.md`](TOKEN_STYLE.md) (локально) и `docs/`.
-
-MCP-прокси: `tokenatra_mcp.py` (stdio, только stdlib) — подключается
-к Claude Desktop / OpenCode: `python tokenatra_mcp.py`.
-
-## Сборка установщика (Windows)
+Сборка установщика для Windows (требуется Inno Setup 6):
 
 ```bat
 build_installer.bat
 ```
 
-(cargo build + Inno Setup → `dist\installer\Tokenatra_v*_windows_x86_64_setup.exe`)
+Сборка архива модуля для Foundry VTT:
 
-## Foundry VTT модуль
+```bat
+build_module.bat
+```
 
-`foundry-module/` — коннектор Tokenatra ↔ Foundry (manifest URL или zip из
-`build_module.bat`).
+## Agent API
 
----
+Локальный интерфейс управления редактором работает по адресу `http://127.0.0.1:7878/agent/v1/*` и требует заголовок `X-Tokenatra-Agent: 1`.
+
+Основные маршруты:
+
+```text
+GET    /agent/v1/manifest
+GET    /agent/v1/assets
+POST   /agent/v1/sessions                 {image_path | image, ring}
+GET    /agent/v1/sessions/<id>
+DELETE /agent/v1/sessions/<id>
+POST   /agent/v1/sessions/<id>/remove_bg  {edge_blur, showing_original}
+POST   /agent/v1/sessions/<id>/transform  {scale, rotation, offset_x, offset_y, fit_zone}
+POST   /agent/v1/sessions/<id>/mask       {target, op, shapes|preset|px, protect}
+POST   /agent/v1/sessions/<id>/ring       {name}
+POST   /agent/v1/sessions/<id>/effects    {shadow, color}
+POST   /agent/v1/sessions/<id>/export     {format, quality, size, scale_mode, with_ring}
+GET    /agent/v1/sessions/<id>/preview
+GET    /agent/v1/sessions/<id>/inspect
+```
 
 ## English
 
-**Tokenatra** — a token editor for Foundry VTT with AI background removal.
-Native app: axum (HTTP) + ort (ONNX Runtime: DirectML/CUDA/CoreML/ROCm) + wry/tao GUI.
-Single binary, no Python environment required.
+Tokenatra is a desktop token editor and background remover for Foundry VTT built with Rust (`axum`, `ort` ONNX Runtime, and `wry`/`tao`).
 
-### Install
+### Installation
 
-Download `Tokenatra_v*_windows_x86_64_setup.exe` from
-[Releases](https://github.com/SweetyHake/Tokenatra/releases).
-Put your `.onnx` model into the `models/` folder next to the app.
+Prebuilt packages for Windows (`setup.exe`), macOS (`.dmg` and `.tar.gz`), and Linux (`.tar.gz`) are available on the [Releases](https://github.com/SweetyHake/Tokenatra/releases) page. Models can be downloaded from the in-app Settings tab or placed manually into the `models/` directory.
 
-### Build from source
+### Building from source
 
-Requires the Rust toolchain (https://rustup.rs). On Linux, WebKit2GTK + GTK3 are needed.
+Install the Rust toolchain via [rustup.rs](https://rustup.rs). On Linux, install `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` first.
 
 ```bash
+cd rust
 cargo run --release
 ```
 
-The UI opens in the app window; the server listens on `http://127.0.0.1:7878`.
-Headless server mode: `cargo run --release -- --server`.
+To run in headless server mode on `http://127.0.0.1:7878`:
 
-### Agent API (for AI agents)
-
-JSON over HTTP at `http://127.0.0.1:7878/agent/v1/*` with header
-`X-Tokenatra-Agent: 1` (localhost only). See the endpoints above.
-MCP stdio proxy: `python tokenatra_mcp.py`.
-
-### Windows installer
-
-```bat
-build_installer.bat
+```bash
+cd rust
+cargo run --release -- --server
 ```

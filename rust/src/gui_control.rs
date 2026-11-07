@@ -21,6 +21,18 @@ pub enum GuiCommand {
     /// Edge resize (Linux/macOS; macOS returns unsupported).
     #[allow(dead_code)]
     DragResize(tao::window::ResizeDirection),
+    /// Frameless edge resize start/move/end for platforms without native drag_resize_window (macOS).
+    #[allow(dead_code)]
+    ResizeBegin {
+        left: bool,
+        right: bool,
+        top: bool,
+        bottom: bool,
+    },
+    #[allow(dead_code)]
+    ResizeMove { dx: f64, dy: f64 },
+    #[allow(dead_code)]
+    ResizeEnd,
 }
 
 struct Channel {

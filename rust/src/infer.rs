@@ -8,14 +8,32 @@ use crate::state::{AppState, ProviderConfig};
 
 /// Providers linked into this binary.
 pub fn available_providers() -> &'static [&'static str] {
-    if cfg!(windows) {
+    #[cfg(windows)]
+    {
         &["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"]
-    } else if cfg!(target_os = "macos") {
+    }
+    #[cfg(target_os = "macos")]
+    {
         &["CoreMLExecutionProvider", "CPUExecutionProvider"]
-    } else if cfg!(target_os = "linux") {
-        &["CUDAExecutionProvider", "ROCMExecutionProvider", "CPUExecutionProvider"]
-    } else {
-        &["CPUExecutionProvider"]
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        #[cfg(all(feature = "cuda", feature = "rocm"))]
+        {
+            &["CUDAExecutionProvider", "ROCMExecutionProvider", "CPUExecutionProvider"]
+        }
+        #[cfg(all(feature = "cuda", not(feature = "rocm")))]
+        {
+            &["CUDAExecutionProvider", "CPUExecutionProvider"]
+        }
+        #[cfg(all(not(feature = "cuda"), feature = "rocm"))]
+        {
+            &["ROCMExecutionProvider", "CPUExecutionProvider"]
+        }
+        #[cfg(not(any(feature = "cuda", feature = "rocm")))]
+        {
+            &["CPUExecutionProvider"]
+        }
     }
 }
 
@@ -100,7 +118,7 @@ fn build_session(
                 }
                 dispatch.push(rocm.into());
             }
-            #[cfg(all(target_os = "macos", feature = "coreml"))]
+            #[cfg(target_os = "macos")]
             "CoreMLExecutionProvider" => dispatch.push(ort::ep::CoreML::default().into()),
             "CPUExecutionProvider" => dispatch.push(ort::ep::CPU::default().into()),
                         _ => {} // provider not linked, ORT falls back to CPU

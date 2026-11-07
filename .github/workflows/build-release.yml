@@ -82,7 +82,7 @@ jobs:
           VER="$(grep -oP 'VERSION:\s*&str\s*=\s*"\K[^"]+' rust/src/consts.rs)"
           mkdir -p dist
           cp rust/target/release/tokenatra dist/
-          cp -r templates static token_rings presets icon.ico logo.png mask.png example.png dist/ 2>/dev/null || true
+          cp -r templates static token_rings presets icon.ico logo.png mask.png ring.png example.png dist/ 2>/dev/null || true
           tar -C dist -czf "Tokenatra_v${VER}_linux_x86_64.tar.gz" .
           mv "Tokenatra_v${VER}_linux_x86_64.tar.gz" dist/
 
@@ -96,9 +96,6 @@ jobs:
   macos:
     name: macOS arm64
     runs-on: macos-latest
-    # ort static archive fails to link on macos (see the coreml feature note
-    # in Cargo.toml); excluded from the release until that is resolved
-    if: false
     steps:
       - uses: actions/checkout@v4
 
@@ -112,26 +109,58 @@ jobs:
         working-directory: rust
         run: cargo build --release
 
-      - name: Package portable archive
+      - name: Package portable archive and DMG
         run: |
           VER="$(grep -oE 'VERSION: &str = "[^"]+"' rust/src/consts.rs | grep -oE '"[^"]+"' | tr -d '"')"
           mkdir -p dist
           cp rust/target/release/tokenatra dist/
-          cp -r templates static token_rings presets icon.ico logo.png mask.png example.png dist/ 2>/dev/null || true
+          cp -r templates static token_rings presets icon.ico logo.png mask.png ring.png example.png dist/ 2>/dev/null || true
           tar -C dist -czf "Tokenatra_v${VER}_macos_arm64.tar.gz" .
           mv "Tokenatra_v${VER}_macos_arm64.tar.gz" dist/
+
+          APP_DIR="dist/dmg/Tokenatra.app/Contents"
+          mkdir -p "$APP_DIR/MacOS" "$APP_DIR/Resources"
+          cp rust/target/release/tokenatra "$APP_DIR/MacOS/tokenatra"
+          cp -r templates static token_rings presets icon.ico logo.png mask.png ring.png example.png "$APP_DIR/Resources/" 2>/dev/null || true
+          cat > "$APP_DIR/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>Tokenatra</string>
+            <key>CFBundleDisplayName</key>
+            <string>Tokenatra</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.sweetyhake.tokenatra</string>
+            <key>CFBundleVersion</key>
+            <string>${VER}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${VER}</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleExecutable</key>
+            <string>tokenatra</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          hdiutil create -volname "Tokenatra" -srcfolder "dist/dmg/Tokenatra.app" -ov -format UDZO "dist/Tokenatra_v${VER}_macos_arm64.dmg"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: tokenatra-macos-arm64
-          path: dist/Tokenatra_v*_macos_arm64.tar.gz
+          path: |
+            dist/Tokenatra_v*_macos_arm64.tar.gz
+            dist/Tokenatra_v*_macos_arm64.dmg
           if-no-files-found: error
 
   release:
     name: Publish release assets
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux]
+    needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tag

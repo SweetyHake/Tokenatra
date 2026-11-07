@@ -184,16 +184,22 @@ fn apply_update_sync() -> Response {
     #[cfg(target_os = "macos")]
     {
         let kind = status_str("download_kind");
+        if kind == "tar.gz" {
+            return apply_update_unix_tar(&src);
+        }
         if kind != "dmg" {
-            return err_status(StatusCode::BAD_REQUEST, "Ожидался DMG-файл обновления");
+            return err_status(StatusCode::BAD_REQUEST, "Ожидался DMG или tar.gz файл обновления");
         }
         return apply_update_macos(&src);
     }
     #[cfg(target_os = "linux")]
     {
         let kind = status_str("download_kind");
+        if kind == "tar.gz" {
+            return apply_update_unix_tar(&src);
+        }
         if kind != "appimage" {
-            return err_status(StatusCode::BAD_REQUEST, "Ожидался AppImage-файл обновления");
+            return err_status(StatusCode::BAD_REQUEST, "Ожидался AppImage или tar.gz файл обновления");
         }
         apply_update_linux(&src)
     }
@@ -427,5 +433,56 @@ fn apply_update_linux(src: &str) -> Response {
     }
     let _ = std::fs::remove_file(src);
     let _ = Command::new(appimage.as_os_str()).spawn();
+    ok_json(json!({ "ok": true }))
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn apply_update_unix_tar(src: &str) -> Response {
+    use std::process::Command;
+    let exe = std::env::current_exe().unwrap_or_default();
+    let Some(dst_dir) = exe.parent() else {
+        return err_status(StatusCode::BAD_REQUEST, "Не удалось определить каталог приложения");
+    };
+    let upd_dir = crate::updater::update_dir();
+    let script = upd_dir.join("_update_tar.sh");
+    let body = r#"#!/bin/sh
+tries=0
+while kill -0 "$PID" 2>/dev/null; do
+  tries=$((tries+1))
+  [ "$tries" -ge 120 ] && break
+  sleep 0.5
+done
+sleep 1
+TMP="$(mktemp -d)"
+if tar -xzf "$SRC" -C "$TMP"; then
+  if [ -d "$TMP/dist" ]; then
+    cp -Rf "$TMP/dist/"* "$DSTDIR/"
+  else
+    cp -Rf "$TMP/"* "$DSTDIR/"
+  fi
+  chmod +x "$EXE" 2>/dev/null
+  rm -f "$SRC"
+  "$EXE" >/dev/null 2>&1 &
+fi
+rm -rf "$TMP"
+rm -f "$0"
+"#;
+    if std::fs::write(&script, body).is_err() {
+        return err_status(StatusCode::INTERNAL_SERVER_ERROR, "Не удалось записать скрипт обновления");
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(&script)
+        .map(|m| m.permissions())
+        .unwrap_or_else(|_| std::fs::Permissions::from_mode(0o644));
+    perms.set_mode(0o755);
+    let _ = std::fs::set_permissions(&script, perms);
+
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg(&script)
+        .env("SRC", src)
+        .env("DSTDIR", dst_dir.to_string_lossy().as_ref())
+        .env("EXE", exe.to_string_lossy().as_ref())
+        .env("PID", std::process::id().to_string());
+    let _ = cmd.spawn();
     ok_json(json!({ "ok": true }))
 }

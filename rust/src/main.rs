@@ -135,11 +135,20 @@ fn main() {
 
     let server_only = args.iter().any(|a| a == "--server" || a == "--headless");
 
-    // Linux (WSLg/VMs): force X11 and software WebKit rendering
-    if !cfg!(windows) {
-        unsafe { std::env::set_var("GDK_BACKEND", "x11") };
-        unsafe { std::env::set_var("GTK_THEME", "Adwaita-dark") };
-        unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
+    // Linux (GTK3 / WebKitGTK): prefer X11/XWayland for frameless drag/resize
+    // (fallback to Wayland), dark GTK theme, and disable DMABUF renderer
+    // (avoids blank WebKitGTK window on WSLg/NVIDIA/VMs) unless overridden by user.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("GDK_BACKEND").is_none() {
+            unsafe { std::env::set_var("GDK_BACKEND", "x11,wayland") };
+        }
+        if std::env::var_os("GTK_THEME").is_none() {
+            unsafe { std::env::set_var("GTK_THEME", "Adwaita:dark") };
+        }
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
+        }
     }
 
     paths::migrate_legacy_model();
@@ -165,9 +174,7 @@ fn main() {
                     #[cfg(windows)]
                     win::terminate_process(old_pid);
                     #[cfg(not(windows))]
-                    unsafe {
-                        libc_kill(old_pid as i32);
-                    }
+                    kill_previous_pid_unix(old_pid);
                     std::thread::sleep(std::time::Duration::from_millis(300));
                 }
         #[cfg(windows)]
@@ -199,22 +206,38 @@ fn main() {
 }
 
 #[cfg(not(windows))]
-unsafe fn libc_kill(pid: i32) {
+fn libc_kill(pid: i32) {
     let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
 }
 
 #[cfg(not(windows))]
+fn kill_previous_pid_unix(pid: u32) {
+    // Guard against PID reuse: only signal if the process command matches tokenatra.
+    if let Ok(out) = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+    {
+        let comm = String::from_utf8_lossy(&out.stdout).to_lowercase();
+        if comm.contains("tokenatra") {
+            libc_kill(pid as i32);
+        }
+    }
+}
+
+#[cfg(not(windows))]
 fn kill_process_on_port_unix(port: u16) {
+    let self_pid = std::process::id();
+    // Strictly filter to LISTEN sockets so client browsers connected to :7878 are never killed.
     let out = std::process::Command::new("lsof")
-        .args(["-t", "-i", &format!("tcp:{port}")])
+        .args(["-t", "-i", &format!("tcp:{port}"), "-sTCP:LISTEN"])
         .output();
     if let Ok(o) = out {
         let text = String::from_utf8_lossy(&o.stdout);
         for line in text.lines() {
-            if let Ok(pid) = line.trim().parse::<u32>() {
-                unsafe {
-                    libc_kill(pid as i32);
-                }
+            if let Ok(pid) = line.trim().parse::<u32>()
+                && pid != self_pid
+            {
+                libc_kill(pid as i32);
             }
         }
     }

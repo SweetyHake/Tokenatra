@@ -13,7 +13,17 @@ fn resource_dir_candidates() -> Vec<PathBuf> {
         }
     if let Ok(exe) = std::env::current_exe() {
         let exe_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        // macOS .app bundle: Tokenatra.app/Contents/MacOS/tokenatra -> Contents/Resources
+        if exe_dir.file_name().and_then(|n| n.to_str()) == Some("MacOS")
+            && let Some(contents) = exe_dir.parent()
+        {
+            out.push(contents.join("Resources"));
+        }
         out.push(exe_dir.clone());
+        // Linux FHS / AppImage: <prefix>/bin/tokenatra -> <prefix>/share/tokenatra
+        if let Some(prefix) = exe_dir.parent() {
+            out.push(prefix.join("share").join("tokenatra"));
+        }
         // cargo run: target/debug/tokenatra.exe -> three levels up to repo root
         for anc in exe_dir.ancestors().skip(1).take(4) {
             out.push(anc.to_path_buf());
@@ -227,7 +237,10 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
 
 #[cfg(not(windows))]
 pub fn same_path(a: &Path, b: &Path) -> bool {
-    std::fs::canonicalize(a).ok() == std::fs::canonicalize(b).ok()
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
+    }
 }
 
 /// moved to RING_DIR; BASE_DIR is read-only in installed builds.
@@ -270,7 +283,7 @@ pub fn migrate_legacy_rings() {
         if consts::builtin_ring_name(&format!("{}.{}", stem, ext)).is_some() {
             continue;
         }
-        let dest = rings.join(&f);
+        let dest = rings.join(f.file_name().unwrap_or_default());
         if dest.exists() {
             continue;
         }

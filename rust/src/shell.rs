@@ -45,6 +45,24 @@ pub enum UserEvent {
 
 static PROXY: OnceLock<Mutex<Option<tao::event_loop::EventLoopProxy<UserEvent>>>> = OnceLock::new();
 
+#[derive(Clone, Copy)]
+struct FramelessResizeState {
+    left: bool,
+    right: bool,
+    top: bool,
+    bottom: bool,
+    orig_x: f64,
+    orig_y: f64,
+    orig_w: f64,
+    orig_h: f64,
+}
+
+static RESIZE_STATE: OnceLock<Mutex<Option<FramelessResizeState>>> = OnceLock::new();
+
+fn resize_state() -> &'static Mutex<Option<FramelessResizeState>> {
+    RESIZE_STATE.get_or_init(|| Mutex::new(None))
+}
+
 pub fn wake() {
     if let Some(m) = PROXY.get()
         && let Ok(guard) = m.lock()
@@ -123,10 +141,30 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
 
     HAS_WINDOW.store(true, Ordering::SeqCst);
 
+    #[cfg(windows)]
     let webview = wry::WebViewBuilder::new()
         .with_url(&splash_url)
         .with_initialization_script(PYWEBVIEW_SHIM)
         .build_as_child(&window)
+        .expect("create webview");
+
+    #[cfg(target_os = "linux")]
+    let webview = {
+        use tao::platform::unix::WindowExtUnix as _;
+        use wry::WebViewBuilderExtUnix as _;
+        let vbox = window.default_vbox().expect("tao default_vbox");
+        wry::WebViewBuilder::new()
+            .with_url(&splash_url)
+            .with_initialization_script(PYWEBVIEW_SHIM)
+            .build_gtk(vbox)
+            .expect("create webview")
+    };
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let webview = wry::WebViewBuilder::new()
+        .with_url(&splash_url)
+        .with_initialization_script(PYWEBVIEW_SHIM)
+        .build(&window)
         .expect("create webview");
 
     // Windows: custom titlebar (dark frame, DWM NC off, WndProc hook)
@@ -294,6 +332,58 @@ fn handle_gui_command(
         }
         GuiCommand::DragResize(direction) => {
             let _ = window.drag_resize_window(direction);
+        }
+        GuiCommand::ResizeBegin {
+            left,
+            right,
+            top,
+            bottom,
+        } => {
+            let scale = window.scale_factor();
+            let pos = window
+                .outer_position()
+                .map(|p| p.to_logical::<f64>(scale))
+                .unwrap_or(tao::dpi::LogicalPosition::new(0.0, 0.0));
+            let size = window.inner_size().to_logical::<f64>(scale);
+            *resize_state().lock().unwrap() = Some(FramelessResizeState {
+                left,
+                right,
+                top,
+                bottom,
+                orig_x: pos.x,
+                orig_y: pos.y,
+                orig_w: size.width,
+                orig_h: size.height,
+            });
+        }
+        GuiCommand::ResizeMove { dx, dy } => {
+            if let Some(st) = *resize_state().lock().unwrap() {
+                let min_w = 800.0_f64;
+                let min_h = 600.0_f64;
+                let mut new_x = st.orig_x;
+                let mut new_y = st.orig_y;
+                let mut new_w = st.orig_w;
+                let mut new_h = st.orig_h;
+                if st.right {
+                    new_w = (st.orig_w + dx).max(min_w);
+                } else if st.left {
+                    new_w = (st.orig_w - dx).max(min_w);
+                    new_x = st.orig_x + (st.orig_w - new_w);
+                }
+                if st.bottom {
+                    new_h = (st.orig_h + dy).max(min_h);
+                } else if st.top {
+                    new_h = (st.orig_h - dy).max(min_h);
+                    new_y = st.orig_y + (st.orig_h - new_h);
+                }
+                window.set_inner_size(tao::dpi::LogicalSize::new(new_w, new_h));
+                if st.left || st.top {
+                    window.set_outer_position(tao::dpi::LogicalPosition::new(new_x, new_y));
+                }
+            }
+        }
+        GuiCommand::ResizeEnd => {
+            *resize_state().lock().unwrap() = None;
         }
         GuiCommand::HideToTray(tx) => {
             #[cfg(windows)]

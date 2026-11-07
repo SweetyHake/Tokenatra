@@ -77,16 +77,42 @@ fn window_move() -> Response {
     }
 }
 
-pub async fn resize_begin() -> Response {
-    // Linux frameless path unused (native decorations)
-    ok_json(json!({ "ok": false, "error": "native resize is unavailable on this platform" }))
+pub async fn resize_begin(body: axum::body::Bytes) -> Response {
+    let data: serde_json::Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let (mut left, mut right, mut top, mut bottom) = (
+        data.get("left").and_then(|v| v.as_bool()).unwrap_or(false),
+        data.get("right").and_then(|v| v.as_bool()).unwrap_or(false),
+        data.get("top").and_then(|v| v.as_bool()).unwrap_or(false),
+        data.get("bottom").and_then(|v| v.as_bool()).unwrap_or(false),
+    );
+    if let Some(edge) = data.get("edge").and_then(|v| v.as_str()) {
+        left |= edge.contains('w');
+        right |= edge.contains('e');
+        top |= edge.contains('n');
+        bottom |= edge.contains('s');
+    }
+    if !left && !right && !top && !bottom {
+        return ok_json(json!({ "ok": false, "error": "no edges" }));
+    }
+    crate::gui_control::send(GuiCommand::ResizeBegin {
+        left,
+        right,
+        top,
+        bottom,
+    });
+    ok_json(json!({ "ok": true }))
 }
 
-pub async fn resize_move() -> Response {
+pub async fn resize_move(body: axum::body::Bytes) -> Response {
+    let data: serde_json::Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let dx = data.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let dy = data.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    crate::gui_control::send(GuiCommand::ResizeMove { dx, dy });
     ok_json(json!({ "ok": true }))
 }
 
 pub async fn resize_end() -> Response {
+    crate::gui_control::send(GuiCommand::ResizeEnd);
     ok_json(json!({ "ok": true }))
 }
 

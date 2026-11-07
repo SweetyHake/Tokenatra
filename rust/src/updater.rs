@@ -137,7 +137,8 @@ fn find_exe_asset(assets: &[Value]) -> Option<String> {
 }
 
 fn find_unix_asset(assets: &[Value]) -> Option<String> {
-    let ext = if cfg!(target_os = "macos") { ".dmg" } else { ".appimage" };
+    let primary_ext = if cfg!(target_os = "macos") { ".dmg" } else { ".appimage" };
+    let os_tag = if cfg!(target_os = "macos") { "macos" } else { "linux" };
     let machine = std::env::consts::ARCH;
     let arches: &[&str] = if machine == "arm64" || machine == "aarch64" {
         &["arm64", "aarch64"]
@@ -146,24 +147,37 @@ fn find_unix_asset(assets: &[Value]) -> Option<String> {
     };
     let mut exact = None;
     let mut fallback = None;
+    let mut tar_exact = None;
+    let mut tar_fallback = None;
     for a in assets {
         let lower = a
             .get("name")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_lowercase();
-        if !lower.ends_with(ext) || !lower.contains(&APP_NAME.to_lowercase()) {
+        if !lower.contains(&APP_NAME.to_lowercase()) {
             continue;
         }
-        if arches.iter().any(|a| lower.contains(&format!("_{a}."))) {
-            exact = a.get("browser_download_url").and_then(|v| v.as_str()).map(String::from);
-            break;
-        }
-        if fallback.is_none() {
-            fallback = a.get("browser_download_url").and_then(|v| v.as_str()).map(String::from);
+        let url = a.get("browser_download_url").and_then(|v| v.as_str()).map(String::from);
+        if lower.ends_with(primary_ext) {
+            if arches.iter().any(|ar| lower.contains(&format!("_{ar}."))) {
+                exact = url;
+                break;
+            }
+            if fallback.is_none() {
+                fallback = url;
+            }
+        } else if lower.ends_with(".tar.gz") && lower.contains(os_tag) {
+            if arches.iter().any(|ar| lower.contains(&format!("_{ar}."))) {
+                if tar_exact.is_none() {
+                    tar_exact = url;
+                }
+            } else if tar_fallback.is_none() {
+                tar_fallback = url;
+            }
         }
     }
-    exact.or(fallback)
+    exact.or(fallback).or(tar_exact).or(tar_fallback)
 }
 
 fn expected_update_extension() -> Option<&'static str> {
@@ -280,11 +294,13 @@ pub fn download_update() {
         let clean = url.split('?').next().unwrap_or(&url).to_string();
         let lower = clean.to_lowercase();
         let expected = expected_update_extension();
-        let ok = match expected {
-            Some(".exe") => lower.ends_with(".exe"),
-            Some(e) => lower.ends_with(e),
-            None => false,
-        };
+        let is_tar_gz = cfg!(any(target_os = "macos", target_os = "linux")) && lower.ends_with(".tar.gz");
+        let ok = is_tar_gz
+            || match expected {
+                Some(".exe") => lower.ends_with(".exe"),
+                Some(e) => lower.ends_with(e),
+                None => false,
+            };
         if !ok {
             let mut s = state().lock().unwrap();
             s.download_active = false;
@@ -302,6 +318,8 @@ pub fn download_update() {
             } else {
                 "bare"
             }
+        } else if is_tar_gz {
+            "tar.gz"
         } else if cfg!(target_os = "macos") {
             "dmg"
         } else {
@@ -314,12 +332,17 @@ pub fn download_update() {
     }
 
     let result = (|| -> anyhow::Result<PathBuf> {
-        let url = state().lock().unwrap().url.clone().unwrap_or_default();
+        let (url, kind) = {
+            let g = state().lock().unwrap();
+            (g.url.clone().unwrap_or_default(), g.download_kind.clone().unwrap_or_default())
+        };
         let _clean = url.split('?').next().unwrap_or_default().to_string();
-        let dest = update_dir().join(format!(
-            "Tokenatra_update{}",
+        let ext = if kind == "tar.gz" {
+            ".tar.gz"
+        } else {
             expected_update_extension().unwrap_or("")
-        ));
+        };
+        let dest = update_dir().join(format!("Tokenatra_update{ext}"));
         // clean up old update files
         if let Ok(rd) = std::fs::read_dir(update_dir()) {
             for e in rd.filter_map(|e| e.ok()) {

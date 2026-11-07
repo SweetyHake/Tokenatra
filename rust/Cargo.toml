@@ -63,14 +63,12 @@ windows = { version = "0.62", features = [
 
 [features]
 # Optional GPU EPs where the target dep does not already include them.
-# coreml on macOS: the static ort build with coreml fails to link
-# (undefined symbols in model.mm.o) — enable at your own risk.
 cuda = ["ort/cuda"]
 rocm = ["ort/rocm"]
 coreml = ["ort/coreml"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
-ort = { version = "2.0.0-rc.15" }
+ort = { version = "2.0.0-rc.15", features = ["coreml"] }
 
 [build-dependencies]
 # Embeds icon.ico into the exe: Explorer, shortcuts (installer.iss points
