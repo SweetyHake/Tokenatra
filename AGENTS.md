@@ -41,16 +41,19 @@ JSON поверх HTTP, только localhost, заголовок `X-Tokenatra-
 
 ```
 GET  /agent/v1/manifest  /assets  /tools_schema
-POST /agent/v1/sessions                         {image: base64|data_url}
+POST /agent/v1/sessions                         {image_path | image: base64|data_url, ring}
 GET/DELETE /agent/v1/sessions/{id}
-POST /agent/v1/sessions/{id}/remove_bg          {edge_blur}
-POST /agent/v1/sessions/{id}/mask               {op, shapes|preset|px, protect}
-      op: erase|restore (shapes rect/circle/stroke), apply_preset, invert, feather, grow
-POST /agent/v1/sessions/{id}/transform          {scale, rotation, offset_x, offset_y}
+POST /agent/v1/sessions/{id}/remove_bg          {edge_blur, showing_original}
+POST /agent/v1/sessions/{id}/mask               {target: canvas|image|both, op, shapes|preset|px, protect}
+      op: erase|restore (shapes rect/circle/stroke), apply_preset, invert, feather, grow, reset
+POST /agent/v1/sessions/{id}/transform          {scale, rotation, offset_x, offset_y, fit_zone}
 POST /agent/v1/sessions/{id}/ring               {name|null}
 POST /agent/v1/sessions/{id}/effects            {shadow, color}
-GET  /agent/v1/sessions/{id}/preview?size=512
-GET  /agent/v1/sessions/{id}/inspect?include_image=1
+POST /agent/v1/sessions/{id}/history            {action: undo|redo}
+POST /agent/v1/sessions/{id}/portrait           {variant, scale, rotation, offset_x, offset_y, size, format, quality}
+POST /agent/v1/sessions/{id}/save_preset        {name}
+GET  /agent/v1/sessions/{id}/preview?size=512&scale_mode=1&guides=1
+GET  /agent/v1/sessions/{id}/inspect?include_image=1&guides=1
 POST /agent/v1/sessions/{id}/export             {format, quality, size, scale_mode, with_ring}
 ```
 
@@ -61,17 +64,26 @@ base dim ≤ 2048, экспорт 256–2048.
 (f — fit-координата источника). `scale_mode: "1"` — экспорт ровно область кольца 1×
 (для стиля «кольцо на весь канвас + голова над кольцом» — ВСЕГДА "1", не "auto").
 
-## Рецепты токенов и subject-файлов
+## Рецепты токенов и subject-файлов (по шаблону `example.png`)
 
-Полное руководство: `W:\Images\STokens\TOKEN_STYLE.md` — композиция «кольцо 1× +
-субъект», якоря (глаза 300–330, пояс 850–880), рецепты дуги, петля самопроверки,
-реверс-инжиниринг. Анализ пакета: `W:\Images\STokens\SUBJECT_ANALYSIS.md`.
+Полное руководство вшито в MCP (`tokenatra_recipe` и `<mcp_instructions>`).
 
-Кратко:
-- **token = кольцо (1×) + субъект поверх**; голова выступает над кольцом, пояс у
-  нижней кромки. Кольцо серии — `steel`. Никаких масок, если арт обрезан по пояс.
-- **subject = портрет** (remove_bg если фон непрозрачный) **вписанный в квадрат,
-  фигура ~52–60% высоты, дуга снизу** (circle ≈ 512, 350–460, r 260–370).
+В интерфейсе Tokenatra (и в MCP через `tokenatra_preview({ session_id, example: true })`)
+на рабочий холст `2x` (`2048×2048`) накладывается шаблон `example.png` с тремя
+пурпурными ориентирами (в логических координатах кольца `1x`, где `0..1024` —
+область кольца `1x`, а отрицательные `y` выходят за верхний край кольца в зону `2x`):
+- **Область головы (пурпурный овал `cx ≈ 524, cy ≈ 134, rx ≈ 362, ry ≈ 274`)**:
+  голова персонажа (без учёта шляпы / рогов) должна целиком помещаться в овал:
+  - **Макушка**: `y ≈ -130` (в `2x`-кадре `2048` это `y ≈ 436`) — верх головы/причёски выступает НАД кольцом.
+  - **Подбородок**: `y ≈ 410` (в `2x`-кадре `y ≈ 711`), глаза на `y ≈ 150–200`, лицо по центру `x ≈ 512`.
+- **Талия / Пояс (линия талии или ремня)**: `y ≈ 715` (в `2x`-кадре `y ≈ 1230`), а нижний срез торса/юбки доходит до нижней внутренней кромки кольца (`y ≈ 865`).
+- **Маска и детали поверх обода**:
+  - Розовая маска (`target: "canvas"`) покрывает весь холст `3x` (`-1024..2048`).
+  - Нажатие `preset1` (`tokenatra_apply_preset({ session_id, preset: "preset1" })`) оставляет всё внутри кольца и верхний поп-аут (голову/шляпу), срезая низ по внутренней кромке кольца.
+  - Кисти рук, эфесы оружия или щиты по бокам, которые должны лежать ПОВЕРХ обода кольца, восстанавливаются мягкой кистью (`op: "restore"` с `circle` и `feather: 8`) в области `y ≈ 550–700`.
+- **Экспорт**:
+  - `scale_mode: "auto"` (или `"2"`): так как макушка/шляпа выступает выше кольца (`y < 0`), авто-масштаб сохраняет кадр `2x` (`2048×2048` при `size: 1024`), чтобы голова и шляпа не обрезались краем файла.
+  - Для `subject.webp` (вырезка без кольца с тенью): включить тень (`angle: 135, distance: 7, blur: 3, opacity: 0.4`) и экспортировать с `with_ring: false, scale_mode: "auto"`.
 
 ## Модель (remove_bg)
 

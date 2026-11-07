@@ -46,11 +46,10 @@ pub fn file_response(bytes: Vec<u8>, mime: &str, cache: Option<&str>) -> Respons
         .header(header::CONTENT_TYPE, mime)
         .body(Body::from(bytes))
         .unwrap();
-    if let Some(c) = cache {
-        if let Ok(v) = HeaderValue::from_str(c) {
+    if let Some(c) = cache
+        && let Ok(v) = HeaderValue::from_str(c) {
             resp.headers_mut().insert(header::CACHE_CONTROL, v);
         }
-    }
     resp
 }
 
@@ -152,11 +151,10 @@ fn connector_origin(origin: &str) -> Option<String> {
     if origin.is_empty() {
         return None;
     }
-    if let Some(h) = origin_host(origin) {
-        if is_local_host_name(&h) {
+    if let Some(h) = origin_host(origin)
+        && is_local_host_name(&h) {
             return Some(origin.to_string());
         }
-    }
     let normalized = origin.trim().trim_end_matches('/').to_lowercase();
     if crate::config::allowed_origins().iter().any(|o| o == &normalized) {
         return Some(origin.to_string());
@@ -170,13 +168,12 @@ fn supplied_secret(req_headers: &axum::http::HeaderMap, uri: &Uri) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
         .to_string();
-    if key.is_empty() {
-        if let Some(k) = query_pairs(uri).get("key") {
+    if key.is_empty()
+        && let Some(k) = query_pairs(uri).get("key") {
             key = k.clone();
         }
-    }
-    if key.is_empty() {
-        if let Some(c) = req_headers
+    if key.is_empty()
+        && let Some(c) = req_headers
             .get(header::COOKIE)
             .and_then(|v| v.to_str().ok())
         {
@@ -188,7 +185,6 @@ fn supplied_secret(req_headers: &axum::http::HeaderMap, uri: &Uri) -> String {
                 }
             }
         }
-    }
     key.trim().to_string()
 }
 
@@ -415,14 +411,13 @@ pub async fn headers_mw(req: Request<Body>, next: Next) -> Response {
                 "https://[::1]:*".into(),
             ];
             ancestors.extend(allowed.iter().cloned());
-            if crate::config::network_mode() || key_valid {
-                if let Some(o) = query.get("origin") {
+            if (crate::config::network_mode() || key_valid)
+                && let Some(o) = query.get("origin") {
                     let o = o.trim().to_lowercase();
                     if o.starts_with("http://") || o.starts_with("https://") {
                         ancestors.push(o.trim_end_matches('/').to_string());
                     }
                 }
-            }
             format!("frame-ancestors {}", ancestors.join(" "))
         } else {
             "frame-ancestors 'none'".to_string()
@@ -452,6 +447,9 @@ pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
         .route("/sessions/{sid}/transform", post(agent::op_transform))
         .route("/sessions/{sid}/ring", post(agent::op_ring))
         .route("/sessions/{sid}/effects", post(agent::op_effects))
+        .route("/sessions/{sid}/history", post(agent::op_history))
+        .route("/sessions/{sid}/portrait", post(agent::op_portrait))
+        .route("/sessions/{sid}/save_preset", post(agent::op_save_preset))
         .route("/sessions/{sid}/preview", get(agent::op_preview))
         .route("/sessions/{sid}/inspect", get(agent::op_inspect))
         .route("/sessions/{sid}/export", post(agent::op_export))
