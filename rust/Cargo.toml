@@ -33,9 +33,10 @@ webp = "0.3"
 which = "8"
 wry = "0.57"
 
-# ONNX Runtime (pyke io). Execution providers per target (unified below):
-# Windows -> DirectML (AMD/Intel) + CUDA (NVIDIA); macOS -> CoreML;
-# Linux -> ROCm (AMD) + CUDA (NVIDIA). Intel on Linux runs on CPU.
+# ONNX Runtime (pyke io). Static prebuilt binaries exist per EP set, and
+# pyke ships no binary with several GPU EPs combined, so targets differ:
+# Windows -> DirectML (AMD/Intel) + CUDA (NVIDIA); macOS/Linux -> CPU only.
+# Optional GPU EPs on other targets: --features cuda | rocm | coreml.
 ort = { version = "2.0.0-rc.15", features = ["half"] }
 crossbeam-channel = "0.5.17"
 half = "2.7.1"
@@ -61,16 +62,15 @@ windows = { version = "0.62", features = [
 ] }
 
 [features]
-# CoreML EP on macOS: disabled by default, the static ort build with coreml
-# fails to link (undefined symbols in model.mm.o). Enable with --features coreml.
+# Optional GPU EPs where the target dep does not already include them.
+# coreml on macOS: the static ort build with coreml fails to link
+# (undefined symbols in model.mm.o) — enable at your own risk.
+cuda = ["ort/cuda"]
+rocm = ["ort/rocm"]
 coreml = ["ort/coreml"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ort = { version = "2.0.0-rc.15" }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# ROCm for AMD, CUDA for NVIDIA
-ort = { version = "2.0.0-rc.15", features = ["rocm", "cuda"] }
 
 [build-dependencies]
 # Embeds icon.ico into the exe: Explorer, shortcuts (installer.iss points

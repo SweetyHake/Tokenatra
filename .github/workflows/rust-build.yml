@@ -19,9 +19,6 @@ jobs:
   build:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    # rust-lld (default since 1.90) fails to resolve the static ort archive
-    env:
-      RUSTFLAGS: -C linker-features=-lld
     defaults:
       run:
         working-directory: rust

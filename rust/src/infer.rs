@@ -82,8 +82,8 @@ fn build_session(
                 }
                 dispatch.push(dml.into());
             }
-            // ort ships the CUDA EP on Windows and Linux (target deps in Cargo.toml)
-            #[cfg(any(windows, target_os = "linux"))]
+            // Windows dep ships CUDA; elsewhere behind --features cuda
+            #[cfg(any(windows, feature = "cuda"))]
             "CUDAExecutionProvider" => {
                 let mut cuda = ort::ep::CUDA::default();
                 if let Some(id) = dml_device_id {
@@ -91,7 +91,7 @@ fn build_session(
                 }
                 dispatch.push(cuda.into());
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "rocm")]
             "ROCMExecutionProvider" => {
                 let mut rocm = ort::ep::ROCm::default();
                 if let Some(id) = dml_device_id {
