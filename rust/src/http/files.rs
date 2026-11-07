@@ -11,6 +11,13 @@ use crate::state::AppState;
 /// str(Path) without the canonicalize verbatim prefix.
 pub fn clean_path(p: &Path) -> String {
     let s = p.to_string_lossy().to_string();
+    // Network files canonicalize to the verbatim UNC form
+    // \\?\UNC\server\share\...; strip it back to \\server\share\... (the
+    // leftover "UNC\..." form is not a valid path and 404s on re-fetch).
+    const VERBATIM_UNC: &str = "\\\\?\\UNC\\";
+    if let Some(rest) = s.strip_prefix(VERBATIM_UNC) {
+        return format!("\\\\{rest}");
+    }
     const VERBATIM: &str = "\\\\?\\";
     s.strip_prefix(VERBATIM).unwrap_or(&s).to_string()
 }
@@ -69,7 +76,7 @@ pub async fn save_file(mut mp: Multipart) -> Response {
             ("AVIF Image", vec!["avif"]),
         ];
         types.sort_by_key(|(_, exts)| {
-            if exts.iter().any(|e| *e == ext.as_str()) { 0 } else { 1 }
+            if exts.contains(&ext.as_str()) { 0 } else { 1 }
         });
         let mut dlg = rfd::FileDialog::new().set_file_name(&suggested);
         for (name, exts) in &types {
@@ -146,17 +153,15 @@ pub async fn save_to_folder(
         .iter()
         .map(|p| norm_folder(p))
         .collect();
-    if let Ok(cfg) = crate::config::load() {
-        if let Some(folders) = cfg.get("lastFolders").and_then(|v| v.as_object()) {
+    if let Ok(cfg) = crate::config::load()
+        && let Some(folders) = cfg.get("lastFolders").and_then(|v| v.as_object()) {
             for (_, v) in folders {
-                if let Some(s) = v.as_str() {
-                    if !s.is_empty() {
+                if let Some(s) = v.as_str()
+                    && !s.is_empty() {
                         allowed.push(norm_folder(Path::new(s)));
                     }
-                }
             }
         }
-    }
     if !allowed.contains(&norm_folder(&folder_path)) {
         return err_status(StatusCode::FORBIDDEN, "Folder was not picked via dialog");
     }
