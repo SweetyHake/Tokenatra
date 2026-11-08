@@ -249,24 +249,38 @@ pub fn prepare_model_input(rgb: &image::RgbImage, imagenet_norm: bool) -> Vec<f3
 /// Raw mask postprocessing: sigmoid or clip, stretched to 0-255.
 /// None => no object found (near-uniform mask), empty mask.
 pub fn mask_from_output(raw: &[f32]) -> Option<image::GrayImage> {
-    let mn = raw.iter().cloned().fold(f32::INFINITY, f32::min);
-    let mx = raw.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    if (mx - mn) < 1e-4 {
-        return Some(image::GrayImage::new(1024, 1024));
+    if raw.len() < 1024 * 1024 {
+        return None;
     }
-    let (min_in_01, max_in_01) = if mn >= 0.0 && mx <= 1.0 {
-        (true, true)
-    } else {
-        (false, false)
-    };
-    let mut img = image::GrayImage::new(1024, 1024);
-    for (i, v) in raw.iter().enumerate() {
-        let v = if min_in_01 && max_in_01 {
+    let plane = &raw[..1024 * 1024];
+    let raw_min = plane.iter().copied().fold(f32::INFINITY, f32::min);
+    let raw_max = plane.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let in_01 = raw_min >= 0.0 && raw_max <= 1.0;
+
+    let mut mapped = vec![0.0f32; 1024 * 1024];
+    let mut mn = f32::INFINITY;
+    let mut mx = f32::NEG_INFINITY;
+    for (dst, &v) in mapped.iter_mut().zip(plane.iter()) {
+        let m = if in_01 {
             v.clamp(0.0, 1.0)
         } else {
             1.0 / (1.0 + (-v).exp())
         };
-        let stretched = ((v - mn) / (mx - mn + 1e-8) * 255.0) as u8;
+        *dst = m;
+        if m < mn {
+            mn = m;
+        }
+        if m > mx {
+            mx = m;
+        }
+    }
+    if (mx - mn) < 1e-4 {
+        return Some(image::GrayImage::new(1024, 1024));
+    }
+    let mut img = image::GrayImage::new(1024, 1024);
+    let span = mx - mn + 1e-8;
+    for (i, &v) in mapped.iter().enumerate() {
+        let stretched = ((v - mn) / span * 255.0).round().clamp(0.0, 255.0) as u8;
         img.get_pixel_mut((i % 1024) as u32, (i / 1024) as u32)[0] = stretched;
     }
     Some(img)

@@ -2,7 +2,7 @@ use axum::extract::{Multipart, State};
 use axum::response::Response;
 
 use axum::http::StatusCode;
-use super::{err_status, file_response, ok_json};
+use super::{err_status, file_response};
 use crate::state::AppState;
 
 /// POST /process: background removal.
@@ -170,8 +170,4 @@ pub async fn convert_file(mut mp: Multipart) -> Response {
             err_status(StatusCode::INTERNAL_SERVER_ERROR, "Ошибка конвертации файла")
         }
     }
-}
-
-pub async fn _unused(_s: State<std::sync::Arc<AppState>>) -> Response {
-    ok_json(serde_json::json!({}))
 }

@@ -521,7 +521,7 @@ function initEdgeResize() {
         return 'ns-resize';
     };
 
-    document.addEventListener('mousemove', event => {
+    window.addEventListener('mousemove', event => {
         const edges = getEdges(event.clientX, event.clientY);
         if (macResizing) { const now = performance.now(); if (now - lastSent >= 16) { lastSent = now; fetch('/api/window/resize_move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dx: event.screenX - startScreenX, dy: event.screenY - startScreenY }) }).catch(() => {}); } return; }
         if (document.documentElement.classList.contains('is-maximized')) { bodyStyle.cursor = ''; return; }
@@ -531,7 +531,6 @@ function initEdgeResize() {
     document.addEventListener('mousedown', event => {
         if (event.button !== 0) return;
         const edges = getEdges(event.clientX, event.clientY);
-        if (macResizing) { const now = performance.now(); if (now - lastSent >= 16) { lastSent = now; fetch('/api/window/resize_move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dx: event.screenX - startScreenX, dy: event.screenY - startScreenY }) }).catch(() => {}); } return; }
         if (document.documentElement.classList.contains('is-maximized')) { bodyStyle.cursor = ''; return; }
         if (!hasEdge(edges)) return;
         event.preventDefault();
@@ -1037,11 +1036,10 @@ async function initNetworkSettings() {
     };
 }
 
-// Настройки трея (только Windows): серверные ключи close_to_tray /
-// tray_idle_unload_min. НЕ в AppConfig._defaults — embed-снапшоты не должны
-// их затирать (сервер дополнительно защищает их при /config POST).
+// Настройки трея и памяти (Windows / Linux / macOS): серверные ключи
+// close_to_tray / tray_idle_unload_min. НЕ в AppConfig._defaults —
+// embed-снапшоты не должны их затирать (сервер дополнительно защищает их при /config POST).
 async function initTraySettings() {
-    if (!IS_WINDOWS) return;
     if (state.embed) return; // настройки трея управляют окном приложения, не embed-инстансом
     if (!($('traySettingsCard') && $('closeToTrayCheck') && $('trayIdleSelect'))) return;
     let cfg = {};

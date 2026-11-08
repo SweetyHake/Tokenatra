@@ -74,6 +74,7 @@ pub fn activate_model(path: &Path, state: &AppState) {
     let _ = crate::config::set_key("selected_model", json!(name));
     let mut guard = state.session_lock.lock().unwrap();
     *guard = None;
+    state.set_model_loaded(false);
 }
 
 pub async fn select_model(
@@ -112,7 +113,8 @@ pub async fn select_model(
             return err_status(StatusCode::NOT_FOUND, "Модель не найдена");
         }
     }
-    activate_model(&p, &state);
+    let p_clone = p.clone();
+    let _ = tokio::task::spawn_blocking(move || activate_model(&p_clone, &state)).await;
     ok_json(json!({
         "ok": true,
         "name": p.file_name().and_then(|n| n.to_str()).unwrap_or_default(),
@@ -176,8 +178,7 @@ fn download_model_sync(url: &str, state: &AppState) -> Result<PathBuf, String> {
             "Модель «{filename}» уже загружена — повторная загрузка не требуется"
         ));
     }
-    let uniq = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
-    let temp_path = models.join(format!("{filename}.{}.{}.download", std::process::id(), uniq));
+    let temp_path = models.join(format!("{filename}.{}.download", paths::unique_tmp_tag()));
 
     let result = (|| -> Result<(), String> {
         let client = reqwest::blocking::Client::builder()
@@ -207,6 +208,7 @@ fn download_model_sync(url: &str, state: &AppState) -> Result<PathBuf, String> {
         {
             let mut guard = state.session_lock.lock().unwrap();
             *guard = None;
+            state.set_model_loaded(false);
         }
         std::fs::rename(&temp_path, &target).map_err(|e| e.to_string())?;
         Ok(())
@@ -273,32 +275,47 @@ pub async fn load_model_from_disk(
         return err_status(StatusCode::BAD_REQUEST, "Можно выбрать только файл .onnx");
     }
 
-    let models = paths::models_dir();
-    let _ = std::fs::create_dir_all(&models);
-    let target = models.join(source.file_name().unwrap_or_default());
-    let temp_path = models.join(format!(
-        "{}.download",
-        source.file_name().and_then(|n| n.to_str()).unwrap_or_default()
-    ));
-    let res = (|| -> Result<(), String> {
-        if !paths::same_path(&source, &target) {
-            std::fs::copy(&source, &temp_path).map_err(|e| e.to_string())?;
-            {
-                let mut guard = state.session_lock.lock().unwrap();
-                *guard = None;
+    let st = state.clone();
+    let res = tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
+        let models = paths::models_dir();
+        let _ = std::fs::create_dir_all(&models);
+        let target = models.join(source.file_name().unwrap_or_default());
+        let temp_path = models.join(format!(
+            "{}.{}.download",
+            source.file_name().and_then(|n| n.to_str()).unwrap_or_default(),
+            paths::unique_tmp_tag()
+        ));
+        let copy_res = (|| -> Result<(), String> {
+            if !paths::same_path(&source, &target) {
+                std::fs::copy(&source, &temp_path).map_err(|e| e.to_string())?;
+                {
+                    let mut guard = st.session_lock.lock().unwrap();
+                    *guard = None;
+                    st.set_model_loaded(false);
+                }
+                std::fs::rename(&temp_path, &target).map_err(|e| e.to_string())?;
             }
-            std::fs::rename(&temp_path, &target).map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+        if let Err(e) = copy_res {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(e);
         }
-        Ok(())
-    })();
-    if let Err(e) = res {
-        let _ = std::fs::remove_file(&temp_path);
-        return err_status(StatusCode::INTERNAL_SERVER_ERROR, &format!("Не удалось загрузить модель: {e}"));
+        activate_model(&target, &st);
+        Ok(target)
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()));
+
+    match res {
+        Ok(target) => ok_json(json!({
+            "ok": true,
+            "name": target.file_name().and_then(|n| n.to_str()).unwrap_or_default(),
+            "size": target.metadata().map(|m| m.len()).unwrap_or(0),
+        })),
+        Err(e) => err_status(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("Не удалось загрузить модель: {e}"),
+        ),
     }
-    activate_model(&target, &state);
-    ok_json(json!({
-        "ok": true,
-        "name": target.file_name().and_then(|n| n.to_str()).unwrap_or_default(),
-        "size": target.metadata().map(|m| m.len()).unwrap_or(0),
-    }))
 }

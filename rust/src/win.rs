@@ -732,10 +732,11 @@ pub fn unregister_context_menu() {
     }
 }
 
-/// Frees the port from a foreign process (netstat + taskkill).
+/// Frees the port from a previous Tokenatra instance (netstat + terminate_process).
 pub fn kill_process_on_port(port: u16) {
     use std::process::{Command, Stdio};
-    let target = format!("127.0.0.1:{port}");
+    let target_loopback = format!("127.0.0.1:{port}");
+    let target_any = format!("0.0.0.0:{port}");
     let out = (|| -> Option<String> {
         let mut c = Command::new("netstat");
         c.args(["-ano"]).stdout(Stdio::piped()).stderr(Stdio::null());
@@ -743,27 +744,42 @@ pub fn kill_process_on_port(port: u16) {
         Some(String::from_utf8_lossy(&c.output().ok()?.stdout).to_string())
     })()
     .unwrap_or_default();
-    let my_pid = std::process::id().to_string();
+    let my_pid = std::process::id();
     for line in out.lines() {
-        if line.contains("LISTENING") && line.contains(&target)
-            && let Some(pid) = line.split_whitespace().last()
-                && !pid.is_empty() && pid != "0" && *pid != my_pid {
-                    let mut c = Command::new("taskkill");
-                    c.args(["/F", "/PID", pid])
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null());
-                    c.creation_flags(0x0800_0000);
-                    let _ = c.output();
-                }
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        // Proto Local_Address Foreign_Address State PID
+        if cols.len() >= 5
+            && cols[3] == "LISTENING"
+            && (cols[1] == target_loopback || cols[1] == target_any)
+            && let Ok(pid) = cols[4].parse::<u32>()
+            && pid != 0
+            && pid != my_pid
+        {
+            terminate_process(pid);
+        }
     }
 }
 
-/// Kills a process by PID (previous instance app.pid).
+/// Kills a Tokenatra process by PID (verifies image name via tasklist first).
 pub fn terminate_process(pid: u32) -> bool {
     if pid == 0 || pid == std::process::id() {
         return false;
     }
     use std::process::{Command, Stdio};
+    let is_tokenatra = (|| -> bool {
+        let mut chk = Command::new("tasklist");
+        chk.args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        chk.creation_flags(0x0800_0000);
+        let Ok(out) = chk.output() else { return false };
+        String::from_utf8_lossy(&out.stdout)
+            .to_lowercase()
+            .contains("tokenatra")
+    })();
+    if !is_tokenatra {
+        return false;
+    }
     let mut c = Command::new("taskkill");
     c.args(["/F", "/PID", &pid.to_string()])
         .stdout(Stdio::null())

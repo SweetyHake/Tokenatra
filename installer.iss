@@ -5,7 +5,7 @@
 #define MyAppName "Tokenatra"
 #ifndef MyAppVersion
 ; Fallback: CI передаёт версию через /DMyAppVersion (from rust/src/consts.rs VERSION)
-#define MyAppVersion "26.5.0"
+#define MyAppVersion "26.5.1"
 #endif
 #define MyAppPublisher "SweetyHake"
 #define MyAppURL "https://github.com/SweetyHake/Tokenatra"
@@ -35,10 +35,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
+Name: "registermcp"; Description: "Register MCP server for AI agents (Claude, Cursor, Antigravity, OpenCode)"; GroupDescription: "AI integration:"
 
 [Files]
-; Один нативный бинарник + ресурсы. Никакого Python-окружения.
+; Один нативный бинарник + MCP-прокси + ресурсы. Никакого Python-окружения.
 Source: "rust\target\release\tokenatra.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: "rust\target\release\TokenatraMCP.exe"; DestDir: "{app}"; DestName: "TokenatraMCP.exe"; Flags: ignoreversion
 Source: "static\*"; DestDir: "{app}\static"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "templates\*"; DestDir: "{app}\templates"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "token_rings\*"; DestDir: "{app}\token_rings"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -116,4 +118,5 @@ begin
 end;
 
 [Run]
+Filename: "{app}\TokenatraMCP.exe"; Parameters: "--install-mcp"; Tasks: registermcp; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

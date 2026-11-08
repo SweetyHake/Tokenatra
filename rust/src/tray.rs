@@ -1,11 +1,9 @@
-#![cfg(windows)]
-//! System tray (Windows, tray-icon + muda).
+//! System tray (Windows, Linux, macOS: tray-icon + muda).
 //! The icon lives for the whole app lifetime; hide means real exit.
 //! muda objects are not Sync: the Tray lives on the main event loop
-//! thread only; other threads talk through channels.
+//! thread only; other threads talk through GuiCommand.
 
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use crate::state::AppState;
 
@@ -14,22 +12,15 @@ pub struct Tray {
     pub model_item: muda::MenuItem,
 }
 
-/// Channel for model menu label updates (to the main thread).
-struct ModelLabelChannel {
-    tx: Sender<bool>,
-    rx: Mutex<Option<std::sync::mpsc::Receiver<bool>>>,
-}
-
-static MODEL_LABEL: OnceLock<ModelLabelChannel> = OnceLock::new();
-
-fn model_label() -> &'static ModelLabelChannel {
-    MODEL_LABEL.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel();
-        ModelLabelChannel {
-            tx,
-            rx: Mutex::new(Some(rx)),
-        }
-    })
+impl Tray {
+    pub fn set_model_loaded(&self, loaded: bool) {
+        let label = if loaded {
+            "Выгрузить модель"
+        } else {
+            "Загрузить модель"
+        };
+        self.model_item.set_text(label);
+    }
 }
 
 fn load_tray_icon() -> Option<tray_icon::Icon> {
@@ -42,13 +33,15 @@ fn load_tray_icon() -> Option<tray_icon::Icon> {
 
 /// Builds the tray. Must run on the main event loop thread.
 pub fn create(state: &Arc<AppState>) -> Option<Tray> {
-    let Some(icon) = load_tray_icon() else {
-        crate::tray_control::set_created(false);
-        return None;
-    };
+    let icon = load_tray_icon()?;
 
+    let initial_model_label = if state.is_model_loaded() {
+        "Выгрузить модель"
+    } else {
+        "Загрузить модель"
+    };
     let open_item = muda::MenuItem::with_id("open", "Открыть Tokenatra", true, None);
-    let model_item = muda::MenuItem::with_id("model", "Загрузить модель", true, None);
+    let model_item = muda::MenuItem::with_id("model", initial_model_label, true, None);
     let quit_item = muda::MenuItem::with_id("quit", "Закрыть", true, None);
 
     let menu = muda::Menu::new();
@@ -56,7 +49,6 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         .append_items(&[&open_item, &model_item, &quit_item])
         .is_err()
     {
-        crate::tray_control::set_created(false);
         return None;
     }
 
@@ -68,15 +60,6 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         .with_menu_on_left_click(false)
         .build()
         .ok()?;
-
-    // menu label updates from any thread go through the channel
-    {
-        let ch = model_label();
-        crate::tray_control::set_model_state_handler(Box::new(move |loaded| {
-            let _ = ch.tx.send(loaded);
-            crate::shell::wake();
-        }));
-    }
 
     // thread handling menu/icon clicks (clicks are cheap, model in background)
     let st = state.clone();
@@ -90,8 +73,7 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
                     if !MODEL_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
                         let st2 = st.clone();
                         std::thread::spawn(move || {
-                            let loaded = crate::infer::model_loaded(&st2);
-                            if loaded {
+                            if crate::infer::model_loaded(&st2) {
                                 crate::infer::unload_model(&st2);
                             } else {
                                 let _ = crate::infer::load_session(&st2);
@@ -126,23 +108,59 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         }
     });
 
-    crate::tray_control::set_created(true);
     Some(Tray { icon, model_item })
 }
 
 static MODEL_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Applies pending model label changes (call on the event loop).
-pub fn drain_model_labels(tray: &Tray) {
-    let guard = model_label().rx.lock().unwrap();
-    if let Some(rx) = guard.as_ref() {
-        while let Ok(loaded) = rx.try_recv() {
-            let label = if loaded { "Выгрузить модель" } else { "Загрузить модель" };
-            tray.model_item.set_text(label);
-        }
-    }
-}
-
 pub fn hide(tray: &Tray) {
     let _ = tray.icon.set_visible(false);
+}
+
+/// Initializes the standard macOS application menu bar (App, Edit, Window)
+/// so that WKWebView receives standard keyboard shortcuts (Cmd+C/V/X/A/Z/Q).
+#[cfg(target_os = "macos")]
+pub fn init_macos_app_menu() -> Option<muda::Menu> {
+    use muda::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+    let menu = Menu::new();
+    let app_menu = Submenu::new(crate::consts::APP_NAME, true);
+    let _ = app_menu.append_items(&[
+        &PredefinedMenuItem::about(
+            None,
+            Some(AboutMetadata {
+                name: Some(crate::consts::APP_NAME.into()),
+                version: Some(crate::consts::VERSION.into()),
+                ..Default::default()
+            }),
+        ),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::services(None),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::hide(None),
+        &PredefinedMenuItem::hide_others(None),
+        &PredefinedMenuItem::show_all(None),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::quit(None),
+    ]);
+    let edit_menu = Submenu::new("Edit", true);
+    let _ = edit_menu.append_items(&[
+        &PredefinedMenuItem::undo(None),
+        &PredefinedMenuItem::redo(None),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::cut(None),
+        &PredefinedMenuItem::copy(None),
+        &PredefinedMenuItem::paste(None),
+        &PredefinedMenuItem::select_all(None),
+    ]);
+    let window_menu = Submenu::new("Window", true);
+    let _ = window_menu.append_items(&[
+        &PredefinedMenuItem::minimize(None),
+        &PredefinedMenuItem::maximize(None),
+        &PredefinedMenuItem::close_window(None),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::fullscreen(None),
+    ]);
+    let _ = menu.append_items(&[&app_menu, &edit_menu, &window_menu]);
+    menu.init_for_nsapp();
+    Some(menu)
 }

@@ -6,37 +6,8 @@ use serde_json::json;
 
 use axum::http::StatusCode;
 use super::{err_status, ok_json};
+use crate::paths::{clean_path, norm_folder};
 use crate::state::AppState;
-
-/// str(Path) without the canonicalize verbatim prefix.
-pub fn clean_path(p: &Path) -> String {
-    let s = p.to_string_lossy().to_string();
-    // Network files canonicalize to the verbatim UNC form
-    // \\?\UNC\server\share\...; strip it back to \\server\share\... (the
-    // leftover "UNC\..." form is not a valid path and 404s on re-fetch).
-    const VERBATIM_UNC: &str = "\\\\?\\UNC\\";
-    if let Some(rest) = s.strip_prefix(VERBATIM_UNC) {
-        return format!("\\\\{rest}");
-    }
-    const VERBATIM: &str = "\\\\?\\";
-    s.strip_prefix(VERBATIM).unwrap_or(&s).to_string()
-}
-
-#[cfg(windows)]
-pub fn norm_folder(p: &Path) -> PathBuf {
-    let s = clean_path(p).to_lowercase().replace('/', "\\");
-    let s = s.trim_end_matches('\\').to_string();
-    PathBuf::from(s)
-}
-
-#[cfg(not(windows))]
-pub fn norm_folder(p: &Path) -> PathBuf {
-    let mut s = p.to_string_lossy().to_string();
-    if let Ok(c) = std::fs::canonicalize(p) {
-        s = c.to_string_lossy().to_string();
-    }
-    PathBuf::from(s)
-}
 
 pub async fn save_file(mut mp: Multipart) -> Response {
     let mut filename = "file.webp".to_string();

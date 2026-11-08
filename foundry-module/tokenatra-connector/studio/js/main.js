@@ -64,7 +64,7 @@ function updateDeviceIndicator(device, modelExists) {
     // '—' — офлайн-маркер из hosted-транспорта: приложение не отвечает
     const offline = device === '—';
     const deviceName = offline ? I18n.t('Tokenatra не запущена') : (device || 'CPU');
-    const isGPU = !offline && (deviceName.includes('GPU') || deviceName.includes('DirectML') || deviceName.includes('CUDA') || deviceName.includes('ROCm'));
+    const isGPU = !offline && (deviceName.includes('GPU') || deviceName.includes('DirectML') || deviceName.includes('CUDA') || deviceName.includes('ROCm') || deviceName.includes('CoreML'));
     // Офлайн — красная точка (отдельный класс), не жёлтая «CPU»
     const statusClass = !modelExists ? 'model-missing' : (offline ? 'offline' : (isGPU ? 'gpu' : 'cpu'));
     const tooltip = !modelExists
@@ -505,6 +505,8 @@ function initEdgeResize() {
     if (state.embed) return;
     const band = 6;
     const bodyStyle = document.body.style;
+    const isMac = /Mac/.test(navigator.platform || '');
+    let macResizing = false, startScreenX = 0, startScreenY = 0, lastSent = 0;
     const getEdges = (x, y) => ({
         left: x < band,
         right: x >= window.innerWidth - band,
@@ -519,18 +521,22 @@ function initEdgeResize() {
         return 'ns-resize';
     };
 
-    document.addEventListener('mousemove', event => {
+    window.addEventListener('mousemove', event => {
         const edges = getEdges(event.clientX, event.clientY);
+        if (macResizing) { const now = performance.now(); if (now - lastSent >= 16) { lastSent = now; fetch('/api/window/resize_move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dx: event.screenX - startScreenX, dy: event.screenY - startScreenY }) }).catch(() => {}); } return; }
+        if (document.documentElement.classList.contains('is-maximized')) { bodyStyle.cursor = ''; return; }
         bodyStyle.cursor = hasEdge(edges) ? getCursor(edges) : '';
     }, { passive: true });
 
     document.addEventListener('mousedown', event => {
         if (event.button !== 0) return;
         const edges = getEdges(event.clientX, event.clientY);
+        if (document.documentElement.classList.contains('is-maximized')) { bodyStyle.cursor = ''; return; }
         if (!hasEdge(edges)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         bodyStyle.cursor = getCursor(edges);
+        if (isMac) { macResizing = true; startScreenX = event.screenX; startScreenY = event.screenY; lastSent = 0; fetch('/api/window/resize_begin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(edges) }).catch(() => {}); return; }
         fetch('/api/window/resize_start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -538,7 +544,9 @@ function initEdgeResize() {
         }).catch(() => {});
     }, true);
 
-    window.addEventListener('mouseup', () => { bodyStyle.cursor = ''; });
+    const endEdgeResize = () => { if (macResizing) { macResizing = false; fetch('/api/window/resize_end', { method: 'POST' }).catch(() => {}); } bodyStyle.cursor = ''; };
+    window.addEventListener('mouseup', endEdgeResize);
+    window.addEventListener('blur', endEdgeResize);
 }
 
 function initModelSelector() {
@@ -1028,11 +1036,10 @@ async function initNetworkSettings() {
     };
 }
 
-// Настройки трея (только Windows): серверные ключи close_to_tray /
-// tray_idle_unload_min. НЕ в AppConfig._defaults — embed-снапшоты не должны
-// их затирать (сервер дополнительно защищает их при /config POST).
+// Настройки трея и памяти (Windows / Linux / macOS): серверные ключи
+// close_to_tray / tray_idle_unload_min. НЕ в AppConfig._defaults —
+// embed-снапшоты не должны их затирать (сервер дополнительно защищает их при /config POST).
 async function initTraySettings() {
-    if (!IS_WINDOWS) return;
     if (state.embed) return; // настройки трея управляют окном приложения, не embed-инстансом
     if (!($('traySettingsCard') && $('closeToTrayCheck') && $('trayIdleSelect'))) return;
     let cfg = {};

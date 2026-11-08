@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -140,11 +141,12 @@ fn find_unix_asset(assets: &[Value]) -> Option<String> {
     let primary_ext = if cfg!(target_os = "macos") { ".dmg" } else { ".appimage" };
     let os_tag = if cfg!(target_os = "macos") { "macos" } else { "linux" };
     let machine = std::env::consts::ARCH;
-    let arches: &[&str] = if machine == "arm64" || machine == "aarch64" {
-        &["arm64", "aarch64"]
-    } else {
-        &["x86_64"]
-    };
+    let (arches, incompatible_arches): (&[&str], &[&str]) =
+        if machine == "arm64" || machine == "aarch64" {
+            (&["arm64", "aarch64"], &["x86_64", "amd64"])
+        } else {
+            (&["x86_64", "amd64"], &["arm64", "aarch64"])
+        };
     let mut exact = None;
     let mut fallback = None;
     let mut tar_exact = None;
@@ -158,13 +160,16 @@ fn find_unix_asset(assets: &[Value]) -> Option<String> {
         if !lower.contains(&APP_NAME.to_lowercase()) {
             continue;
         }
+        let is_incompatible = incompatible_arches
+            .iter()
+            .any(|ar| lower.contains(&format!("_{ar}.")));
         let url = a.get("browser_download_url").and_then(|v| v.as_str()).map(String::from);
         if lower.ends_with(primary_ext) {
             if arches.iter().any(|ar| lower.contains(&format!("_{ar}."))) {
                 exact = url;
                 break;
             }
-            if fallback.is_none() {
+            if !is_incompatible && fallback.is_none() {
                 fallback = url;
             }
         } else if lower.ends_with(".tar.gz") && lower.contains(os_tag) {
@@ -172,7 +177,7 @@ fn find_unix_asset(assets: &[Value]) -> Option<String> {
                 if tar_exact.is_none() {
                     tar_exact = url;
                 }
-            } else if tar_fallback.is_none() {
+            } else if !is_incompatible && tar_fallback.is_none() {
                 tar_fallback = url;
             }
         }
@@ -409,16 +414,4 @@ pub fn start_background_tasks(force: bool, delay_secs: u64) {
         }
         check_for_updates(force);
     });
-}
-
-// reqwest::blocking::Response read
-trait ReadExt {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
-}
-
-impl ReadExt for reqwest::blocking::Response {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        
-        std::io::Read::read(self, buf)
-    }
 }

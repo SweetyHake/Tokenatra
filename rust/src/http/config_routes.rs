@@ -13,7 +13,7 @@ pub async fn get_config(headers: HeaderMap) -> Response {
     ok_json(cfg)
 }
 
-/// Browser read from an unknown Origin, no network secret.
+/// Browser read from an unknown Origin: strip network secret and local folder paths.
 fn strip_secret_for_origin(mut cfg: serde_json::Value, headers: &HeaderMap) -> serde_json::Value {
     let origin = headers
         .get(axum::http::header::ORIGIN)
@@ -25,17 +25,27 @@ fn strip_secret_for_origin(mut cfg: serde_json::Value, headers: &HeaderMap) -> s
     if !origin.is_empty()
         && !crate::config::allowed_origins().contains(&origin)
         && !crate::http::guard_connector_origin(&origin)
-        && let Some(obj) = cfg.as_object_mut() {
-            obj.remove("shared_secret");
-        }
+        && let Some(obj) = cfg.as_object_mut()
+    {
+        obj.remove("shared_secret");
+        obj.remove("lastFolders");
+    }
     cfg
 }
 
 pub async fn save_config(
-    State(_state): State<std::sync::Arc<AppState>>,
+    State(state): State<std::sync::Arc<AppState>>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
+    let ct = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_lowercase();
+    if !ct.starts_with("application/json") {
+        return err_status(StatusCode::UNSUPPORTED_MEDIA_TYPE, "JSON Content-Type required");
+    }
     let data: Option<serde_json::Map<String, serde_json::Value>> =
         serde_json::from_slice(&body).ok();
     let Some(data) = data else {
@@ -52,7 +62,8 @@ pub async fn save_config(
         && !crate::config::allowed_origins().contains(&origin)
         && !crate::http::guard_connector_origin(&origin);
 
-    let merged = crate::config::merge_client_config(&data, origin_is_foreign);
+    let picked = state.picked_folders.lock().unwrap().clone();
+    let merged = crate::config::merge_client_config(&data, origin_is_foreign, &picked);
     if crate::config::save(&merged).is_err() {
         return err_json("Не удалось записать config.json");
     }

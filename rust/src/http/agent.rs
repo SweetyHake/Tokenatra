@@ -3,7 +3,7 @@
 // (TokenCanvas, TokenEditor, TokenPresets, PortraitGenerator, Remover, Converter).
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use axum::extract::{Path, Query, State};
@@ -38,7 +38,6 @@ pub struct HistoryEntry {
     pub showing_original: bool,
 }
 
-#[derive(Clone)]
 pub struct AgentSession {
     pub id: String,
     pub original: RgbaImage,
@@ -130,16 +129,23 @@ impl AgentSession {
     }
 }
 
-static STORE: Mutex<Option<Vec<AgentSession>>> = Mutex::new(None);
+struct SessionSlot {
+    id: String,
+    session: Arc<Mutex<AgentSession>>,
+}
 
-fn with_store<T>(f: impl FnOnce(&mut Vec<AgentSession>) -> T) -> T {
+static STORE: Mutex<Option<Vec<SessionSlot>>> = Mutex::new(None);
+
+fn with_store<T>(f: impl FnOnce(&mut Vec<SessionSlot>) -> T) -> T {
     let mut guard = STORE.lock().unwrap();
-    if guard.is_none() {
-        *guard = Some(Vec::new());
-    }
-    let v = guard.as_mut().unwrap();
+    let v = guard.get_or_insert_with(Vec::new);
     let now = Instant::now();
-    v.retain(|s| now.duration_since(s.last_used).as_secs() < SESSION_TTL_MIN * 60);
+    v.retain(|slot| {
+        slot.session
+            .lock()
+            .map(|s| now.duration_since(s.last_used).as_secs() < SESSION_TTL_MIN * 60)
+            .unwrap_or(false)
+    });
     f(v)
 }
 
@@ -154,13 +160,18 @@ fn default_ring_name() -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn store_create(base: RgbaImage, ring_override: Option<Option<String>>) -> AgentSession {
+fn store_create(base: RgbaImage, ring_override: Option<Option<String>>) -> Arc<Mutex<AgentSession>> {
     with_store(|v| {
         while v.len() >= MAX_SESSIONS {
             let oldest = v
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, s)| s.last_used)
+                .min_by_key(|(_, slot)| {
+                    slot.session
+                        .lock()
+                        .map(|s| s.last_used)
+                        .unwrap_or_else(|_| Instant::now())
+                })
                 .map(|(i, _)| i)
                 .unwrap();
             v.remove(oldest);
@@ -214,26 +225,23 @@ fn store_create(base: RgbaImage, ring_override: Option<Option<String>>) -> Agent
             "create",
             json!({"width": sess.original.width(), "height": sess.original.height()}),
         );
-        v.push(sess.clone());
-        sess
+        let arc = Arc::new(Mutex::new(sess));
+        v.push(SessionSlot {
+            id,
+            session: arc.clone(),
+        });
+        arc
     })
 }
 
-fn store_get(sid: &str) -> Option<AgentSession> {
+fn store_get(sid: &str) -> Option<Arc<Mutex<AgentSession>>> {
     with_store(|v| {
-        let s = v.iter_mut().find(|s| s.id == sid)?;
-        s.touch();
-        Some(s.clone())
-    })
-}
-
-fn store_commit(updated: AgentSession) {
-    with_store(|v| {
-        if let Some(s) = v.iter_mut().find(|s| s.id == updated.id) {
-            *s = updated;
-            s.last_used = Instant::now();
+        let slot = v.iter().find(|s| s.id == sid)?;
+        if let Ok(mut s) = slot.session.lock() {
+            s.touch();
         }
-    });
+        Some(slot.session.clone())
+    })
 }
 
 fn store_remove(sid: &str) {
@@ -1284,6 +1292,20 @@ pub async fn tools_schema() -> Response {
     }))
 }
 
+async fn run_blocking<F>(f: F) -> Response
+where
+    F: FnOnce() -> Response + Send + 'static,
+{
+    match tokio::task::spawn_blocking(f).await {
+        Ok(resp) => resp,
+        Err(e) => agent_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "join_error",
+            &e.to_string(),
+        ),
+    }
+}
+
 pub async fn create_session(
     State(_state): State<std::sync::Arc<AppState>>,
     body: Option<axum::Json<Value>>,
@@ -1291,55 +1313,62 @@ pub async fn create_session(
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
     };
-    let ring_override = if v.get("ring").is_some() {
-        if v["ring"].is_null() {
-            Some(None)
-        } else if let Some(rname) = v["ring"].as_str() {
-            if find_ring_file(rname).is_none() {
-                return agent_err(StatusCode::NOT_FOUND, "unknown_asset", "ring not found");
+    run_blocking(move || {
+        let ring_override = if v.get("ring").is_some() {
+            if v["ring"].is_null() {
+                Some(None)
+            } else if let Some(rname) = v["ring"].as_str() {
+                if find_ring_file(rname).is_none() {
+                    return agent_err(StatusCode::NOT_FOUND, "unknown_asset", "ring not found");
+                }
+                Some(Some(rname.to_string()))
+            } else {
+                None
             }
-            Some(Some(rname.to_string()))
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
 
-    match decode_source(&v) {
-        Ok(base) => {
-            let sess = store_create(base, ring_override);
-            let stats = inspect_session(&sess);
-            ok_json(json!({
-                "session_id": sess.id,
-                "image": {"width": sess.original.width(), "height": sess.original.height()},
-                "ring": sess.ring,
-                "transform": {
-                    "scale": sess.scale,
-                    "rotation": sess.rotation,
-                    "offset_x": sess.offset_x,
-                    "offset_y": sess.offset_y,
-                },
-                "mask": stats,
-            }))
+        match decode_source(&v) {
+            Ok(base) => {
+                let arc = store_create(base, ring_override);
+                let sess = arc.lock().unwrap();
+                let stats = inspect_session(&sess);
+                ok_json(json!({
+                    "session_id": sess.id,
+                    "image": {"width": sess.original.width(), "height": sess.original.height()},
+                    "ring": sess.ring,
+                    "transform": {
+                        "scale": sess.scale,
+                        "rotation": sess.rotation,
+                        "offset_x": sess.offset_x,
+                        "offset_y": sess.offset_y,
+                    },
+                    "mask": stats,
+                }))
+            }
+            Err(r) => r,
         }
-        Err(r) => r,
-    }
+    })
+    .await
 }
 
 #[allow(clippy::result_large_err)]
-fn session_op_guard(sid: &str) -> Result<AgentSession, Response> {
-    let s = store_get(sid).ok_or_else(|| {
+fn session_op_guard(sid: &str) -> Result<Arc<Mutex<AgentSession>>, Response> {
+    let arc = store_get(sid).ok_or_else(|| {
         agent_err(StatusCode::NOT_FOUND, "session_not_found", "no such session")
     })?;
-    if s.ops_used >= OPS_LIMIT {
-        return Err(agent_err(
-            StatusCode::TOO_MANY_REQUESTS,
-            "ops_limit",
-            "operation limit reached for this session",
-        ));
+    {
+        let s = arc.lock().unwrap();
+        if s.ops_used >= OPS_LIMIT {
+            return Err(agent_err(
+                StatusCode::TOO_MANY_REQUESTS,
+                "ops_limit",
+                "operation limit reached for this session",
+            ));
+        }
     }
-    Ok(s)
+    Ok(arc)
 }
 
 pub async fn get_session(
@@ -1347,35 +1376,38 @@ pub async fn get_session(
     Path(sid): Path<String>,
 ) -> Response {
     match store_get(&sid) {
-        Some(s) => ok_json(json!({
-            "session_id": s.id,
-            "image": {"width": s.original.width(), "height": s.original.height()},
-            "bg_removed": s.bg_removed,
-            "showing_original": s.showing_original,
-            "protection_enabled": s.protection_enabled,
-            "transform": {"scale": s.scale, "rotation": s.rotation, "offset_x": s.offset_x, "offset_y": s.offset_y},
-            "ring": s.ring,
-            "effects": {
-                "shadow": {"enabled": s.shadow_enabled, "angle": s.shadow_angle, "distance": s.shadow_distance, "blur": s.shadow_blur, "opacity": s.shadow_opacity},
-                "color": {"enabled": s.color_enabled, "saturation": s.color_sat, "lightness": s.color_light, "contrast": s.color_contrast}
-            },
-            "portrait": {
-                "variant": s.portrait_variant,
-                "scale": s.portrait_scale,
-                "rotation": s.portrait_rotation,
-                "offset_x": s.portrait_x,
-                "offset_y": s.portrait_y,
-            },
-            "history": {
-                "index": s.history_index,
-                "count": s.history.len(),
-                "can_undo": s.history_index > 0,
-                "can_redo": s.history_index + 1 < s.history.len(),
-            },
-            "ops_used": s.ops_used,
-            "ops_limit": OPS_LIMIT,
-            "recipe": s.ops_log,
-        })),
+        Some(arc) => {
+            let s = arc.lock().unwrap();
+            ok_json(json!({
+                "session_id": s.id,
+                "image": {"width": s.original.width(), "height": s.original.height()},
+                "bg_removed": s.bg_removed,
+                "showing_original": s.showing_original,
+                "protection_enabled": s.protection_enabled,
+                "transform": {"scale": s.scale, "rotation": s.rotation, "offset_x": s.offset_x, "offset_y": s.offset_y},
+                "ring": s.ring,
+                "effects": {
+                    "shadow": {"enabled": s.shadow_enabled, "angle": s.shadow_angle, "distance": s.shadow_distance, "blur": s.shadow_blur, "opacity": s.shadow_opacity},
+                    "color": {"enabled": s.color_enabled, "saturation": s.color_sat, "lightness": s.color_light, "contrast": s.color_contrast}
+                },
+                "portrait": {
+                    "variant": s.portrait_variant,
+                    "scale": s.portrait_scale,
+                    "rotation": s.portrait_rotation,
+                    "offset_x": s.portrait_x,
+                    "offset_y": s.portrait_y,
+                },
+                "history": {
+                    "index": s.history_index,
+                    "count": s.history.len(),
+                    "can_undo": s.history_index > 0,
+                    "can_redo": s.history_index + 1 < s.history.len(),
+                },
+                "ops_used": s.ops_used,
+                "ops_limit": OPS_LIMIT,
+                "recipe": s.ops_log,
+            }))
+        }
         None => agent_err(StatusCode::NOT_FOUND, "session_not_found", "no such session"),
     }
 }
@@ -1392,24 +1424,27 @@ pub async fn op_remove_bg(
 ) -> Response {
     let v = body.map(|axum::Json(v)| v).unwrap_or_else(|| json!({}));
     let edge_blur = v["edge_blur"].as_f64().unwrap_or(1.0);
-    let mut s = match session_op_guard(&sid) {
+    let arc = match session_op_guard(&sid) {
         Ok(s) => s,
         Err(r) => return r,
     };
 
-    // If `showing_original` is explicitly passed and we already have a cutout, just toggle it (like clicking Remove BG again in UI)
-    if let Some(show_orig) = v["showing_original"].as_bool()
-        && s.cutout.is_some() {
+    let orig = {
+        let mut s = arc.lock().unwrap();
+        // If `showing_original` is explicitly passed and we already have a cutout, just toggle it (like clicking Remove BG again in UI)
+        if let Some(show_orig) = v["showing_original"].as_bool()
+            && s.cutout.is_some()
+        {
             s.showing_original = show_orig;
             s.log_op("toggle_original", json!({"showing_original": show_orig}));
             s.push_history();
             let stats = inspect_session(&s);
-            store_commit(s);
             return ok_json(json!({"ok": true, "bg_removed": true, "showing_original": show_orig, "mask": stats}));
         }
+        s.original.clone()
+    };
 
     state.mark_activity();
-    let orig = s.original.clone();
     let st = state.clone();
     let infer_res = tokio::task::spawn_blocking(move || {
         let dyn_img = image::DynamicImage::ImageRgba8(orig);
@@ -1421,6 +1456,7 @@ pub async fn op_remove_bg(
 
     match infer_res {
         Ok(Ok(rgba)) => {
+            let mut s = arc.lock().unwrap();
             s.cutout = Some(rgba);
             s.bg_removed = true;
             s.showing_original = false;
@@ -1430,7 +1466,6 @@ pub async fn op_remove_bg(
             s.log_op("remove_bg", json!({"edge_blur": edge_blur}));
             s.push_history();
             let stats = inspect_session(&s);
-            store_commit(s);
             ok_json(json!({"ok": true, "bg_removed": true, "showing_original": false, "mask": stats}))
         }
         Ok(Err(e)) => agent_err(StatusCode::INTERNAL_SERVER_ERROR, "infer_error", &e.to_string()),
@@ -1442,185 +1477,193 @@ pub async fn op_mask(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
     };
-    let mut s = match session_op_guard(&sid) {
-        Ok(s) => s,
-        Err(r) => return r,
-    };
-    let op = v["op"].as_str().unwrap_or_default().to_string();
-    let target = v["target"].as_str().unwrap_or("canvas").to_lowercase();
-    let px = v["px"].as_u64().unwrap_or(0) as u32;
-    if let Some(pe) = v["protection_enabled"].as_bool() {
-        s.protection_enabled = pe;
-    }
-    let protect = v["protect"].as_bool().unwrap_or(s.protection_enabled);
-    let params = v.clone();
+    run_blocking(move || {
+        let arc = match session_op_guard(&sid) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        let mut s = arc.lock().unwrap();
+        let op = v["op"].as_str().unwrap_or_default().to_string();
+        let target = v["target"].as_str().unwrap_or("canvas").to_lowercase();
+        let px = v["px"].as_u64().unwrap_or(0) as u32;
+        if let Some(pe) = v["protection_enabled"].as_bool() {
+            s.protection_enabled = pe;
+        }
+        let protect = v["protect"].as_bool().unwrap_or(s.protection_enabled);
+        let params = v.clone();
 
-    match op.as_str() {
-        "erase" | "restore" => {
-            let erase = op == "erase";
-            if v["shapes"].as_array().is_none() {
-                return bad("bad_request", "shapes array required for erase/restore");
-            }
-            if target == "image" || target == "blue" {
-                let prev = s.image_mask.clone();
-                mask_apply_shapes(&mut s.image_mask, &v["shapes"], erase, false);
-                if erase && protect
-                    && let Some(prot_1024) = load_protection_mask_1024(s.ring.as_deref()) {
-                        let (iw, ih) = s.image_mask.dimensions();
-                        let max_dim = iw.max(ih).max(1) as f32;
-                        let fit_scale = (LOGICAL / max_dim) * s.scale;
-                        let theta = s.rotation.to_radians();
-                        let cos_r = theta.cos();
-                        let sin_r = theta.sin();
-                        let cx = 512.0 + s.offset_x;
-                        let cy = 512.0 + s.offset_y;
-                        for (x, y, p) in s.image_mask.enumerate_pixels_mut() {
-                            let old_v = prev.get_pixel(x, y).0[0];
-                            if p.0[0] >= old_v {
-                                continue;
-                            }
-                            let lx = (x as f32 - iw as f32 * 0.5) * fit_scale;
-                            let ly = (y as f32 - ih as f32 * 0.5) * fit_scale;
-                            let rx = cos_r * lx - sin_r * ly + cx;
-                            let ry = sin_r * lx + cos_r * ly + cy;
-                            if rx >= 0.0 && ry >= 0.0 && rx < LOGICAL && ry < LOGICAL
-                                && prot_1024.get_pixel(rx as u32, ry as u32).0[0] > 0 {
-                                    p.0[0] = old_v;
+        match op.as_str() {
+            "erase" | "restore" => {
+                let erase = op == "erase";
+                if v["shapes"].as_array().is_none() {
+                    return bad("bad_request", "shapes array required for erase/restore");
+                }
+                if target == "image" || target == "blue" {
+                    let prev = s.image_mask.clone();
+                    mask_apply_shapes(&mut s.image_mask, &v["shapes"], erase, false);
+                    if erase && protect
+                        && let Some(prot_1024) = load_protection_mask_1024(s.ring.as_deref()) {
+                            let (iw, ih) = s.image_mask.dimensions();
+                            let max_dim = iw.max(ih).max(1) as f32;
+                            let fit_scale = (LOGICAL / max_dim) * s.scale;
+                            let theta = s.rotation.to_radians();
+                            let cos_r = theta.cos();
+                            let sin_r = theta.sin();
+                            let cx = 512.0 + s.offset_x;
+                            let cy = 512.0 + s.offset_y;
+                            for (x, y, p) in s.image_mask.enumerate_pixels_mut() {
+                                let old_v = prev.get_pixel(x, y).0[0];
+                                if p.0[0] >= old_v {
+                                    continue;
                                 }
-                        }
-                    }
-            } else {
-                let prev = s.canvas_mask.clone();
-                mask_apply_shapes(&mut s.canvas_mask, &v["shapes"], erase, true);
-                if erase && protect
-                    && let Some(prot_1024) = load_protection_mask_1024(s.ring.as_deref()) {
-                        let off = LOGICAL_U32;
-                        for y in 0..LOGICAL_U32 {
-                            for x in 0..LOGICAL_U32 {
-                                if prot_1024.get_pixel(x, y).0[0] > 0 {
-                                    let old_v = prev.get_pixel(off + x, off + y).0[0];
-                                    s.canvas_mask.put_pixel(off + x, off + y, Luma([old_v]));
-                                }
+                                let lx = (x as f32 - iw as f32 * 0.5) * fit_scale;
+                                let ly = (y as f32 - ih as f32 * 0.5) * fit_scale;
+                                let rx = cos_r * lx - sin_r * ly + cx;
+                                let ry = sin_r * lx + cos_r * ly + cy;
+                                if rx >= 0.0 && ry >= 0.0 && rx < LOGICAL && ry < LOGICAL
+                                    && prot_1024.get_pixel(rx as u32, ry as u32).0[0] > 0 {
+                                        p.0[0] = old_v;
+                                    }
                             }
                         }
-                    }
+                } else {
+                    let prev = s.canvas_mask.clone();
+                    mask_apply_shapes(&mut s.canvas_mask, &v["shapes"], erase, true);
+                    if erase && protect
+                        && let Some(prot_1024) = load_protection_mask_1024(s.ring.as_deref()) {
+                            let off = LOGICAL_U32;
+                            for y in 0..LOGICAL_U32 {
+                                for x in 0..LOGICAL_U32 {
+                                    if prot_1024.get_pixel(x, y).0[0] > 0 {
+                                        let old_v = prev.get_pixel(off + x, off + y).0[0];
+                                        s.canvas_mask.put_pixel(off + x, off + y, Luma([old_v]));
+                                    }
+                                }
+                            }
+                        }
+                }
             }
+            "invert" => {
+                let m = if target == "image" || target == "blue" {
+                    &mut s.image_mask
+                } else {
+                    &mut s.canvas_mask
+                };
+                for p in m.pixels_mut() {
+                    p.0[0] = 255 - p.0[0];
+                }
+            }
+            "reset" => {
+                if target == "image" || target == "blue" {
+                    s.image_mask = GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
+                } else if target == "both" {
+                    s.canvas_mask = GrayImage::from_pixel(LOGICAL_U32 * 3, LOGICAL_U32 * 3, Luma([255u8]));
+                    s.image_mask = GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
+                } else {
+                    s.canvas_mask = GrayImage::from_pixel(LOGICAL_U32 * 3, LOGICAL_U32 * 3, Luma([255u8]));
+                }
+            }
+            "feather" => {
+                if px == 0 {
+                    return bad("bad_request", "px required for feather");
+                }
+                if target == "image" || target == "blue" {
+                    s.image_mask = image::imageops::blur(&s.image_mask, px as f32 * 0.5);
+                } else {
+                    s.canvas_mask = image::imageops::blur(&s.canvas_mask, px as f32 * 0.5);
+                }
+            }
+            "grow" => {
+                if px == 0 {
+                    return bad("bad_request", "px required for grow");
+                }
+                use imageproc::distance_transform::Norm;
+                if target == "image" || target == "blue" {
+                    s.image_mask = imageproc::morphology::dilate(&s.image_mask, Norm::LInf, px.min(255) as u8);
+                } else {
+                    s.canvas_mask = imageproc::morphology::dilate(&s.canvas_mask, Norm::LInf, px.min(255) as u8);
+                }
+            }
+            "apply_preset" => {
+                let pname = v["preset"].as_str().unwrap_or_default();
+                let Some(pp) = find_preset_file(pname) else {
+                    return agent_err(StatusCode::NOT_FOUND, "unknown_preset", "preset not found");
+                };
+                match load_preset_mask(&pp, LOGICAL_U32 * 3, LOGICAL_U32 * 3) {
+                    Ok(m) => s.canvas_mask = m,
+                    Err(e) => return bad("bad_request", &format!("preset decode failed: {e}")),
+                }
+            }
+            other => return bad("bad_mask_op", &format!("unknown mask op {other:?}")),
         }
-        "invert" => {
-            let m = if target == "image" || target == "blue" {
-                &mut s.image_mask
-            } else {
-                &mut s.canvas_mask
-            };
-            for p in m.pixels_mut() {
-                p.0[0] = 255 - p.0[0];
-            }
-        }
-        "reset" => {
-            if target == "image" || target == "blue" {
-                s.image_mask = GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
-            } else if target == "both" {
-                s.canvas_mask = GrayImage::from_pixel(LOGICAL_U32 * 3, LOGICAL_U32 * 3, Luma([255u8]));
-                s.image_mask = GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
-            } else {
-                s.canvas_mask = GrayImage::from_pixel(LOGICAL_U32 * 3, LOGICAL_U32 * 3, Luma([255u8]));
-            }
-        }
-        "feather" => {
-            if px == 0 {
-                return bad("bad_request", "px required for feather");
-            }
-            if target == "image" || target == "blue" {
-                s.image_mask = image::imageops::blur(&s.image_mask, px as f32 * 0.5);
-            } else {
-                s.canvas_mask = image::imageops::blur(&s.canvas_mask, px as f32 * 0.5);
-            }
-        }
-        "grow" => {
-            if px == 0 {
-                return bad("bad_request", "px required for grow");
-            }
-            use imageproc::distance_transform::Norm;
-            if target == "image" || target == "blue" {
-                s.image_mask = imageproc::morphology::dilate(&s.image_mask, Norm::LInf, px.min(255) as u8);
-            } else {
-                s.canvas_mask = imageproc::morphology::dilate(&s.canvas_mask, Norm::LInf, px.min(255) as u8);
-            }
-        }
-        "apply_preset" => {
-            let pname = v["preset"].as_str().unwrap_or_default();
-            let Some(pp) = find_preset_file(pname) else {
-                return agent_err(StatusCode::NOT_FOUND, "unknown_preset", "preset not found");
-            };
-            match load_preset_mask(&pp, LOGICAL_U32 * 3, LOGICAL_U32 * 3) {
-                Ok(m) => s.canvas_mask = m,
-                Err(e) => return bad("bad_request", &format!("preset decode failed: {e}")),
-            }
-        }
-        other => return bad("bad_mask_op", &format!("unknown mask op {other:?}")),
-    }
 
-    s.log_op(&format!("mask.{op}"), params);
-    s.push_history();
-    let stats = inspect_session(&s);
-    store_commit(s);
-    ok_json(json!({"ok": true, "mask": stats}))
+        s.log_op(&format!("mask.{op}"), params);
+        s.push_history();
+        let stats = inspect_session(&s);
+        ok_json(json!({"ok": true, "mask": stats}))
+    })
+    .await
 }
 
 pub async fn op_transform(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -> Response {
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
     };
-    let mut s = match session_op_guard(&sid) {
-        Ok(s) => s,
-        Err(r) => return r,
-    };
-    let params = v.clone();
+    run_blocking(move || {
+        let arc = match session_op_guard(&sid) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        let mut s = arc.lock().unwrap();
+        let params = v.clone();
 
-    if let Some(zone) = v["fit_zone"].as_u64() {
-        let z = zone.clamp(1, 3) as f32;
-        s.scale = z;
-        s.offset_x = 0.0;
-        s.offset_y = 0.0;
-        s.rotation = 0.0;
-    }
-    if let Some(x) = v["scale"].as_f64() {
-        s.scale = x as f32;
-    }
-    if let Some(x) = v["rotation"].as_f64() {
-        s.rotation = x as f32;
-    }
-    if let Some(x) = v["offset_x"].as_f64() {
-        s.offset_x = x as f32;
-    }
-    if let Some(x) = v["offset_y"].as_f64() {
-        s.offset_y = x as f32;
-    }
-    if s.scale <= 0.0 || s.scale > 8.0 {
-        return bad("bad_request", "scale out of range (0.01..8.0)");
-    }
-    s.log_op("transform", params);
-    s.push_history();
-    let stats = inspect_session(&s);
-    let resp = json!({
-        "ok": true,
-        "transform": {
-            "scale": s.scale,
-            "rotation": s.rotation,
-            "offset_x": s.offset_x,
-            "offset_y": s.offset_y,
-        },
-        "mask": stats,
-    });
-    store_commit(s);
-    ok_json(resp)
+        if let Some(sc) = v["scale"].as_f64()
+            && (sc <= 0.0 || sc > 8.0)
+        {
+            return bad("bad_request", "scale out of range (0.01..8.0)");
+        }
+        if let Some(zone) = v["fit_zone"].as_u64() {
+            let z = zone.clamp(1, 3) as f32;
+            s.scale = z;
+            s.offset_x = 0.0;
+            s.offset_y = 0.0;
+            s.rotation = 0.0;
+        }
+        if let Some(x) = v["scale"].as_f64() {
+            s.scale = x as f32;
+        }
+        if let Some(x) = v["rotation"].as_f64() {
+            s.rotation = x as f32;
+        }
+        if let Some(x) = v["offset_x"].as_f64() {
+            s.offset_x = x as f32;
+        }
+        if let Some(x) = v["offset_y"].as_f64() {
+            s.offset_y = x as f32;
+        }
+        s.log_op("transform", params);
+        s.push_history();
+        let stats = inspect_session(&s);
+        let resp = json!({
+            "ok": true,
+            "transform": {
+                "scale": s.scale,
+                "rotation": s.rotation,
+                "offset_x": s.offset_x,
+                "offset_y": s.offset_y,
+            },
+            "mask": stats,
+        });
+        ok_json(resp)
+    })
+    .await
 }
 
 pub async fn op_ring(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -> Response {
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
     };
-    let mut s = match session_op_guard(&sid) {
+    let arc = match session_op_guard(&sid) {
         Ok(s) => s,
         Err(r) => return r,
     };
@@ -1633,9 +1676,9 @@ pub async fn op_ring(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -
         && find_ring_file(n).is_none() {
             return agent_err(StatusCode::NOT_FOUND, "unknown_asset", "ring not found");
         }
+    let mut s = arc.lock().unwrap();
     s.ring = name.clone();
     s.log_op("ring", json!({"name": name}));
-    store_commit(s);
     ok_json(json!({"ok": true, "ring": name}))
 }
 
@@ -1643,10 +1686,11 @@ pub async fn op_effects(Path(sid): Path<String>, body: Option<axum::Json<Value>>
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
     };
-    let mut s = match session_op_guard(&sid) {
+    let arc = match session_op_guard(&sid) {
         Ok(s) => s,
         Err(r) => return r,
     };
+    let mut s = arc.lock().unwrap();
     let params = v.clone();
     if let Some(sh) = v["shadow"].as_object() {
         if let Some(en) = sh.get("enabled").and_then(|x| x.as_bool()) {
@@ -1687,7 +1731,6 @@ pub async fn op_effects(Path(sid): Path<String>, body: Option<axum::Json<Value>>
             "color": {"enabled": s.color_enabled, "saturation": s.color_sat, "lightness": s.color_light, "contrast": s.color_contrast},
         }
     });
-    store_commit(s);
     ok_json(resp)
 }
 
@@ -1695,244 +1738,160 @@ pub async fn op_history(Path(sid): Path<String>, body: Option<axum::Json<Value>>
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
     };
-    let mut s = match session_op_guard(&sid) {
-        Ok(s) => s,
-        Err(r) => return r,
-    };
-    let action = v["action"].as_str().unwrap_or("undo");
-    match action {
-        "undo" => {
-            if s.history_index == 0 {
-                return bad("nothing_to_undo", "already at oldest state");
+    run_blocking(move || {
+        let arc = match session_op_guard(&sid) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        let mut s = arc.lock().unwrap();
+        let action = v["action"].as_str().unwrap_or("undo");
+        match action {
+            "undo" => {
+                if s.history_index == 0 {
+                    return bad("nothing_to_undo", "already at oldest state");
+                }
+                s.history_index -= 1;
+                let snap = s.history[s.history_index].clone();
+                s.apply_history(snap);
             }
-            s.history_index -= 1;
-            let snap = s.history[s.history_index].clone();
-            s.apply_history(snap);
-        }
-        "redo" => {
-            if s.history_index + 1 >= s.history.len() {
-                return bad("nothing_to_redo", "already at newest state");
+            "redo" => {
+                if s.history_index + 1 >= s.history.len() {
+                    return bad("nothing_to_redo", "already at newest state");
+                }
+                s.history_index += 1;
+                let snap = s.history[s.history_index].clone();
+                s.apply_history(snap);
             }
-            s.history_index += 1;
-            let snap = s.history[s.history_index].clone();
-            s.apply_history(snap);
+            other => return bad("bad_request", &format!("unknown history action {other:?}")),
         }
-        other => return bad("bad_request", &format!("unknown history action {other:?}")),
-    }
-    s.log_op(&format!("history.{action}"), json!({"index": s.history_index}));
-    let stats = inspect_session(&s);
-    let idx = s.history_index;
-    let total = s.history.len();
-    store_commit(s);
-    ok_json(json!({
-        "ok": true,
-        "history_index": idx,
-        "history_count": total,
-        "mask": stats,
-    }))
+        let idx = s.history_index;
+        let total = s.history.len();
+        s.log_op(&format!("history.{action}"), json!({"index": idx}));
+        let stats = inspect_session(&s);
+        ok_json(json!({
+            "ok": true,
+            "history_index": idx,
+            "history_count": total,
+            "mask": stats,
+        }))
+    })
+    .await
 }
 
 pub async fn op_portrait(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -> Response {
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
     };
-    let mut s = match session_op_guard(&sid) {
-        Ok(s) => s,
-        Err(r) => return r,
-    };
-    if let Some(var) = v["variant"].as_str() {
-        s.portrait_variant = if var == "cutout" { "cutout".into() } else { "original".into() };
-    }
-    if let Some(sc) = v["scale"].as_f64() {
-        s.portrait_scale = sc.clamp(0.05, 8.0) as f32;
-    }
-    if let Some(rot) = v["rotation"].as_f64() {
-        s.portrait_rotation = rot as f32;
-    }
-    if let Some(ox) = v["offset_x"].as_f64() {
-        s.portrait_x = ox as f32;
-    }
-    if let Some(oy) = v["offset_y"].as_f64() {
-        s.portrait_y = oy as f32;
-    }
-    let size = v["size"].as_u64().unwrap_or(1024).clamp(256, 4096) as u32;
-    let format = v["format"].as_str().unwrap_or("webp").to_lowercase();
-    let quality = v["quality"].as_u64().unwrap_or(95).clamp(10, 100) as u8;
+    run_blocking(move || {
+        let arc = match session_op_guard(&sid) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        let size = v["size"].as_u64().unwrap_or(1024).clamp(256, 4096) as u32;
+        let format = v["format"].as_str().unwrap_or("webp").to_lowercase();
+        let quality = v["quality"].as_u64().unwrap_or(95).clamp(10, 100) as u8;
+        let img = {
+            let mut s = arc.lock().unwrap();
+            if let Some(var) = v["variant"].as_str() {
+                s.portrait_variant = if var == "cutout" { "cutout".into() } else { "original".into() };
+            }
+            if let Some(sc) = v["scale"].as_f64() {
+                s.portrait_scale = sc.clamp(0.05, 8.0) as f32;
+            }
+            if let Some(rot) = v["rotation"].as_f64() {
+                s.portrait_rotation = rot as f32;
+            }
+            if let Some(ox) = v["offset_x"].as_f64() {
+                s.portrait_x = ox as f32;
+            }
+            if let Some(oy) = v["offset_y"].as_f64() {
+                s.portrait_y = oy as f32;
+            }
+            s.log_op("portrait", v.clone());
+            render_portrait(&s, size)
+        };
 
-    s.log_op("portrait", v.clone());
-    let img = render_portrait(&s, size);
-    store_commit(s);
-
-    match crate::imaging::save_image(&image::DynamicImage::ImageRgba8(img), &format, quality) {
-        Ok((bytes, mime)) => file_response(bytes, mime),
-        Err(e) => agent_err(StatusCode::INTERNAL_SERVER_ERROR, "encode_error", &e.to_string()),
-    }
+        match crate::imaging::save_image(&image::DynamicImage::ImageRgba8(img), &format, quality) {
+            Ok((bytes, mime)) => file_response(bytes, mime),
+            Err(e) => agent_err(StatusCode::INTERNAL_SERVER_ERROR, "encode_error", &e.to_string()),
+        }
+    })
+    .await
 }
 
 pub async fn op_save_preset(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -> Response {
     let v = body.map(|axum::Json(v)| v).unwrap_or_else(|| json!({}));
-    let s = match session_op_guard(&sid) {
-        Ok(s) => s,
-        Err(r) => return r,
-    };
-    // Save current `canvas_mask` in UI preset semantics:
-    // opaque purple (#9833ff) = cutout (where mask == 0), transparent = kept (where mask == 255).
-    let mask_1024 = resize_mask(&s.canvas_mask, LOGICAL_U32, LOGICAL_U32);
-    let mut snap = RgbaImage::new(LOGICAL_U32, LOGICAL_U32);
-    for (x, y, p) in mask_1024.enumerate_pixels() {
-        let cut_alpha = 255u8.saturating_sub(p.0[0]);
-        snap.put_pixel(x, y, Rgba([152, 51, 255, cut_alpha]));
-    }
-    let dir = paths::user_preset_dir();
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "io_error", &e.to_string());
-    }
-    let custom_name = v["name"]
-        .as_str()
-        .map(|n| {
-            n.chars()
-                .filter(|c| c.is_alphanumeric() || [' ', '_', '-'].contains(c))
-                .collect::<String>()
-                .trim()
-                .to_string()
-        })
-        .filter(|n| !n.is_empty());
-    let target = if let Some(cname) = custom_name {
-        dir.join(format!("{cname}.png"))
-    } else {
-        let mut num = 1;
-        while dir.join(format!("Пресет {num}.png")).exists() {
-            num += 1;
+    run_blocking(move || {
+        let arc = match session_op_guard(&sid) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        // Save current `canvas_mask` in UI preset semantics:
+        // opaque purple (#9833ff) = cutout (where mask == 0), transparent = kept (where mask == 255).
+        let mask_1024 = {
+            let s = arc.lock().unwrap();
+            resize_mask(&s.canvas_mask, LOGICAL_U32, LOGICAL_U32)
+        };
+        let mut snap = RgbaImage::new(LOGICAL_U32, LOGICAL_U32);
+        for (x, y, p) in mask_1024.enumerate_pixels() {
+            let cut_alpha = 255u8.saturating_sub(p.0[0]);
+            snap.put_pixel(x, y, Rgba([152, 51, 255, cut_alpha]));
         }
-        dir.join(format!("Пресет {num}.png"))
-    };
-    let mut buf = Vec::new();
-    if image::DynamicImage::write_to(
-        &image::DynamicImage::ImageRgba8(snap),
-        std::io::Cursor::new(&mut buf),
-        image::ImageFormat::Png,
-    )
-    .is_err()
-    {
-        return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "encode_error", "failed to encode preset PNG");
-    }
-    if let Err(e) = std::fs::write(&target, buf) {
-        return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "io_error", &e.to_string());
-    }
-    ok_json(json!({
-        "ok": true,
-        "name": target.file_stem().and_then(|s| s.to_str()).unwrap_or_default(),
-        "file": target.file_name().and_then(|s| s.to_str()).unwrap_or_default(),
-    }))
+        let dir = paths::user_preset_dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "io_error", &e.to_string());
+        }
+        let custom_name = v["name"]
+            .as_str()
+            .map(|n| {
+                n.chars()
+                    .filter(|c| c.is_alphanumeric() || [' ', '_', '-'].contains(c))
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            })
+            .filter(|n| !n.is_empty());
+        let target = if let Some(cname) = custom_name {
+            dir.join(format!("{cname}.png"))
+        } else {
+            let mut num = 1;
+            while dir.join(format!("Пресет {num}.png")).exists() {
+                num += 1;
+            }
+            dir.join(format!("Пресет {num}.png"))
+        };
+        let mut buf = Vec::new();
+        if image::DynamicImage::write_to(
+            &image::DynamicImage::ImageRgba8(snap),
+            std::io::Cursor::new(&mut buf),
+            image::ImageFormat::Png,
+        )
+        .is_err()
+        {
+            return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "encode_error", "failed to encode preset PNG");
+        }
+        if let Err(e) = paths::atomic_write(&target, &buf) {
+            return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "io_error", &e.to_string());
+        }
+        ok_json(json!({
+            "ok": true,
+            "name": target.file_stem().and_then(|s| s.to_str()).unwrap_or_default(),
+            "file": target.file_name().and_then(|s| s.to_str()).unwrap_or_default(),
+        }))
+    })
+    .await
 }
 
 pub async fn op_preview(
     Path(sid): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
-    let Some(s) = store_get(&sid) else {
-        return agent_err(StatusCode::NOT_FOUND, "session_not_found", "no such session");
-    };
-    let size: u32 = q
-        .get("size")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(512)
-        .clamp(64, 1024);
-    let show_example = q
-        .get("example")
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(false);
-    let example_scale: u32 = q
-        .get("example_scale")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(2)
-        .clamp(1, 3);
-    let example_opacity: f32 = q
-        .get("example_opacity")
-        .and_then(|v| v.parse::<f32>().ok())
-        .unwrap_or(0.65_f32)
-        .clamp(0.1, 1.0);
-    // When `example=1` is requested and `scale_mode` is not explicitly given, default to "2"
-    // so the entire 2x `example.png` template ("Макушка", "Челюсть", "Пояс") is visible!
-    let default_sm = if show_example { "2" } else { "1" };
-    let scale_mode = q.get("scale_mode").map(|s| s.as_str()).unwrap_or(default_sm);
-    let with_ring = q
-        .get("with_ring")
-        .map(|v| v != "0" && v != "false")
-        .unwrap_or(true);
-    let guides = q
-        .get("guides")
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(false);
-
-    match compose(&s, size, scale_mode, with_ring) {
-        Ok((mut img, used)) => {
-            if show_example {
-                draw_example_overlay(&mut img, used, example_scale, example_opacity);
-            }
-            if guides {
-                draw_preview_guides(&mut img, used);
-            }
-            match crate::imaging::save_image(
-                &image::DynamicImage::ImageRgba8(img),
-                "webp",
-                90,
-            ) {
-                Ok((bytes, _)) => file_response(bytes, "image/webp"),
-                Err(e) => agent_err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "encode_error",
-                    &e.to_string(),
-                ),
-            }
-        }
-        Err(e) => agent_err(StatusCode::INTERNAL_SERVER_ERROR, "compose_error", &e),
-    }
-}
-
-pub async fn op_inspect(
-    Path(sid): Path<String>,
-    Query(q): Query<HashMap<String, String>>,
-) -> Response {
-    let Some(mut s) = store_get(&sid) else {
-        return agent_err(StatusCode::NOT_FOUND, "session_not_found", "no such session");
-    };
-    let mut stats = inspect_session(&s);
-    let cur_cov = stats["coverage_pct"].as_f64().unwrap_or(0.0);
-    if let Some(prev_cov) = s.last_inspect_coverage {
-        stats["delta"] = json!({
-            "coverage_dpct": ((cur_cov - prev_cov) * 10.0).round() / 10.0
-        });
-    }
-    s.last_inspect_coverage = Some(cur_cov);
-    store_commit(s.clone());
-
-    let mut v = json!({
-        "session_id": s.id,
-        "image": {"width": s.original.width(), "height": s.original.height()},
-        "bg_removed": s.bg_removed,
-        "showing_original": s.showing_original,
-        "protection_enabled": s.protection_enabled,
-        "transform": {"scale": s.scale, "rotation": s.rotation, "offset_x": s.offset_x, "offset_y": s.offset_y},
-        "ring": s.ring,
-        "effects": {
-            "shadow": {"enabled": s.shadow_enabled, "angle": s.shadow_angle, "distance": s.shadow_distance, "blur": s.shadow_blur, "opacity": s.shadow_opacity},
-            "color": {"enabled": s.color_enabled, "saturation": s.color_sat, "lightness": s.color_light}
-        },
-        "history": {
-            "index": s.history_index,
-            "count": s.history.len(),
-            "can_undo": s.history_index > 0,
-            "can_redo": s.history_index + 1 < s.history.len(),
-        },
-        "ops_used": s.ops_used,
-        "ops_limit": OPS_LIMIT,
-        "recipe": s.ops_log,
-        "mask": stats,
-    });
-    if q.get("include_image").map(|v| v == "1" || v == "true").unwrap_or(false) {
+    run_blocking(move || {
+        let Some(arc) = store_get(&sid) else {
+            return agent_err(StatusCode::NOT_FOUND, "session_not_found", "no such session");
+        };
         let size: u32 = q
-            .get("preview_size")
+            .get("size")
             .and_then(|v| v.parse().ok())
             .unwrap_or(512)
             .clamp(64, 1024);
@@ -1950,33 +1909,141 @@ pub async fn op_inspect(
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(0.65_f32)
             .clamp(0.1, 1.0);
+        // When `example=1` is requested and `scale_mode` is not explicitly given, default to "2"
+        // so the entire 2x `example.png` template ("Макушка", "Челюсть", "Пояс") is visible!
         let default_sm = if show_example { "2" } else { "1" };
         let scale_mode = q.get("scale_mode").map(|s| s.as_str()).unwrap_or(default_sm);
+        let with_ring = q
+            .get("with_ring")
+            .map(|v| v != "0" && v != "false")
+            .unwrap_or(true);
         let guides = q
             .get("guides")
             .map(|v| v == "1" || v == "true")
             .unwrap_or(false);
-        if let Ok((mut img, used)) = compose(&s, size, scale_mode, true) {
-            if show_example {
-                draw_example_overlay(&mut img, used, example_scale, example_opacity);
+
+        let composed = {
+            let s = arc.lock().unwrap();
+            compose(&s, size, scale_mode, with_ring)
+        };
+        match composed {
+            Ok((mut img, used)) => {
+                if show_example {
+                    draw_example_overlay(&mut img, used, example_scale, example_opacity);
+                }
+                if guides {
+                    draw_preview_guides(&mut img, used);
+                }
+                match crate::imaging::save_image(
+                    &image::DynamicImage::ImageRgba8(img),
+                    "webp",
+                    90,
+                ) {
+                    Ok((bytes, _)) => file_response(bytes, "image/webp"),
+                    Err(e) => agent_err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "encode_error",
+                        &e.to_string(),
+                    ),
+                }
             }
-            if guides {
-                draw_preview_guides(&mut img, used);
-            }
-            if let Ok((bytes, _)) = crate::imaging::save_image(
-                &image::DynamicImage::ImageRgba8(img),
-                "webp",
-                90,
-            ) {
-                let data_url = format!(
-                    "data:image/webp;base64,{}",
-                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
-                );
-                v["image_data_url"] = json!(data_url);
+            Err(e) => agent_err(StatusCode::INTERNAL_SERVER_ERROR, "compose_error", &e),
+        }
+    })
+    .await
+}
+
+pub async fn op_inspect(
+    Path(sid): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    run_blocking(move || {
+        let Some(arc) = store_get(&sid) else {
+            return agent_err(StatusCode::NOT_FOUND, "session_not_found", "no such session");
+        };
+        let mut s = arc.lock().unwrap();
+        let mut stats = inspect_session(&s);
+        let cur_cov = stats["coverage_pct"].as_f64().unwrap_or(0.0);
+        if let Some(prev_cov) = s.last_inspect_coverage {
+            stats["delta"] = json!({
+                "coverage_dpct": ((cur_cov - prev_cov) * 10.0).round() / 10.0
+            });
+        }
+        s.last_inspect_coverage = Some(cur_cov);
+
+        let mut v = json!({
+            "session_id": s.id,
+            "image": {"width": s.original.width(), "height": s.original.height()},
+            "bg_removed": s.bg_removed,
+            "showing_original": s.showing_original,
+            "protection_enabled": s.protection_enabled,
+            "transform": {"scale": s.scale, "rotation": s.rotation, "offset_x": s.offset_x, "offset_y": s.offset_y},
+            "ring": s.ring,
+            "effects": {
+                "shadow": {"enabled": s.shadow_enabled, "angle": s.shadow_angle, "distance": s.shadow_distance, "blur": s.shadow_blur, "opacity": s.shadow_opacity},
+                "color": {"enabled": s.color_enabled, "saturation": s.color_sat, "lightness": s.color_light}
+            },
+            "history": {
+                "index": s.history_index,
+                "count": s.history.len(),
+                "can_undo": s.history_index > 0,
+                "can_redo": s.history_index + 1 < s.history.len(),
+            },
+            "ops_used": s.ops_used,
+            "ops_limit": OPS_LIMIT,
+            "recipe": s.ops_log,
+            "mask": stats,
+        });
+        if q.get("include_image").map(|v| v == "1" || v == "true").unwrap_or(false) {
+            let size: u32 = q
+                .get("preview_size")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(512)
+                .clamp(64, 1024);
+            let show_example = q
+                .get("example")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false);
+            let example_scale: u32 = q
+                .get("example_scale")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2)
+                .clamp(1, 3);
+            let example_opacity: f32 = q
+                .get("example_opacity")
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.65_f32)
+                .clamp(0.1, 1.0);
+            let default_sm = if show_example { "2" } else { "1" };
+            let scale_mode = q.get("scale_mode").map(|s| s.as_str()).unwrap_or(default_sm);
+            let guides = q
+                .get("guides")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false);
+            if let Ok((mut img, used)) = compose(&s, size, scale_mode, true) {
+                drop(s);
+                if show_example {
+                    draw_example_overlay(&mut img, used, example_scale, example_opacity);
+                }
+                if guides {
+                    draw_preview_guides(&mut img, used);
+                }
+                if let Ok((bytes, _)) = crate::imaging::save_image(
+                    &image::DynamicImage::ImageRgba8(img),
+                    "webp",
+                    90,
+                ) {
+                    let data_url = format!(
+                        "data:image/webp;base64,{}",
+                        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+                    );
+                    v["image_data_url"] = json!(data_url);
+                }
             }
         }
-    }
-    ok_json(v)
+        ok_json(v)
+    })
+    .await
 }
 
 pub async fn op_export(
@@ -1987,31 +2054,38 @@ pub async fn op_export(
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
     };
-    let Some(s) = store_get(&sid) else {
-        return agent_err(StatusCode::NOT_FOUND, "session_not_found", "no such session");
-    };
-    let format = v["format"].as_str().unwrap_or("png").to_lowercase();
-    if !["webp", "png", "jpg"].contains(&format.as_str()) {
-        return bad("bad_request", "format must be webp|png|jpg");
-    }
-    let quality = v["quality"].as_u64().unwrap_or(95).clamp(10, 100) as u8;
-    let size = v["size"].as_u64().unwrap_or(1024).clamp(256, 2048) as u32;
-    let scale_mode = v["scale_mode"].as_str().unwrap_or("1").to_string();
-    let with_ring = v["with_ring"].as_bool().unwrap_or(true);
+    run_blocking(move || {
+        let Some(arc) = store_get(&sid) else {
+            return agent_err(StatusCode::NOT_FOUND, "session_not_found", "no such session");
+        };
+        let format = v["format"].as_str().unwrap_or("png").to_lowercase();
+        if !["webp", "png", "jpg"].contains(&format.as_str()) {
+            return bad("bad_request", "format must be webp|png|jpg");
+        }
+        let quality = v["quality"].as_u64().unwrap_or(95).clamp(10, 100) as u8;
+        let size = v["size"].as_u64().unwrap_or(1024).clamp(256, 2048) as u32;
+        let scale_mode = v["scale_mode"].as_str().unwrap_or("1").to_string();
+        let with_ring = v["with_ring"].as_bool().unwrap_or(true);
 
-    match compose(&s, size, &scale_mode, with_ring) {
-        Ok((img, _used)) => match crate::imaging::save_image(
-            &image::DynamicImage::ImageRgba8(img),
-            &format,
-            quality,
-        ) {
-            Ok((bytes, mime)) => file_response(bytes, mime),
-            Err(e) => agent_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "encode_error",
-                &e.to_string(),
-            ),
-        },
-        Err(e) => agent_err(StatusCode::INTERNAL_SERVER_ERROR, "compose_error", &e),
-    }
+        let composed = {
+            let s = arc.lock().unwrap();
+            compose(&s, size, &scale_mode, with_ring)
+        };
+        match composed {
+            Ok((img, _used)) => match crate::imaging::save_image(
+                &image::DynamicImage::ImageRgba8(img),
+                &format,
+                quality,
+            ) {
+                Ok((bytes, mime)) => file_response(bytes, mime),
+                Err(e) => agent_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "encode_error",
+                    &e.to_string(),
+                ),
+            },
+            Err(e) => agent_err(StatusCode::INTERNAL_SERVER_ERROR, "compose_error", &e),
+        }
+    })
+    .await
 }

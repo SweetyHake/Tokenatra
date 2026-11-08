@@ -62,10 +62,10 @@ jobs:
           workspaces: rust
 
       - name: Build (release)
-        run: cargo build --release
+        run: cargo build --release --bins
 
       - name: Clippy
-        run: cargo clippy --release -- -D warnings
+        run: cargo clippy --release --bins -- -D warnings
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -73,6 +73,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/tokenatra.exe dist/
+          cp target/release/TokenatraMCP.exe dist/ 2>/dev/null || true
           cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../ring.png ../example.png dist/ 2>/dev/null || true
           7z a -tzip "${{ matrix.artifact }}.zip" dist
       - name: Package (macOS/Linux)
@@ -81,6 +82,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/tokenatra dist/
+          cp target/release/TokenatraMCP dist/ 2>/dev/null || true
           cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../ring.png ../example.png dist/ 2>/dev/null || true
           tar czf "${{ matrix.artifact }}.tar.gz" dist
 

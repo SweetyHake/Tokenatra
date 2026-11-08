@@ -8,7 +8,7 @@
 - Редактор токенов: масштабирование, поворот, маски и ластик (по холсту и по слою), каталог колец, тени, цветокоррекция, сохранение пресетов.
 - Генератор портретов и пакетный конвертер изображений (PNG, WebP, JPG, AVIF) и аудио (OGG через FFmpeg).
 - Модуль-коннектор для Foundry VTT с возможностью открывать студию прямо внутри игрового мира.
-- Локальный HTTP API `/agent/v1/*` для автоматизации сборки токенов.
+- Встроенный MCP-сервер (`TokenatraMCP` / `Tokenatra --mcp`) и локальный HTTP API `/agent/v1/*` для автоматизации создания токенов и портретов через ИИ-агентов (Claude Desktop, Cursor, Antigravity, Windsurf, OpenCode).
 
 ## Установка и запуск
 
@@ -67,9 +67,30 @@ build_installer.bat
 build_module.bat
 ```
 
-## Agent API
+## MCP-сервер и Agent API
 
-Локальный интерфейс управления редактором работает по адресу `http://127.0.0.1:7878/agent/v1/*` и требует заголовок `X-Tokenatra-Agent: 1`.
+В приложение встроен нативный MCP stdio-сервер (`TokenatraMCP.exe` / `Tokenatra.exe --mcp`), не требующий Python. При установке и первом запуске приложение автоматически регистрирует MCP-сервер в установленных ИИ-клиентах (Antigravity, Claude Desktop, Cursor, Windsurf, OpenCode). Принудительная регистрация из командной строки:
+
+```bash
+TokenatraMCP.exe --install-mcp
+```
+
+Ручное подключение в `mcp_config.json` / `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "tokenatra": {
+      "command": "C:\\Program Files\\Tokenatra\\TokenatraMCP.exe",
+      "args": []
+    }
+  }
+}
+```
+
+Если приложение закрыто, при первом вызове любого MCP-инструмента `TokenatraMCP` автоматически запустит фоновый сервер `Tokenatra.exe --server`.
+
+Локальный HTTP-интерфейс управления редактором работает по адресу `http://127.0.0.1:7878/agent/v1/*` и требует заголовок `X-Tokenatra-Agent: 1`.
 
 Основные маршруты:
 

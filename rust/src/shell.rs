@@ -71,7 +71,6 @@ pub fn wake() {
             }
 }
 
-#[cfg_attr(not(windows), allow(dead_code))] // idle js rides the windows tray
 fn enter_idle_js() -> &'static str {
     "window.TokenTray && window.TokenTray.enterIdle && window.TokenTray.enterIdle(true)"
 }
@@ -190,10 +189,9 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
     let (window, webview) = (window, Arc::new(webview));
 
     // ===== Tray: the icon lives for the whole app lifetime =====
-    #[cfg(windows)]
-    let tray = crate::tray::create(&state);
-    #[cfg(not(windows))]
-    let tray: Option<()> = None;
+    let mut tray: Option<crate::tray::Tray> = None;
+    #[cfg(target_os = "macos")]
+    let mut macos_menu: Option<muda::Menu> = None;
 
     let window = Arc::new(window);
     let st = state.clone();
@@ -202,11 +200,15 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
         *control_flow = ControlFlow::Wait;
 
         match event {
-            Event::UserEvent(UserEvent::Wake) => {
-                #[cfg(windows)]
-                if let Some(t) = tray.as_ref() {
-                    crate::tray::drain_model_labels(t);
+            Event::NewEvents(tao::event::StartCause::Init) => {
+                #[cfg(target_os = "macos")]
+                {
+                    macos_menu = crate::tray::init_macos_app_menu();
+                    let _ = &macos_menu;
                 }
+                tray = crate::tray::create(&st);
+            }
+            Event::UserEvent(UserEvent::Wake) => {
                 while let Ok(cmd) = crate::gui_control::try_recv() {
                     handle_gui_command(cmd, &window, &webview, &st, &tray);
                 }
@@ -233,15 +235,12 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                #[cfg(windows)]
-                {
-                    let (close_to_tray, _) = crate::config::tray_settings();
-                    if close_to_tray && tray.is_some() {
-                        window.set_visible(false);
-                        st.set_tray_mode(true);
-                        let _ = webview.evaluate_script(enter_idle_js());
-                        return;
-                    }
+                let (close_to_tray, _) = crate::config::tray_settings();
+                if close_to_tray && tray.is_some() {
+                    window.set_visible(false);
+                    st.set_tray_mode(true);
+                    let _ = webview.evaluate_script(enter_idle_js());
+                    return;
                 }
                 FORCE_QUIT.store(true, Ordering::SeqCst);
                 *control_flow = ControlFlow::Exit;
@@ -253,7 +252,8 @@ pub fn run_gui(state: Arc<AppState>) -> i32 {
                 *control_flow = ControlFlow::Exit;
             }
             Event::LoopDestroyed => {
-                #[cfg(windows)]
+                #[cfg(target_os = "macos")]
+                let _ = &macos_menu;
                 if let Some(t) = tray.as_ref() {
                     crate::tray::hide(t);
                 }
@@ -269,8 +269,7 @@ fn handle_gui_command(
     window: &Arc<tao::window::Window>,
     webview: &Arc<wry::WebView>,
     state: &Arc<AppState>,
-    #[cfg(windows)] tray: &Option<crate::tray::Tray>,
-    #[cfg(not(windows))] tray: &Option<()>,
+    tray: &Option<crate::tray::Tray>,
 ) {
     match cmd {
         GuiCommand::Minimize => window.set_minimized(true),
@@ -308,6 +307,11 @@ fn handle_gui_command(
             crate::win::resize_webview_to_client();
             let _ = webview.evaluate_script(exit_idle_js());
         }
+        GuiCommand::ModelStateChanged(loaded) => {
+            if let Some(t) = tray.as_ref() {
+                t.set_model_loaded(loaded);
+            }
+        }
         GuiCommand::ToggleFullscreen => {
             // Linux/macOS: native tao borderless works fine.
             #[cfg(windows)]
@@ -323,9 +327,6 @@ fn handle_gui_command(
                     window.set_fullscreen(Some(Fullscreen::Borderless(None)));
                 }
             }
-        }
-        GuiCommand::EvalJs(code) => {
-            let _ = webview.evaluate_script(&code);
         }
         GuiCommand::DragWindow => {
             let _ = window.drag_window();
@@ -386,30 +387,26 @@ fn handle_gui_command(
             *resize_state().lock().unwrap() = None;
         }
         GuiCommand::HideToTray(tx) => {
-            #[cfg(windows)]
-            {
-                let (close_to_tray, _) = crate::config::tray_settings();
-                let ok = close_to_tray && tray.is_some();
-                if ok {
-                    window.set_visible(false);
-                    state.set_tray_mode(true);
-                    let _ = webview.evaluate_script(enter_idle_js());
-                }
-                let _ = tx.send(ok);
+            let (close_to_tray, _) = crate::config::tray_settings();
+            let ok = close_to_tray && tray.is_some();
+            if ok {
+                window.set_visible(false);
+                state.set_tray_mode(true);
+                let _ = webview.evaluate_script(enter_idle_js());
             }
-            #[cfg(not(windows))]
-            {
-                let _ = (tx, tray, webview);
-            }
+            let _ = tx.send(ok);
         }
     }
 }
 
 fn final_exit() {
-    // same as _final_exit/_nuclear_exit in the old app.py
     #[cfg(windows)]
     {
         crate::win::unregister_context_menu();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        crate::unregister_context_menu_linux();
     }
     let _ = std::fs::remove_file(crate::paths::pid_file());
 }

@@ -29,7 +29,7 @@ jobs:
           workspaces: rust
 
       - name: Build (release)
-        run: cargo build --release
+        run: cargo build --release --bins
 
       - name: Install Inno Setup
         shell: pwsh
@@ -82,6 +82,7 @@ jobs:
           VER="$(grep -oP 'VERSION:\s*&str\s*=\s*"\K[^"]+' rust/src/consts.rs)"
           mkdir -p dist
           cp rust/target/release/tokenatra dist/
+          cp rust/target/release/TokenatraMCP dist/ 2>/dev/null || true
           cp -r templates static token_rings presets icon.ico logo.png mask.png ring.png example.png dist/ 2>/dev/null || true
           tar -C dist -czf "Tokenatra_v${VER}_linux_x86_64.tar.gz" .
           mv "Tokenatra_v${VER}_linux_x86_64.tar.gz" dist/
@@ -114,6 +115,7 @@ jobs:
           VER="$(grep -oE 'VERSION: &str = "[^"]+"' rust/src/consts.rs | grep -oE '"[^"]+"' | tr -d '"')"
           mkdir -p dist
           cp rust/target/release/tokenatra dist/
+          cp rust/target/release/TokenatraMCP dist/ 2>/dev/null || true
           cp -r templates static token_rings presets icon.ico logo.png mask.png ring.png example.png dist/ 2>/dev/null || true
           tar -C dist -czf "Tokenatra_v${VER}_macos_arm64.tar.gz" .
           mv "Tokenatra_v${VER}_macos_arm64.tar.gz" dist/
@@ -121,7 +123,19 @@ jobs:
           APP_DIR="dist/dmg/Tokenatra.app/Contents"
           mkdir -p "$APP_DIR/MacOS" "$APP_DIR/Resources"
           cp rust/target/release/tokenatra "$APP_DIR/MacOS/tokenatra"
+          cp rust/target/release/TokenatraMCP "$APP_DIR/MacOS/TokenatraMCP" 2>/dev/null || true
           cp -r templates static token_rings presets icon.ico logo.png mask.png ring.png example.png "$APP_DIR/Resources/" 2>/dev/null || true
+          if [ -f logo.png ]; then
+            ICONSET="dist/AppIcon.iconset"
+            mkdir -p "$ICONSET"
+            for sz in 16 32 128 256 512; do
+              sips -z $sz $sz logo.png --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null 2>&1 || true
+              sz2=$((sz * 2))
+              sips -z $sz2 $sz2 logo.png --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1 || true
+            done
+            iconutil -c icns "$ICONSET" -o "$APP_DIR/Resources/AppIcon.icns" || true
+            rm -rf "$ICONSET"
+          fi
           cat > "$APP_DIR/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -141,6 +155,8 @@ jobs:
             <string>APPL</string>
             <key>CFBundleExecutable</key>
             <string>tokenatra</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
             <key>NSHighResolutionCapable</key>
             <true/>
           </dict>

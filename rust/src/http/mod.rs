@@ -308,8 +308,7 @@ pub async fn guard_mw(req: Request<Body>, next: Next) -> Response {
         method,
         Method::POST | Method::PUT | Method::DELETE | Method::PATCH
     );
-    if state_changing
-        && !sec_fetch_site.is_empty()
+    if !sec_fetch_site.is_empty()
         && !["same-origin", "same-site", "none"].contains(&sec_fetch_site.as_str())
     {
         return forbidden();
@@ -358,10 +357,11 @@ pub async fn headers_mw(req: Request<Body>, next: Next) -> Response {
 
     let origin_normalized = origin_hdr.trim().trim_end_matches('/').to_lowercase();
     let allowed = crate::config::allowed_origins();
+    let allow_b = crate::config::allow_browser();
     let origin_in_allowed = !origin_normalized.is_empty() && allowed.contains(&origin_normalized);
-    let config_read = path == "/config" && origin_in_allowed;
+    let config_read = path == "/config" && (origin_in_allowed || allow_b);
     let ui_read = (method == Method::GET || method == Method::HEAD)
-        && origin_in_allowed
+        && (origin_in_allowed || allow_b)
         && is_ui_asset_path(&path);
 
     if is_connector_route(&path) || is_public_proxy_route(&path) || config_read || ui_read {
@@ -453,6 +453,7 @@ pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
         .route("/sessions/{sid}/preview", get(agent::op_preview))
         .route("/sessions/{sid}/inspect", get(agent::op_inspect))
         .route("/sessions/{sid}/export", post(agent::op_export))
+        .layer(axum::extract::DefaultBodyLimit::max(15 * 1024 * 1024))
         .with_state(state.clone());
 
     let mut r = axum::Router::new()

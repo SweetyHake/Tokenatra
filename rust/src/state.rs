@@ -20,6 +20,8 @@ pub struct AppState {
     /// Inference monopoly (session_lock equivalent): from session setup
     /// to run(); two live DML sessions break ExecuteKernel.
     pub session_lock: Mutex<Option<crate::infer::Session>>,
+    /// Lock-free indicator of whether the ONNX session is currently loaded.
+    pub model_loaded: AtomicBool,
     /// Tray mode (window hidden).
     pub tray_mode: AtomicBool,
     pub last_activity: AtomicU64, // unix seconds
@@ -46,11 +48,21 @@ impl AppState {
             device_name: RwLock::new("Определение…".into()),
             provider_cfg: RwLock::new(None),
             session_lock: Mutex::new(None),
+            model_loaded: AtomicBool::new(false),
             tray_mode: AtomicBool::new(false),
             last_activity: AtomicU64::new(now_secs()),
             picked_folders: Mutex::new(Vec::new()),
             embed_exports: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub fn set_model_loaded(&self, loaded: bool) {
+        self.model_loaded.store(loaded, Ordering::SeqCst);
+        let _ = crate::gui_control::send(crate::gui_control::GuiCommand::ModelStateChanged(loaded));
+    }
+
+    pub fn is_model_loaded(&self) -> bool {
+        self.model_loaded.load(Ordering::SeqCst)
     }
 
     pub fn mark_activity(&self) {
@@ -107,9 +119,9 @@ impl AppState {
 
     /// Clears the export directory (app startup).
     pub fn remember_picked_folder(&self, p: PathBuf) {
-        let norm = crate::http::files::norm_folder(&p);
+        let norm = crate::paths::norm_folder(&p);
         let mut f = self.picked_folders.lock().unwrap();
-        if !f.iter().any(|x| crate::http::files::norm_folder(x) == norm) {
+        if !f.iter().any(|x| crate::paths::norm_folder(x) == norm) {
             f.push(p);
         }
     }

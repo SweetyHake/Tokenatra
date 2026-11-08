@@ -165,17 +165,16 @@ fn load_session_inner(state: &AppState) -> anyhow::Result<Session> {
 
     use ort::session::builder::GraphOptimizationLevel as G;
     let mut session = None;
-    let mut cur_providers = providers.clone();
     let mut cur_dml = dml_device_id;
 
     // 1. EXTENDED + EP (+device_id)
-    if let Ok(s) = try_build(&model_path, G::Level2, intra, &cur_providers, cur_dml) {
+    if let Ok(s) = try_build(&model_path, G::Level2, intra, &providers, cur_dml) {
         session = Some(s);
     }
     // 2. no device_id (auto DML adapter selection failed)
-    if session.is_none() && cur_dml.is_some() && cur_providers != ["CPUExecutionProvider".to_string()] {
+    if session.is_none() && cur_dml.is_some() && providers != ["CPUExecutionProvider".to_string()] {
         println!("  Адаптер #{:?} не запустился — пробуем дефолтный…", cur_dml);
-        if let Ok(s) = try_build(&model_path, G::Level2, intra, &cur_providers, None) {
+        if let Ok(s) = try_build(&model_path, G::Level2, intra, &providers, None) {
             session = Some(s);
             cur_dml = None;
             println!("  Дефолтный адаптер работает.");
@@ -184,7 +183,7 @@ fn load_session_inner(state: &AppState) -> anyhow::Result<Session> {
     // 3. BASIC (known ORT LayerNorm-fusion bug)
     if session.is_none() {
         println!("  Оптимизация EXTENDED не загрузилась — откат на BASIC…");
-        if let Ok(s) = try_build(&model_path, G::Level1, intra, &cur_providers, cur_dml) {
+        if let Ok(s) = try_build(&model_path, G::Level1, intra, &providers, cur_dml) {
             session = Some(s);
         }
     }
@@ -192,7 +191,7 @@ fn load_session_inner(state: &AppState) -> anyhow::Result<Session> {
     let s = match session {
         Some(s) => s,
         None => {
-            if cur_providers != ["CPUExecutionProvider".to_string()] {
+            if providers != ["CPUExecutionProvider".to_string()] {
                 println!("  GPU-провайдер не запустился — откат на CPU…");
                 state
                     .device_name
@@ -203,8 +202,6 @@ fn load_session_inner(state: &AppState) -> anyhow::Result<Session> {
             try_build(&model_path, G::Level1, intra, &["CPUExecutionProvider".to_string()], None)?
         }
     };
-    cur_providers = vec!["CPUExecutionProvider".into()];
-    let _ = cur_providers;
 
     let input_name = s.inputs()[0].name().to_string();
     let mut sess = Session { session: s, input_name };
@@ -231,48 +228,54 @@ fn try_build(
 }
 
 /// Returns the live session, creating it if needed (under session_lock).
-#[cfg_attr(not(windows), allow(dead_code))] // windows-only DirectML tuning path
 pub fn load_session(state: &Arc<AppState>) -> anyhow::Result<()> {
     let mut guard = state.session_lock.lock().unwrap();
     if guard.is_none() {
         *guard = Some(load_session_inner(state)?);
-        crate::tray_control::notify_model_state(true);
+        state.set_model_loaded(true);
         drop(guard);
         spawn_tune_child(state);
     }
     Ok(())
 }
 
-/// Unloads the ONNX session (tray idle). True if unloaded.
+/// Unloads the ONNX session. True if unloaded.
 pub fn unload_model(state: &Arc<AppState>) -> bool {
     let mut guard = state.session_lock.lock().unwrap();
     if guard.is_none() {
+        state.set_model_loaded(false);
         return false;
     }
     *guard = None;
+    state.set_model_loaded(false);
     drop(guard);
-    println!("[tray] Модель выгружена по простою в трее");
-    crate::tray_control::notify_model_state(false);
+    println!("[tray] Модель выгружена по простою");
     true
 }
 
 pub fn model_loaded(state: &Arc<AppState>) -> bool {
-    state.session_lock.lock().unwrap().is_some()
+    state.is_model_loaded()
 }
 
 /// Inference under session_lock (from session setup to run).
 pub fn run_inference(state: &Arc<AppState>, tensor: Vec<f32>) -> anyhow::Result<Vec<f32>> {
     let mut guard = state.session_lock.lock().unwrap();
+    let mut freshly_loaded = false;
     if guard.is_none() {
         let t_infer = Instant::now();
         *guard = Some(load_session_inner(state)?);
         println!("  Загрузка модели: {:.2} с", t_infer.elapsed().as_secs_f32());
-        crate::tray_control::notify_model_state(true);
+        state.set_model_loaded(true);
+        freshly_loaded = true;
     }
     let t0 = Instant::now();
     let sess = guard.as_mut().unwrap();
     let out = sess.run(tensor);
     println!("  Инференс: {:.2} с", t0.elapsed().as_secs_f32());
+    drop(guard);
+    if freshly_loaded {
+        spawn_tune_child(state);
+    }
     out
 }
 

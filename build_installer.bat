@@ -1,13 +1,13 @@
 @echo off
 setlocal
-rem Сборка Windows-установщика: cargo build + Inno Setup (installer.iss)
-rem Inno Setup: https://jrsoftware.org/isdl.php (ISCC.exe в PATH или Program Files)
+rem РЎР±РѕСЂРєР° Windows-СѓСЃС‚Р°РЅРѕРІС‰РёРєР°: cargo build + Inno Setup (installer.iss)
+rem Inno Setup: https://jrsoftware.org/isdl.php (ISCC.exe РІ PATH РёР»Рё Program Files)
 
 set ROOT=%~dp0
 
-echo [1/3] cargo build --release
+echo [1/3] cargo build --release --bins
 pushd "%ROOT%rust"
-cargo build --release
+cargo build --release --bins
 if errorlevel 1 (
     echo [ERROR] cargo build failed
     popd & exit /b 1
@@ -21,7 +21,7 @@ if not exist %ISCC% (
     exit /b 1
 )
 
-echo [2/3] Версия из rust\src\consts.rs
+echo [2/3] Р’РµСЂСЃРёСЏ РёР· rust\src\consts.rs
 for /f "tokens=2 delims==" %%v in ('findstr /C:"pub const VERSION" "%ROOT%rust\src\consts.rs"') do set APPVER=%%~v
 set APPVER=%APPVER:"=%
 set APPVER=%APPVER:;=%

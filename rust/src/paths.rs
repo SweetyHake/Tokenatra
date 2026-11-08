@@ -71,7 +71,7 @@ pub fn base_dir() -> &'static Path {
 }
 
 fn probe_write(dir: &Path) -> bool {
-    let probe = dir.join(".tokenatra_write_probe");
+    let probe = dir.join(format!(".tokenatra_write_probe_{}", unique_tmp_tag()));
     std::fs::write(&probe, b"x").is_ok() && std::fs::remove_file(&probe).is_ok()
 }
 
@@ -188,22 +188,32 @@ pub fn migrate_legacy_model() {
 
 /// Selected model path: config selected_model -> first .onnx in models/.
 pub fn get_selected_model_path() -> PathBuf {
+    let candidates = [
+        models_dir(),
+        base_dir().join("models"),
+        resource_dir().join("models"),
+    ];
     if let Ok(cfg) = crate::config::load()
-        && let Some(sel) = cfg.get("selected_model").and_then(|v| v.as_str()) {
-            let p = models_dir().join(Path::new(sel).file_name().unwrap_or_default());
+        && let Some(sel) = cfg.get("selected_model").and_then(|v| v.as_str())
+        && let Some(fname) = Path::new(sel).file_name()
+    {
+        for dir in &candidates {
+            let p = dir.join(fname);
             if p.exists() {
                 return p;
             }
         }
-    if let Some(p) = first_onnx_in(&models_dir()) {
-        return p;
     }
-    // portable builds: models next to the exe
-    let legacy = base_dir().join("models");
-    if !same_path(&legacy, &models_dir())
-        && let Some(p) = first_onnx_in(&legacy) {
+    let mut visited: Vec<PathBuf> = Vec::new();
+    for dir in &candidates {
+        if visited.iter().any(|v| same_path(v, dir)) {
+            continue;
+        }
+        visited.push(dir.clone());
+        if let Some(p) = first_onnx_in(dir) {
             return p;
         }
+    }
     models_dir().join("model.onnx")
 }
 
@@ -243,8 +253,72 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// moved to RING_DIR; BASE_DIR is read-only in installed builds.
-/// moved to RING_DIR; BASE_DIR is read-only in installed builds.
+/// str(Path) without the canonicalize verbatim prefix.
+pub fn clean_path(p: &Path) -> String {
+    let s = p.to_string_lossy().to_string();
+    // Network files canonicalize to the verbatim UNC form
+    // \\?\UNC\server\share\...; strip it back to \\server\share\... (the
+    // leftover "UNC\..." form is not a valid path and 404s on re-fetch).
+    const VERBATIM_UNC: &str = "\\\\?\\UNC\\";
+    if let Some(rest) = s.strip_prefix(VERBATIM_UNC) {
+        return format!("\\\\{rest}");
+    }
+    const VERBATIM: &str = "\\\\?\\";
+    s.strip_prefix(VERBATIM).unwrap_or(&s).to_string()
+}
+
+#[cfg(windows)]
+pub fn norm_folder(p: &Path) -> PathBuf {
+    let s = clean_path(p).to_lowercase().replace('/', "\\");
+    let s = s.trim_end_matches('\\').to_string();
+    PathBuf::from(s)
+}
+
+#[cfg(not(windows))]
+pub fn norm_folder(p: &Path) -> PathBuf {
+    let mut s = p.to_string_lossy().to_string();
+    if let Ok(c) = std::fs::canonicalize(p) {
+        s = c.to_string_lossy().to_string();
+    }
+    if s.len() > 1 {
+        s = s.trim_end_matches('/').to_string();
+    }
+    PathBuf::from(s)
+}
+
+pub fn unique_tmp_tag() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let rnd: u32 = rand::random();
+    format!("{}_{seq}_{rnd:08x}", std::process::id())
+}
+
+/// Atomic file write (temp + sync + rename).
+pub fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    let tmp = path.with_file_name(format!(".{file_name}.{}.tmp", unique_tmp_tag()));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        if let Err(e) = f.write_all(data).and_then(|_| f.sync_all()) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    }
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+/// Migrates user-added rings out of the read-only builtin resource dir into user_data_dir.
 pub fn migrate_legacy_rings() {
     let builtin = builtin_ring_dir();
     let rings = ring_dir();
@@ -259,11 +333,9 @@ pub fn migrate_legacy_rings() {
     let exts = ["webp", "png", "jpg", "jpeg"];
     for entry in entries.filter_map(|e| e.ok()) {
         let f = entry.path();
-        let meta = match f.metadata() {
-            Ok(m) if m.is_file() => m,
-            _ => continue,
-        };
-        let _ = meta;
+        if !f.metadata().map(|m| m.is_file()).unwrap_or(false) {
+            continue;
+        }
         let ext = f
             .extension()
             .and_then(|e| e.to_str())

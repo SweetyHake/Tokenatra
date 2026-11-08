@@ -1,9 +1,17 @@
 [package]
 name = "tokenatra"
-version = "26.5.0"
+version = "26.5.1"
 edition = "2024"
 description = "Tokenatra: token editor & background remover"
 default-run = "tokenatra"
+
+[[bin]]
+name = "tokenatra"
+path = "src/main.rs"
+
+[[bin]]
+name = "TokenatraMCP"
+path = "src/bin/tokenatra_mcp.rs"
 
 [profile.release]
 opt-level = 3
@@ -32,6 +40,8 @@ url = "2.5"
 webp = "0.3"
 which = "8"
 wry = "0.57"
+tray-icon = "0.21"
+muda = "0.17"
 
 # ONNX Runtime (pyke io). Static prebuilt binaries exist per EP set, and
 # pyke ships no binary with several GPU EPs combined, so targets differ:
@@ -44,8 +54,6 @@ half = "2.7.1"
 [target.'cfg(windows)'.dependencies]
 # DirectML covers AMD/Intel (and is the NVIDIA fallback); CUDA for NVIDIA
 ort = { version = "2.0.0-rc.15", features = ["directml", "cuda"] }
-tray-icon = "0.21"
-muda = "0.17"
 # registry verbs / context menu (win.rs); module itself is cfg(windows)-gated
 winreg = "0.56"
 windows = { version = "0.62", features = [

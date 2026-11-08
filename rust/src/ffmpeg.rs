@@ -1,7 +1,5 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
 
 /// Locates FFmpeg next to the app, in tools/ or on PATH.
 pub fn find_ffmpeg() -> Option<PathBuf> {
@@ -44,7 +42,7 @@ pub fn convert_media_to_ogg(data: &[u8], src_ext: &str, quality: u8) -> Result<V
     })?;
 
     let tmp = std::env::temp_dir();
-    let uniq = std::process::id();
+    let uniq = crate::paths::unique_tmp_tag();
     let input_path = tmp.join(format!("tokenatra_{uniq}_in{}", src_ext));
     let output_path = tmp.join(format!("tokenatra_{uniq}_out.ogg"));
     let _ = std::fs::remove_file(&input_path);
@@ -84,7 +82,7 @@ pub fn vorbis_quality(quality: u8) -> i32 {
 pub fn decode_to_png(data: &[u8]) -> Option<Vec<u8>> {
     let ffmpeg = find_ffmpeg()?;
     let tmp = std::env::temp_dir();
-    let uniq = std::process::id();
+    let uniq = crate::paths::unique_tmp_tag();
     let in_path = tmp.join(format!("tokenatra_{uniq}.avif"));
     std::fs::write(&in_path, data).ok()?;
     let out = (|| -> Option<Vec<u8>> {
@@ -107,44 +105,50 @@ pub fn decode_to_png(data: &[u8]) -> Option<Vec<u8>> {
 }
 
 pub fn notify(message: &str) {
-    let msg = message.to_string();
-    std::thread::spawn(move || {
-        if cfg!(target_os = "macos") {
-            let escaped = msg.replace('\\', "\\\\").replace('"', "\\\"");
-            let _ = Command::new("osascript")
-                .args(["-e", &format!("display notification \"{escaped}\" with title \"Tokenatra\"")])
-                .spawn();
-        } else if cfg!(target_os = "linux") {
-            let _ = Command::new("notify-send").args(["-a", "Tokenatra", &msg]).spawn();
-        } else {
-            let ps = format!(
-                "[System.Reflection.Assembly]::LoadWithPartialName(\"System.Windows.Forms\") | Out-Null; \
-                 $n = New-Object System.Windows.Forms.NotifyIcon; \
-                 $n.Icon = [System.Drawing.SystemIcons]::Information; \
-                 $n.Visible = $true; \
-                 $n.ShowBalloonTip(4000, \"Tokenatra\", \"{msg}\", [System.Windows.Forms.ToolTipIcon]::Info); \
-                 Start-Sleep -Milliseconds 4500; \
-                 $n.Dispose()"
-            );
-            let _ = no_window(Command::new("powershell")
-                .args(["-WindowStyle", "Hidden", "-Command", &ps]))
-                .spawn();
-        }
-    });
+    if cfg!(target_os = "macos") {
+        let _ = Command::new("osascript")
+            .args([
+                "-e",
+                "on run argv",
+                "-e",
+                "display notification (item 1 of argv) with title \"Tokenatra\"",
+                "-e",
+                "end run",
+                "--",
+                message,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    } else if cfg!(target_os = "linux") {
+        let _ = Command::new("notify-send")
+            .args(["-a", "Tokenatra", "--", message])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    } else {
+        let ps = "[System.Reflection.Assembly]::LoadWithPartialName(\"System.Windows.Forms\") | Out-Null; \
+                  $n = New-Object System.Windows.Forms.NotifyIcon; \
+                  $n.Icon = [System.Drawing.SystemIcons]::Information; \
+                  $n.Visible = $true; \
+                  $n.ShowBalloonTip(4000, \"Tokenatra\", $env:TOKENATRA_NOTIFY_MSG, [System.Windows.Forms.ToolTipIcon]::Info); \
+                  Start-Sleep -Milliseconds 4500; \
+                  $n.Dispose()";
+        let _ = no_window(
+            Command::new("powershell")
+                .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
+                .env("TOKENATRA_NOTIFY_MSG", message)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .spawn();
+    }
 }
 
 /// Atomic file write (temp + rename).
 pub fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        std::process::id()
-    ));
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(data)?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)
+    crate::paths::atomic_write(path, data)
 }
-
-pub const _UNUSED: Duration = Duration::from_secs(0);

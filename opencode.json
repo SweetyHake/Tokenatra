@@ -4,7 +4,7 @@
     "servers": {
       "tokenatra": {
         "type": "local",
-        "command": ["Z:\\Tokenatra\\mcp\\TokenatraMCP\\TokenatraMCP.exe"]
+        "command": ["Z:\\Tokenatra\\rust\\target\\release\\TokenatraMCP.exe"]
       }
     }
   }

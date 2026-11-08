@@ -160,7 +160,7 @@ pub async fn shutdown() -> Response {
 }
 
 pub async fn apply_update() -> Response {
-    apply_update_inner().await
+    apply_update_sync()
 }
 
 fn status_str(key: &str) -> String {
@@ -169,10 +169,6 @@ fn status_str(key: &str) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string()
-}
-
-fn apply_update_inner() -> std::future::Ready<Response> {
-    std::future::ready(apply_update_sync())
 }
 
 fn apply_update_sync() -> Response {
@@ -203,24 +199,23 @@ fn apply_update_sync() -> Response {
         }
         apply_update_linux(&src)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
     {
         apply_update_windows(&src)
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(windows)]
 fn apply_update_windows(src: &str) -> Response {
     use std::process::Command;
     let kind = status_str("download_kind");
 
     let exe = std::env::current_exe().unwrap_or_default();
-    let (dst, is_frozen) = if exe.file_name().map(|n| n == "tokenatra.exe" || n == "Tokenatra.exe").unwrap_or(false) {
-        (exe.to_string_lossy().to_string(), true)
+    let dst = if exe.file_name().map(|n| n == "tokenatra.exe" || n == "Tokenatra.exe").unwrap_or(false) {
+        exe.to_string_lossy().to_string()
     } else {
-        (paths::base_dir().join("Tokenatra.exe").to_string_lossy().to_string(), false)
+        paths::base_dir().join("Tokenatra.exe").to_string_lossy().to_string()
     };
-    let _ = is_frozen;
     let exe_name = std::path::Path::new(&dst)
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
@@ -416,23 +411,46 @@ fn apply_update_linux(src: &str) -> Response {
             "Обновление доступно только для AppImage-версии. Скачайте новый файл вручную.",
         );
     };
-    let appimage = std::path::PathBuf::from(appimage);
-    let tmp = appimage.with_extension(format!("{}.new", appimage.extension().and_then(|e| e.to_str()).unwrap_or("AppImage")));
-    let tmp = appimage.parent().map(|p| p.join(format!("{}.new", appimage.file_name().and_then(|n| n.to_str()).unwrap_or_default()))).unwrap_or(tmp);
-    if std::fs::copy(src, &tmp).is_err() {
-        return err_status(StatusCode::INTERNAL_SERVER_ERROR, "Не удалось скопировать обновление");
+    let upd_dir = crate::updater::update_dir();
+    let script = upd_dir.join("_update_appimage.sh");
+    let body = r#"#!/bin/sh
+tries=0
+while kill -0 "$PID" 2>/dev/null; do
+  tries=$((tries+1))
+  [ "$tries" -ge 120 ] && break
+  sleep 0.5
+done
+sleep 1
+TMP="${APPIMAGE}.new"
+if cp -f "$SRC" "$TMP"; then
+  chmod +x "$TMP" 2>/dev/null
+  if mv -f "$TMP" "$APPIMAGE"; then
+    rm -f "$SRC"
+    "$APPIMAGE" >/dev/null 2>&1 &
+  else
+    rm -f "$TMP" 2>/dev/null
+  fi
+fi
+rm -f "$0"
+"#;
+    if std::fs::write(&script, body).is_err() {
+        return err_status(StatusCode::INTERNAL_SERVER_ERROR, "Не удалось записать скрипт обновления");
     }
     use std::os::unix::fs::PermissionsExt;
-    if let Ok(meta) = std::fs::metadata(&tmp) {
-        let mut perms = meta.permissions();
-        perms.set_mode(0o755);
-        let _ = std::fs::set_permissions(&tmp, perms);
+    let mut perms = std::fs::metadata(&script)
+        .map(|m| m.permissions())
+        .unwrap_or_else(|_| std::fs::Permissions::from_mode(0o644));
+    perms.set_mode(0o755);
+    let _ = std::fs::set_permissions(&script, perms);
+
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg(&script)
+        .env("SRC", src)
+        .env("APPIMAGE", &appimage)
+        .env("PID", std::process::id().to_string());
+    if cmd.spawn().is_err() {
+        return err_status(StatusCode::INTERNAL_SERVER_ERROR, "Не удалось запустить обновление");
     }
-    if std::fs::rename(&tmp, &appimage).is_err() {
-        return err_status(StatusCode::INTERNAL_SERVER_ERROR, "Не удалось заменить AppImage");
-    }
-    let _ = std::fs::remove_file(src);
-    let _ = Command::new(appimage.as_os_str()).spawn();
     ok_json(json!({ "ok": true }))
 }
 
