@@ -73,6 +73,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/tokenatra.exe dist/
+          cp target/release/DirectML.dll dist/ 2>/dev/null || true
           cp target/release/TokenatraMCP.exe dist/ 2>/dev/null || true
           cp -r ../templates ../static ../token_rings ../presets ../icon.ico ../logo.png ../mask.png ../ring.png ../example.png dist/ 2>/dev/null || true
           7z a -tzip "${{ matrix.artifact }}.zip" dist

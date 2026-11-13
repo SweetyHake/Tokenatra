@@ -166,6 +166,15 @@ pub fn gpu_device_id() -> Option<i64> {
         .filter(|v| *v >= 0)
 }
 
+pub fn max_agent_sessions() -> usize {
+    let cfg = load().unwrap_or_else(|_| json!({}));
+    cfg.get("agentSessionsLimit")
+        .or_else(|| cfg.get("max_agent_sessions"))
+        .and_then(|v| v.as_u64())
+        .map(|n| (n as usize).clamp(1, 64))
+        .unwrap_or(8)
+}
+
 /// Server keys the client snapshot must not overwrite.
 pub fn merge_client_config(
     data: &Map<String, Value>,
@@ -252,6 +261,16 @@ pub fn set_key(key: &str, value: Value) -> anyhow::Result<()> {
             obj.insert(key.to_string(), value.clone());
         }
         Some(())
+    })?;
+    Ok(())
+}
+
+/// Removes a top-level key from config.json if present.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn remove_key(key: &str) -> anyhow::Result<()> {
+    update(|cfg| {
+        let removed = cfg.as_object_mut().and_then(|obj| obj.remove(key));
+        removed.map(|_| ())
     })?;
     Ok(())
 }

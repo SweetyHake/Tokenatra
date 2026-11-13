@@ -6,6 +6,7 @@ mod cli;
 mod config;
 mod consts;
 mod ffmpeg;
+mod foundry_rings;
 mod gui_control;
 mod http;
 mod imaging;

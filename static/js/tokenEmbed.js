@@ -58,6 +58,27 @@ var TokenEmbed = (function() {
         }
         // Без parentOrigin мост неактивен: отвечать некому, '*' запрещён
         active = !!parentOrigin;
+        if (active && typeof state !== 'undefined') {
+            state.embed = true;
+            state.ringSource = 'foundry';
+            document.documentElement.dataset.ringSource = 'foundry';
+        }
+    }
+
+    var foundryRingSeq = 0;
+    var foundryRingPending = new Map();
+
+    function requestFoundryRing(id) {
+        if (!active || !id) return Promise.reject(new Error('embed inactive'));
+        var reqId = 'fr-' + (++foundryRingSeq);
+        return new Promise(function(resolve, reject) {
+            var timer = setTimeout(function() {
+                foundryRingPending.delete(reqId);
+                reject(new Error('foundry ring timeout'));
+            }, 25000);
+            foundryRingPending.set(reqId, { resolve: resolve, reject: reject, timer: timer });
+            send({ type: 'tokenatra:get-foundry-ring', reqId: reqId, id: id });
+        });
     }
 
     function send(msg) {
@@ -90,6 +111,8 @@ var TokenEmbed = (function() {
                 savedAt: new Date().toISOString(),
                 scale: state.imageScale,
                 rotation: state.imageRotation,
+                ringSource: state.ringSource || 'tokenatra',
+                foundryRingId: state.activeFoundryRingId || null,
                 ring: ringEl ? (ringEl.dataset.ringName || null) : null,
                 preset: presetName,
                 shadow: {
@@ -132,7 +155,7 @@ var TokenEmbed = (function() {
 
     // Применение снапшота из флагов: слайдеры/чекбоксы через штатные
     // обработчики (dispatch input/change), кольцо и пресет — кликом
-    function applySnapshotSettings(s) {
+    function applySnapshotSettings(s, restoreCtx) {
         if (!s) return;
         if (typeof s.scale === 'number') {
             var sc = Math.round(s.scale * 100);
@@ -147,9 +170,26 @@ var TokenEmbed = (function() {
             var rotInput = document.getElementById('rotationInput');
             if (rotInput) rotInput.value = s.rotation;
         }
-        if (s.ring) {
-            var thumb = document.querySelector('.ring-thumb[data-ring-name="' + String(s.ring).replace(/"/g, '\\"') + '"]');
-            if (thumb) thumb.click();
+        var ctx = restoreCtx || {};
+        var useTokenatraRing = (s.ringSource === 'tokenatra' && ctx.actorRingEnabled === false);
+        if (typeof TokenPresets !== 'undefined') {
+            if (useTokenatraRing) {
+                TokenPresets.setRingSource('tokenatra');
+                if (s.ring) {
+                    var thumb = document.querySelector('.ring-thumb[data-ring-name="' + String(s.ring).replace(/"/g, '\\"') + '"]');
+                    if (thumb) thumb.click();
+                }
+            } else {
+                var targetFoundryId = ctx.actorExplicitRingId || s.foundryRingId || ctx.actorFoundryRingId || state.activeFoundryRingId;
+                if (targetFoundryId) state.activeFoundryRingId = targetFoundryId;
+                TokenPresets.setRingSource('foundry');
+                if (targetFoundryId && state.foundryRings && state.foundryRings.length) {
+                    TokenPresets.selectFoundryRing(targetFoundryId);
+                }
+            }
+        } else if (s.ring) {
+            var thumbFallback = document.querySelector('.ring-thumb[data-ring-name="' + String(s.ring).replace(/"/g, '\\"') + '"]');
+            if (thumbFallback) thumbFallback.click();
         }
         if (s.preset && typeof TokenPresets !== 'undefined' && state.eraserPresets) {
             var idx = -1;
@@ -189,7 +229,7 @@ var TokenEmbed = (function() {
     var foundrySourcePath = null;
 
     // Восстановление из флагов актора: оригинал в редактор, поверх — настройки
-    function restoreFromSnapshot(originalUrl, filename, settings, sourcePath) {
+    function restoreFromSnapshot(originalUrl, filename, settings, sourcePath, restoreCtx) {
         loadIntoEditor(originalUrl, filename || 'original.png', sourcePath);
         if (!settings) return;
         var t0 = Date.now();
@@ -197,7 +237,7 @@ var TokenEmbed = (function() {
             // loadImage асинхронен: настройки применяем, когда изображение в редакторе
             if (!state.userImage && Date.now() - t0 < 10000) return;
             clearInterval(iv);
-            try { applySnapshotSettings(settings); } catch (err) {
+            try { applySnapshotSettings(settings, restoreCtx); } catch (err) {
                 send({ type: 'tokenatra:error', message: 'restore failed: ' + err });
             }
         }, 200);
@@ -280,7 +320,9 @@ var TokenEmbed = (function() {
             toast(I18n.t('Сначала загрузите изображение'), true);
             return;
         }
-        var withRing = kind === 'token';
+        var useFoundryRing = (state.ringSource === 'foundry' && !!state.activeFoundryRingId);
+        var effectiveKind = useFoundryRing ? 'subject' : kind;
+        var withRing = !useFoundryRing && effectiveKind === 'token';
         var result = TokenCanvas.renderForSave(withRing);
         if (!result || !result.canvas) return;
         var fmt = (AppConfig.saveSettings && AppConfig.saveSettings.format) || 'webp';
@@ -288,7 +330,7 @@ var TokenEmbed = (function() {
         var mime = fmt === 'png' ? 'image/png' : (fmt === 'jpg' ? 'image/jpeg' : 'image/webp');
         var quality = fmt === 'png' ? undefined
             : Math.min(1, Math.max(0.01, (parseInt(AppConfig.saveSettings.compression) || 95) / 100));
-        var base = (state.tokenFileName.trim() || 'token') + '-' + kind;
+        var base = (state.tokenFileName.trim() || 'token') + '-' + effectiveKind;
         // JPEG без альфы: прозрачный фон стал бы чёрным — композитим на белый
         // (тот же фолбэк, что и TokenCanvas.save)
         var outCanvas = result.canvas;
@@ -312,10 +354,11 @@ var TokenEmbed = (function() {
         var metrics = { scale: exportScale, scaleX: exportScale, scaleY: exportScale };
         outCanvas.toBlob(function(blob) {
             if (blob) uploadAndSend(blob, base + '.' + fmt, fmt, {
-                kind: kind,
+                kind: effectiveKind,
                 scale: metrics.scale,
                 scaleX: metrics.scaleX,
-                scaleY: metrics.scaleY
+                scaleY: metrics.scaleY,
+                foundryRingId: useFoundryRing ? state.activeFoundryRingId : null
             });
         }, mime, quality);
     }
@@ -492,6 +535,27 @@ var TokenEmbed = (function() {
             if (!d || typeof d !== 'object') return;
             if (d.type === 'tokenatra:ping') {
                 send({ type: 'tokenatra:pong', version: window.__APP_VERSION, connectorApi: 1 });
+            } else if (d.type === 'tokenatra:foundry-rings') {
+                whenAppReady(function() {
+                    if (typeof TokenPresets !== 'undefined' && TokenPresets.receiveFoundryRings) {
+                        TokenPresets.receiveFoundryRings(d);
+                    }
+                });
+            } else if (d.type === 'tokenatra:foundry-ring-thumb') {
+                if (typeof TokenPresets !== 'undefined' && TokenPresets.updateFoundryRingThumb) {
+                    TokenPresets.updateFoundryRingThumb(d.id, d.thumbUrl, d.scale);
+                }
+            } else if (d.type === 'tokenatra:foundry-ring-data' && d.reqId) {
+                var pending = foundryRingPending.get(d.reqId);
+                if (pending) {
+                    clearTimeout(pending.timer);
+                    foundryRingPending.delete(d.reqId);
+                    if (d.ok && d.ringBlob) {
+                        pending.resolve({ id: d.id, scale: d.scale || 1, ringBlob: d.ringBlob, topBlob: d.topBlob || null });
+                    } else {
+                        pending.reject(new Error(d.error || 'foundry ring failed'));
+                    }
+                }
             } else if (d.type === 'tokenatra:load' && d.dataUrl) {
                 whenAppReady(function() {
                     loadIntoEditor(d.dataUrl, d.filename, d.sourcePath);
@@ -499,7 +563,11 @@ var TokenEmbed = (function() {
                 });
             } else if (d.type === 'tokenatra:restore' && d.originalUrl) {
                 whenAppReady(function() {
-                    restoreFromSnapshot(d.originalUrl, d.filename, d.settings, d.sourcePath);
+                    restoreFromSnapshot(d.originalUrl, d.filename, d.settings, d.sourcePath, {
+                        actorExplicitRingId: d.actorExplicitRingId || null,
+                        actorFoundryRingId: d.actorFoundryRingId || null,
+                        actorRingEnabled: d.actorRingEnabled
+                    });
                     wrapLoadImage();
                 });
             }
@@ -538,6 +606,7 @@ var TokenEmbed = (function() {
     return {
         isActive: function() { return active; },
         pickFile: function() { send({ type: 'tokenatra:pick-file' }); },
+        requestFoundryRing: requestFoundryRing,
         createRemoverButton: createRemoverButton,
         exportEditor: exportEditor
     };

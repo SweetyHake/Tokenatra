@@ -402,22 +402,49 @@ html.embed .quick-save-folder-row.example-file-row{ display: flex; }.quick-save-
     transition: all var(--dur-fast) var(--ease-out);
     font-family: inherit; text-align: center;
 }.rtab-btn:hover{ color: var(--text-secondary); }.rtab-btn.active{ background: var(--bg-hover); color: var(--text-primary); box-shadow: var(--elev-1); }.rtab-content{ display: none; flex-direction: column; gap: 0; }.rtab-content.active{ display: flex; }/* ── Ring grid ───────────────────────────────────────────────── */
-.ring-carousel{
+.ring-source-row{
+    display: none;
+}html.embed .ring-source-row{
+    display: flex; margin-bottom: 4px;
+}.ring-source-switch{
+    width: 100%;
+}.ring-source-switch .chip-btn{
+    flex: 1 1 0; text-align: center;
+}html.embed[data-ring-source="foundry"] #addRingBtn{
+    display: none;
+}html.embed[data-ring-source="foundry"] #saveBtnRow,
+.save-btn-row.foundry-ring-mode{
+    grid-template-columns: 1fr;
+}html.embed[data-ring-source="foundry"] #saveWithoutRing,
+.save-btn-row.foundry-ring-mode #saveWithoutRing{
+    display: none;
+}.ring-thumb.ring-thumb-loading{
+    background: radial-gradient(circle, var(--bg-section) 42%, var(--border) 60%, var(--bg-base) 72%);
+    opacity: 0.7;
+}.ring-carousel{
     display: flex; align-items: center; gap: 6px;
     container-type: inline-size;
 }.ring-track{
     display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
-    grid-auto-rows: 32px; gap: 6px; flex: 1; align-content: start;
-    max-height: calc(3 * 32px + 2 * 6px + 4px);
-    overflow-y: auto; overflow-x: hidden; padding: 2px 0;
+    gap: 6px; flex: 1; align-content: start;
+    max-height: 146px;
+    overflow-y: auto; overflow-x: hidden; padding: 2px;
     scrollbar-width: none; -ms-overflow-style: none;
 }.ring-track::-webkit-scrollbar{ display: none; }.ring-thumb{
-    width: 100%; max-width: 34px; height: 32px; aspect-ratio: 1;
-    justify-self: start; border-radius: 50%;
+    position: relative; width: 100%; aspect-ratio: 1;
+    border-radius: var(--r-sm);
     background: var(--bg-base); border: 2px solid var(--border);
     cursor: pointer; transition: all var(--dur-fast) var(--ease-out);
     display: flex; align-items: center; justify-content: center; overflow: visible;
-}.ring-thumb img{ width: 100%; height: 100%; object-fit: contain; border-radius: 50%; }.ring-thumb:hover{ border-color: var(--border-light); transform: scale(1.08); }.ring-thumb.active{ border-color: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }.ring-thumb{ position: relative; }.ring-del-btn{
+}.ring-thumb-clip{
+    position: relative; width: 100%; height: 100%;
+    overflow: hidden; border-radius: calc(var(--r-sm) - 2px);
+    display: flex; align-items: center; justify-content: center;
+}.ring-thumb-stage{
+    position: relative; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    transform-origin: center center;
+}.ring-thumb img{ width: 100%; height: 100%; object-fit: contain; display: block; }.ring-thumb img.ring-thumb-top{ position: absolute; inset: 0; pointer-events: none; z-index: 1; }.ring-thumb:hover{ border-color: var(--border-light); transform: scale(1.06); z-index: 2; }.ring-thumb.active{ border-color: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }.ring-del-btn{
     position: absolute; top: -3px; right: -3px; width: 16px; height: 16px;
     display: none; align-items: center; justify-content: center;
     background: var(--danger, #ef4444); border: 2px solid var(--bg-panel);
@@ -771,7 +798,7 @@ html.embed .quick-save-folder-row.example-file-row{ display: flex; }.quick-save-
     background: none; border: none; color: var(--text-muted);
     cursor: pointer; border-radius: var(--r-sm);
     transition: all var(--dur-fast) var(--ease-out);
-}.modal-close:hover{ background: var(--bg-hover); color: var(--text-primary); }.modal-close svg{ width: 16px; height: 16px; }.ring-modal-content{ max-width: 420px; }.ring-form{ display: flex; flex-direction: column; gap: 8px; padding: var(--sp-5); }.ring-form-label{ color: var(--text-secondary); font-size: var(--fs-sm); }.ring-form-label span{ color: var(--text-muted); font-size: var(--fs-xs); }.ring-file-input, .ring-text-input{
+}.modal-close:hover{ background: var(--bg-hover); color: var(--text-primary); }.modal-close svg{ width: 16px; height: 16px; }.ring-modal-content{ max-width: 480px; }.ring-modal-tabs{ padding: 12px var(--sp-5) 0; }.ring-add-switch{ width: 100%; }.ring-add-switch .chip-btn{ flex: 1 1 0; text-align: center; }.ring-form{ display: flex; flex-direction: column; gap: 8px; padding: var(--sp-5); }.ring-form[hidden]{ display: none; }.ring-form-row-2{ display: grid; grid-template-columns: 1fr 96px; gap: 8px; }.ring-form-row-2 > div{ display: flex; flex-direction: column; gap: 6px; min-width: 0; }.ring-import-hint{ margin: 0; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45; }.foundry-pick-actions{ display: flex; gap: 8px; }.foundry-pick-actions .ghost-btn{ flex: 1; justify-content: center; }.foundry-found-wrap{ display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }.foundry-found-wrap[hidden]{ display: none; }.foundry-found-bar{ display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-xs); color: var(--text-secondary); }.foundry-found-toggles{ display: flex; gap: 8px; }.foundry-found-list{ display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; padding: 4px; background: var(--bg-base); border: 1px solid var(--border); border-radius: var(--r-sm); }.foundry-found-item{ display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: var(--r-xs); }.foundry-found-item:hover{ background: var(--bg-hover); }.foundry-found-item input[type="checkbox"]{ flex: 0 0 auto; accent-color: var(--accent); }.foundry-found-name{ flex: 1; min-width: 0; padding: 4px 8px; font-size: var(--fs-xs); }.foundry-found-badges{ display: flex; gap: 4px; flex: 0 0 auto; }.foundry-badge{ font-size: 10px; padding: 2px 6px; border-radius: 99px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }.foundry-badge.accent{ border-color: var(--accent); color: var(--accent); }.foundry-import-status{ font-size: var(--fs-xs); color: var(--danger, #ff6b6b); }.foundry-import-status[hidden]{ display: none; }.ring-form-label{ color: var(--text-secondary); font-size: var(--fs-sm); }.ring-form-label span{ color: var(--text-muted); font-size: var(--fs-xs); }.ring-file-input, .ring-text-input{
     width: 100%; box-sizing: border-box; padding: 8px 10px;
     background: var(--bg-input); border: 1px solid var(--border);
     border-radius: var(--r-sm); color: var(--text-primary); font: inherit; font-size: var(--fs-sm);

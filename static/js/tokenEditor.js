@@ -12,6 +12,7 @@ const TokenEditor = {
         TokenPresets.loadProtectionMask();
         TokenPresets.loadPresets();
         TokenPresets.setupRingModal();
+        TokenPresets.setupRingSourceSwitch();
         TokenPresets.loadRings();
 
         this.setupDropzone();
@@ -758,7 +759,9 @@ const TokenEditor = {
             if (!state.userImage) return;
             if (previewTimer) clearTimeout(previewTimer);
             previewTimer = setTimeout(function() {
-                var result = TokenCanvas.renderForSave(withRing);
+                var isFoundryRingMode = !!(state.embed && state.ringSource === 'foundry');
+                var effectiveWithRing = isFoundryRingMode ? false : withRing;
+                var result = TokenCanvas.renderForSave(effectiveWithRing);
                 if (!result || !result.canvas) return;
                 var srcCanvas = result.canvas;
                 var sw = srcCanvas.width, sh = srcCanvas.height;
@@ -775,8 +778,11 @@ const TokenEditor = {
                 var zf = (typeof uiZoom === 'function') ? uiZoom() : 1;
                 el.style.width = anchor.getBoundingClientRect().width / zf + 'px';
                 el.querySelector('img').src = previewCanvas.toDataURL('image/webp', 0.85);
+                var tipTitle = isFoundryRingMode
+                    ? I18n.t('Кольцо Foundry')
+                    : I18n.t(withRing ? 'С кольцом' : 'Без кольца');
                 el.querySelector('.save-preview-tip-label').textContent =
-                    I18n.t(withRing ? 'С кольцом' : 'Без кольца') + ' (' + I18n.t('Масштаб:') + ' ' + (result.usedScale || 1) + ')';
+                    tipTitle + ' (' + I18n.t('Масштаб:') + ' ' + (result.usedScale || 1) + ')';
                 el.className = 'save-preview-tip show';
                 var rect = anchor.getBoundingClientRect();
                 var left = rect.left + rect.width / 2 - el.offsetWidth * zf / 2;

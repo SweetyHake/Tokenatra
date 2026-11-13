@@ -207,6 +207,12 @@
                             </div>
                         </div>
                         <div class="accordion-body open" id="ringBody">
+                            <div class="ring-source-row" id="ringSourceRow">
+                                <div class="chip-switch ring-source-switch" id="ringSourceSwitch" role="tablist" aria-label="Источник колец">
+                                    <button type="button" class="chip-btn active" data-ring-source="foundry">Foundry</button>
+                                    <button type="button" class="chip-btn" data-ring-source="tokenatra">Tokenatra</button>
+                                </div>
+                            </div>
                             <div class="ring-carousel">
                                 <div class="ring-track" id="ringSelectorList"></div>
                             </div>
@@ -500,16 +506,10 @@
                             <div class="settings-group">
                                     <div class="field-row field-row-model"><span class="field-row-label">Модель:</span><select class="compact-select" id="modelSelect" disabled><option>Загрузка…</option></select></div>
                                 <div class="model-actions">
-                                    <div class="model-actions-row">
-                                        <button class="ghost-btn model-action-btn" id="downloadModelLiteBtn" type="button">
-                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
-                                            Легковесная
-                                        </button>
-                                        <button class="ghost-btn model-action-btn" id="downloadModelBtn" type="button">
-                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
-                                            Полная
-                                        </button>
-                                    </div>
+                                    <button class="ghost-btn model-action-btn" id="downloadModelBtn" type="button">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+                                        Загрузить модель с сервера
+                                    </button>
                                     <button class="accent-btn model-action-btn" id="loadModelDiskBtn" type="button">
                                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 10v6M9 13h6"/></svg>
                                         Загрузить модель с диска
@@ -531,6 +531,7 @@
                             <div class="settings-group">
                                  <div class="field-row"><span class="field-row-label">Размер холста:</span><select class="compact-select" id="canvasScaleSelect"><option value="1">Производительность</option><option value="2" selected>Баланс</option><option value="3">Качество</option></select></div>
                                  <div class="field-row"><span class="field-row-label">История отмен:</span><select class="compact-select" id="historyLimitSelect"><option value="10">10 шагов</option><option value="20">20 шагов</option><option value="30" selected>30 шагов</option><option value="50">50 шагов</option><option value="100">100 шагов</option></select></div>
+                                 <div class="field-row"><span class="field-row-label">Сессии ИИ (MCP):</span><select class="compact-select" id="agentSessionsSelect"><option value="2">2 сессии</option><option value="4">4 сессии</option><option value="8" selected>8 сессий</option><option value="12">12 сессий</option><option value="16">16 сессий</option><option value="32">32 сессии</option></select></div>
                             </div>
                         </section>
 
@@ -765,16 +766,56 @@
                 <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
+        <div class="ring-modal-tabs">
+            <div class="chip-switch ring-add-switch" id="addRingModeSwitch" role="tablist">
+                <button type="button" class="chip-btn active" data-ring-tab="manual">Изображение</button>
+                <button type="button" class="chip-btn" data-ring-tab="foundry">Из Foundry (JSON)</button>
+            </div>
+        </div>
         <form class="ring-form" id="addRingForm">
             <label class="ring-form-label" for="ringFileInput">Изображение кольца</label>
             <input class="ring-file-input" id="ringFileInput" name="ring" type="file" accept=".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg" required>
+            <label class="ring-form-label" for="ringTopInput">Второй слой поверх токена <span>(необязательно, как -top в Multiple Rings)</span></label>
+            <input class="ring-file-input" id="ringTopInput" name="top" type="file" accept=".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg">
             <label class="ring-form-label" for="ringMaskInput">Защитная маска <span>(необязательно, иначе используется стандартная mask.png)</span></label>
             <input class="ring-file-input" id="ringMaskInput" name="mask" type="file" accept=".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg">
-            <label class="ring-form-label" for="ringNameInput">Название <span>(необязательно)</span></label>
-            <input class="ring-text-input" id="ringNameInput" name="name" type="text" maxlength="80" placeholder="Например, Серебряная окантовка">
+            <div class="ring-form-row-2">
+                <div>
+                    <label class="ring-form-label" for="ringNameInput">Название <span>(необязательно)</span></label>
+                    <input class="ring-text-input" id="ringNameInput" name="name" type="text" maxlength="80" placeholder="Например, Серебряная окантовка">
+                </div>
+                <div>
+                    <label class="ring-form-label" for="ringScaleInput">Масштаб</label>
+                    <input class="ring-text-input" id="ringScaleInput" name="scale" type="number" step="0.01" min="0.2" max="5" value="1">
+                </div>
+            </div>
             <div class="ring-form-actions">
                 <button class="ghost-btn" id="cancelAddRing" type="button">Отмена</button>
                 <button class="accent-btn" type="submit">Добавить</button>
+            </div>
+        </form>
+        <form class="ring-form" id="importFoundryForm" hidden>
+            <p class="ring-import-hint">Импортируйте кольца из спрайт-листов Foundry VTT (например, из модуля cs-rings или ядра Foundry). Атлас, второй слой (-top) и масштаб подтянутся автоматически.</p>
+            <div class="foundry-pick-actions">
+                <button class="ghost-btn" id="pickFoundryJsonBtn" type="button">Выбрать JSON…</button>
+                <button class="ghost-btn" id="pickFoundryFolderBtn" type="button">Выбрать папку модуля…</button>
+            </div>
+            <label class="ring-form-label" for="foundryFilesInput">Или выберите файлы вручную <span>(.json + .webp / -top.webp)</span></label>
+            <input class="ring-file-input" id="foundryFilesInput" type="file" multiple accept=".json,.webp,.png,.jpg,.jpeg">
+            <div class="foundry-found-wrap" id="foundryFoundWrap" hidden>
+                <div class="foundry-found-bar">
+                    <span id="foundryFoundCount">Найдено: 0</span>
+                    <div class="foundry-found-toggles">
+                        <button class="link-btn" id="foundrySelectAllBtn" type="button">Все</button>
+                        <button class="link-btn" id="foundrySelectNoneBtn" type="button">Снять</button>
+                    </div>
+                </div>
+                <div class="foundry-found-list" id="foundryFoundList"></div>
+            </div>
+            <div class="foundry-import-status" id="foundryImportStatus" hidden></div>
+            <div class="ring-form-actions">
+                <button class="ghost-btn" id="cancelFoundryImport" type="button">Отмена</button>
+                <button class="accent-btn" id="foundryImportSubmitBtn" type="submit" disabled>Импортировать</button>
             </div>
         </form>
     </div>

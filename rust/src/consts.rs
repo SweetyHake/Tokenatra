@@ -1,5 +1,5 @@
 // App constants.
-pub const VERSION: &str = "26.5.1";
+pub const VERSION: &str = "26.5.2";
 pub const APP_NAME: &str = "Tokenatra";
 pub const GITHUB_REPO: &str = "SweetyHake/Tokenatra";
 pub const PORT: u16 = 7878;
@@ -14,28 +14,37 @@ pub fn model_download_url() -> String {
         .unwrap_or_else(|| DEFAULT_MODEL_DOWNLOAD_URL.to_string())
 }
 
-pub fn model_download_url_lite() -> String {
-    std::env::var("TOKENATRA_MODEL_URL_LITE")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_MODEL_DOWNLOAD_URL_LITE.to_string())
-}
-
-const DEFAULT_MODEL_DOWNLOAD_URL: &str = "https://www.dropbox.com/scl/fi/r8yxydp1phmief0fed5k6/RMBG_2.0_fp16.onnx?rlkey=otrroli64yc3ridsz80oj9eul&st=t78dfodp&dl=1";
-const DEFAULT_MODEL_DOWNLOAD_URL_LITE: &str = "https://huggingface.co/PramaLLC/BEN2/resolve/main/BEN2_Base.onnx";
+const DEFAULT_MODEL_DOWNLOAD_URL: &str = "https://huggingface.co/PramaLLC/BEN2/resolve/main/BEN2_Base.onnx";
 
 /// Built-in rings: filename -> display name (i18n at runtime).
 pub fn builtin_ring_name(file_name_lower: &str) -> Option<&'static str> {
     Some(match file_name_lower {
-        "steel.webp" => "Сталь",
-        "ag-obsidian-red.webp" => "Красный обсидиан",
-        "ag-stormsteel.webp" => "Штормовая сталь",
-        "ag-wood-runic.png" => "Руническое дерево",
-        "high-noon.webp" => "Ковбой (High Noon)",
-        "plague.webp" => "Чумной венок",
-        "purple-crystals.webp" => "Аметистовые кристаллы",
+        "ag-obsidian-red.webp" => "Кровавый обсидиан",
+        "ag-wood-runic.webp" => "Рунное дерево",
+        "archer.webp" => "Стрелок",
+        "armor_2x.webp" => "Доспех",
+        "chronopunk.webp" => "Хронопанк",
+        "circus.webp" => "Цирк",
+        "cosmic.webp" => "Космос",
+        "cristmas_2x.webp" => "Рождество",
+        "druid.webp" => "Друид",
+        "eldritch.webp" => "Бездна",
+        "feywild.webp" => "Фейвайльд",
+        "gold-white-rune.webp" => "Золотые руны",
+        "high-noon.webp" => "Ковбой",
+        "kraken.webp" => "Морская пучина",
+        "lava.webp" => "Лава",
+        "plague.webp" => "Чума",
+        "rogue.webp" => "Теневое ремесло",
+        "rune-gold.webp" => "Руны: золото",
+        "rune-green.webp" => "Руны: зелёные",
+        "rune-ice.webp" => "Руны: лёд",
+        "rune-purple.webp" => "Руны: фиолетовые",
+        "rune-red.webp" => "Руны: красные",
+        "rune-steel.webp" => "Руны: сталь",
+        "stained-glass.webp" => "Витраж",
+        "tentacle.webp" => "Щупальца",
         "theathre.webp" => "Театр",
-        "white-runic.webp" => "Белые руны",
         _ => return None,
     })
 }

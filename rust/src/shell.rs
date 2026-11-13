@@ -298,9 +298,17 @@ fn handle_gui_command(
         }
         GuiCommand::Show => {
             // the window may be hidden or minimized from the tray; restore it
-            window.set_minimized(false);
-            window.set_visible(true);
+            if window.is_minimized() {
+                window.set_minimized(false);
+            }
+            if !window.is_visible() {
+                window.set_visible(true);
+            }
             window.set_focus();
+            #[cfg(windows)]
+            if let Some(hwnd) = crate::win::hwnd() {
+                crate::win::bring_to_front(hwnd);
+            }
             state.set_tray_mode(false);
             // the DPI or resolution may have changed while hidden to the tray
             #[cfg(windows)]

@@ -35,29 +35,43 @@ _INSTRUCTIONS = """\
 Use tools from this server through `execute` under `tools["tokenatra"]`.
 MCP for Tokenatra drives the Tokenatra token & portrait studio (Rust + ONNX Runtime).
 If Tokenatra is not running yet, the first tool call starts `tokenatra.exe --server` automatically.
+Call `tokenatra_recipe({})` for the complete built-in masking & QA guide.
 
-How a human creates a token in Tokenatra (follow the `example.png` style guide):
-1. Open the image: call `tokenatra_create_session({ image_path: "C:/path/to/art.webp" })`.
-   It returns `session_id` and `source_info` (`width`, `height`, `opaque_pct`, `already_transparent`, `fit1024_bbox`).
-   The default ring `"steel"` and ring protection mask are already active, just like in the GUI.
+How to create a token in Tokenatra (follow the `example.png` style guide and strict masking rules):
+1. Pre-check source portrait & open session (`tokenatra_create_session`):
+   - Eye Gaze Rule: a 3/4 head turn is fine, but irises/pupils MUST look directly into the camera lens (verify on 1:1 full-resolution eye crops, never on thumbnails).
+   - Call `tokenatra_create_session({ image_path: "C:/path/to/art.webp" })`.
+   - The default ring `"steel"` and ring protection mask (`r_in = 343` in 1x 1024x1024 space) are active.
 2. Remove background ONLY if needed: check `already_transparent` (or `opaque_pct < 92`).
-   - If the background is opaque (`already_transparent: false`), call `tokenatra_remove_background({ session_id })`.
+   - If `already_transparent: false`, call `tokenatra_remove_background({ session_id })`.
    - NEVER call `tokenatra_remove_background` on an already transparent cutout/subject — re-matting eats fine edges and glow.
-3. Frame the character (`tokenatra_set_transform`) using the `example.png` overlay (`tokenatra_preview({ session_id, example: true })`):
-   In the GUI, the human turns on the "Пример" (`example.png`) overlay (at `2x` scale) and aligns the character to its three purple markers:
-   - **Область головы (Макушка .. Подбородок)**: the character's head (without tall hats or horns) must fit inside the purple oval!
-     - **Макушка (Crown of head)**: `y ~ -130` in 1x ring coords (`y ~ 436` in 2048 2x frame) — the top of the head pops out ABOVE the top rim of the ring (`y = 0`).
-     - **Подбородок (Chin / Jawline)**: `y ~ 410` in 1x ring coords (`y ~ 711` in 2048 2x frame), with eyes around `y ~ 150-200` and face centered on `x ~ 512`.
-   - **Талия / Пояс (Waist / Belt line)**: `y ~ 715` in 1x ring coords (`y ~ 1230` in 2048 2x frame), with the bottom of the torso/skirt reaching the lower inner rim of the ring (`y ~ 865`).
-4. Mask the bottom / sides (`tokenatra_apply_preset` or `tokenatra_edit_mask`):
-   - Call `tokenatra_apply_preset({ session_id, preset: "preset1" })` (or `"preset2"` for wide shields/wings/weapons).
-     Because `canvas_mask` covers the full `3x` canvas (`-1024..2048`), `preset1` keeps the head/hat/weapons popping out above the ring (`y < 0`) while cleanly erasing everything outside the bottom/lower sides of the ring!
-   - Or use `tokenatra_edit_mask` (`target: "canvas"` = Pink Mask fixed to ring; `target: "image"` = Blue Eraser attached to character).
-5. Look at your work with the Example overlay (`tokenatra_preview({ session_id, example: true })`):
-   Pass `example: true` to composite `example.png` ("Макушка", "Область головы", "Подбородок", "Талия / Пояс") directly over the preview at `2x` scale and return that image to you! Adjust `scale`, `offset_x`, `offset_y` until the head sits right inside the purple oval and the waist hits "Талия / Пояс".
+   - When exporting a transparent portrait via `tokenatra_portrait`, always pass `variant: "cutout"`.
+3. Frame the character strictly by head & waist anatomy (`tokenatra_set_transform`):
+   - Scale and position (`scale`, `offset_x`, `offset_y`) are determined ONLY by head and waist anatomy, NEVER by weapon reach/size (never shrink a character to fit a raised sword or wide crossbow).
+   - In 1x logical ring coords (`1024x1024`, center `(512, 512)`):
+     - **Crown of head (Макушка, excluding tall hats/horns)**: `y ~ -76` (pops out above `y = 0`).
+     - **Chin / Jawline (Подбородок)**: `y ~ 200` (head height `~ 276px`, `rx ~ 112px`, centered at `x ~ 512`).
+     - **Waist / Belt line (Талия / Пояс)**: `y ~ 716`.
+   - In 2x preview coords (`1024x1024` with `scale_mode: "2"`, where 1x ring is `[256..768]`):
+     - **Head oval (Макушка .. Подбородок)**: `y = 218..356` (height `138px`, `rx = 56px`, center `x = 512`).
+     - **Waist / Belt line**: `y ~ 615`.
+4. Exact Ring & `preset1` Geometry (in 1x `1024x1024` canvas space, center `(512, 512)`):
+   - **Inner ring radius & protection mask (`protect: true`)**: `r_in = 343` (bottom at `y = 855`; `r_in = 171.5` in 2x 1024 preview).
+   - **Outer ring radius (`steel`)**: `r_out = 407` (bottom at `y = 919`; `r_out = 203.5` in 2x 1024 preview).
+   - **`preset1`**: keeps `mask = 255` everywhere above `y = 564`; below `y = 564` erases everything outside `r = 342`.
+5. Masking & Pop-Out Rules (`tokenatra_apply_preset` + `tokenatra_edit_mask` in `target: "canvas"`):
+   - Always finalize `tokenatra_set_transform` BEFORE applying custom `target: "canvas"` mask edits.
+   - Avoid `target: "image"` for fine coordinate edits on non-square portraits (aspect ratio scaling shifts X-coords); perform all ring-edge and weapon-loop edits in `target: "canvas"` (`0..1024`).
+   - **Eliminate `preset1` side steps at `y = 564`**:
+     - Erase wide cloaks/scarves/pauldrons outside the ring above `y = 564` (`y = 300..600`) using `op: "erase", target: "canvas", protect: true` so they follow `r = 343` without a horizontal step at `y = 564`.
+     - Restore active bent elbows/bracers that dip slightly below `y = 564` (`y = 564..680`) using `op: "restore", target: "canvas"` along their bottom contour.
+   - **Strict Pop-Out Rules**:
+     - NEVER restore torso, waist, belts, pouches, skirts, or hanging charms outside `r = 343` at the bottom.
+     - In the lower hemisphere (`y > 564`), ONLY the weapon itself (blade, guard, grip, pommel, crossbow prod/stirrup) and the active hand holding it may extend outside `r = 343`. Erase any cloak/tunic/pouch trapped between the weapon blade and `r = 343` (`op: "erase", protect: true`) so the metallic ring rim shows cleanly.
+     - **Lowered empty arms MUST stay under the mask**: an empty hand/arm hanging down along the side (`3–5` or `7–9` o'clock) must be tucked inside `r = 343` (`op: "erase", protect: true`), never popped out over the ring.
+     - **Clean closed weapon loops**: punch out opaque background/cloak trapped inside crossbow stirrups or sword D-guards (`op: "erase", target: "canvas", protect: false`).
 6. Export (`tokenatra_export`):
-   - Use `scale_mode: "auto"` (or `"2"` / `"1"`): if the head/hat/weapons pop out beyond the 1x ring (`y < 0`), `"auto"` exports a `2x` (or `3x`) canvas so the pop-out head/hat/shield is NEVER clipped at the border!
-   - If you want a `subject.webp` (cutout without ring, like `Gambit/subject.webp`), enable drop shadow (`tokenatra_set_effects`) and export with `with_ring: false, scale_mode: "2", size: 1024` (which produces a `2048x2048` subject).
+   - For a `subject.webp` cutout (used with dynamic rings), enable drop shadow (`{"enabled":true,"angle":135,"distance":7,"blur":3,"opacity":0.4}`) and export with `with_ring: false, scale_mode: "2", size: 1024`.
 """
 
 _TOOLS = [
@@ -459,63 +473,51 @@ def http_call(method, path, body=None, raw=False):
 
 
 _RECIPE_TEXT = """\
-TOKENATRA STUDIO STYLE GUIDE (based on `example.png` at 2x scale)
+TOKENATRA STUDIO BUILT-IN GUIDE & QA RULES
 
-1. THE `example.png` VISUAL TEMPLATE (HOW HUMANS ALIGN TOKENS IN TOKENATRA):
-   - In Tokenatra, the working canvas is 3x the ring size, and the "Пример" (`example.png`)
-     overlay is drawn at `2x` scale (`2048x2048` when `size=1024`), where the 1x ring occupies
-     the central `1024x1024` box (`[512..1536]` in 2048 coords, or `[0..1024]` in 1x logical coords).
-   - Call `tokenatra_preview({ session_id, example: true })` (or `tokenatra_inspect` with `include_image: true, example: true`)
-     to see your character with the purple `example.png` overlay directly on top!
-   - The three purple markers on `example.png` are:
-     1) **Область головы (Макушка .. Подбородок)**:
-        - The purple oval in the top center (`cx = 524, cy = 134, rx = 362, ry = 274` in 1x logical coords;
-          or `y = 436..711, x = 866..1228` in the `2048x2048` 2x frame).
-        - **Макушка (Crown of head / hair top, excluding tall hats/horns)**: must touch the top purple line
-          (`y ~ -130` in 1x coords, which is ABOVE the upper ring border `y = 0`!).
-        - **Подбородок (Chin / Jawline)**: must touch the middle purple line (`y ~ 410` in 1x coords;
-          eyes sit around `y ~ 150-200`, face centered at `x ~ 512`).
-        - The entire head (hair + face) fits inside the purple oval!
-     2) **Талия / Пояс (Waist / Belt line)**:
-        - Must align with the bottom purple line (`y ~ 715` in 1x coords, or `y ~ 1230` in 2048 2x coords).
-        - The lower torso / hips continue down to the inner bottom rim of the ring (`y ~ 865`), where they are cut by a smooth arc.
+1. SOURCE PORTRAIT REQUIREMENTS (BEFORE SESSION):
+   - **Eye Gaze Rule**: A 3/4 head turn is allowed, but irises and pupils MUST look directly into the camera lens (direct eye contact with the viewer). Always verify gaze on 1:1 full-resolution eye crops, never on downscaled thumbnails.
+   - **Background Removal (`tokenatra_remove_background`)**:
+     - Call ONLY if `already_transparent == false` (or `opaque_pct >= 92`).
+     - NEVER call on an already transparent cutout/subject — re-running ONNX eats fine edges and glow.
+     - When exporting a transparent portrait (`tokenatra_portrait`), always pass `variant: "cutout"`.
 
-2. COORDINATE SYSTEM & TRANSFORM MATH:
-   - Logical 1x ring frame is `1024x1024` (`(0,0)` = top-left of the 1x ring, `(512,512)` = ring center).
-   - Coordinates outside `[0..1024]` (like `y = -130` for the crown of the head) are in the 2x/3x pop-out zone above/around the ring!
-   - Non-square images preserve their aspect ratio automatically (`fit1024` fits the longest side into 1024 px, centered).
-   - Transform formula (from source `fit1024` coordinate `f` to 1x logical coordinate `L`):
+2. ANATOMICAL CALIBRATION OF SCALE & POSITION (`tokenatra_set_transform`):
+   - `scale`, `offset_x`, `offset_y` are determined STRICTLY by head and waist anatomy, NEVER by weapon size/reach (never shrink a character just to fit a raised sword or wide crossbow).
+   - **Reference Coordinates (`example.png` standard)**:
+     - In `1x` logical ring space (`1024x1024`, center `(512, 512)`):
+       - **Crown of head (Макушка, excluding tall hats/helmets/horns)**: `y ~ -76` (pops out above `y = 0`).
+       - **Chin / Jawline (Подбородок)**: `y ~ 200` (head height `~ 276px`, horizontal radius `rx ~ 112px`, face centered at `x ~ 512`).
+       - **Waist / Belt line (Талия / Пояс)**: `y ~ 716`.
+     - In `2x` preview space (`1024x1024` with `scale_mode: "2"`, where the 1x ring occupies `[256..768]`):
+       - **Head oval (Макушка .. Подбородок)**: `y = 218..356` (height `138px`, `rx = 56px`, center `x = 512`).
+       - **Waist / Belt line**: `y ~ 615`.
+   - **Transform Formula**:
+     Non-square images preserve aspect ratio (`fit1024` fits longest side into 1024px, centered):
        L(fx) = 512 + (fx - 512) * scale + offset_x
        L(fy) = 512 + (fy - 512) * scale + offset_y
-   - Solving `scale`, `offset_x`, `offset_y` from Crown `(fx_crown, fy_crown)` -> `y = -130` and Chin `(fx_chin, fy_chin)` -> `y = 410`:
-       scale    = 540 / (fy_chin - fy_crown)     # 540 = 410 - (-130)
-       offset_x = -(fx_face - 512) * scale
-       offset_y = 410 - 512 - (fy_chin - 512) * scale
 
-3. MASKING (PRESETS & PINK CANVAS MASK vs BLUE IMAGE ERASER):
-   - The Pink Canvas Mask (`target: "canvas"`) spans the full `3x` canvas (`-1024..2048` in 1x coords), so pop-out heads, hats, weapons, and shields outside `0..1024` are preserved!
-   - **Built-in Presets (`tokenatra_apply_preset`)**:
-     - `"preset1"`: standard pop-out mask — keeps the entire inner ring circle + the upper pop-out zone for the head/hat/hair, and erases everything outside the bottom and lower sides of the ring.
-     - `"preset2"`: wide pop-out mask — keeps upper-left and upper-right pop-outs (great for shields, wings, raised weapons) while cutting the bottom below the ring rim.
-     - `"preset3"`: narrow vertical column pop-out.
-   - **Manual Bottom Arc (for `subject.webp` cutouts without a ring, or full-body art)**:
-     Call `tokenatra_edit_mask` (`target: "canvas"`, `protect: false`):
-       1) `op: "erase"`,   `shapes_json: '[{"rect":{"x0":-512,"y0":270,"x1":1536,"y1":1536}}]'`
-       2) `op: "restore"`, `shapes_json: '[{"circle":{"cx":512,"cy":270,"r":595}}]'`  (arc bottom at `y = 865`, matching the inner ring rim)
-       3) `op: "feather"`, `px: 8`
+3. EXACT RING, PROTECTION MASK & `preset1` GEOMETRY (1x `1024x1024` SPACE, CENTER `(512, 512)`):
+   - **Inner ring radius & protection mask (`protect: true`)**: `r_in = 343` (bottom point `y = 855`; `r_in = 171.5` in 2x 1024 preview). When `protect: true`, `erase` cannot erase any pixel inside `r = 343`.
+   - **Outer ring radius (`steel`)**: `r_out = 407` (bottom point `y = 919`; `r_out = 203.5` in 2x 1024 preview).
+   - **`preset1` (`tokenatra_apply_preset`)**: keeps `mask = 255` everywhere above `y = 564`; below `y = 564` erases everything outside `r = 342` (`y_bottom = 854`).
+   - **QA Audit Rule**: Always composite verification sheets over the real ring asset (`with_ring: true` or the actual ring image), never over synthetic circles of arbitrary radius.
 
-4. STEP-BY-STEP WORKFLOW:
-   1) `tokenatra_create_session({ image_path: "..." })` -> check `already_transparent`.
-   2) If `already_transparent == false`, call `tokenatra_remove_background({ session_id })`.
-   3) Call `tokenatra_set_transform` and `tokenatra_preview({ session_id, example: true })`.
-   4) Look at the returned image with the purple `example.png` overlay:
-      - Is the head inside the purple oval ("Область головы", between "Макушка" and "Челюсть")?
-      - Is the waist on the "Пояс" line?
-      Adjust `scale`, `offset_x`, `offset_y` (1-2 iterations) until the head fits the oval and the waist sits on "Пояс".
-   5) Apply mask (`tokenatra_apply_preset` with `"preset1"` or `"preset2"`, or custom `tokenatra_edit_mask`).
-   6) Export (`tokenatra_export`):
-      - For a **Token with Ring** where the head/hat/weapons pop out above the ring: use `with_ring: true, scale_mode: "auto"` (or `"2"`), `size: 1024`.
-      - For a **Subject cutout** (`subject.webp` in `STokens`, used by Foundry dynamic ring or series tokens): enable drop shadow (`{"enabled":true,"angle":135,"distance":7,"blur":3,"opacity":0.4}`) and export with `with_ring: false, scale_mode: "2", size: 1024, format: "webp"`.
+4. COORDINATE SPACES (`target: "canvas"` vs `target: "image"`):
+   - **Avoid `target: "image"` for fine coordinate edits on non-square images**: `target: "image"` maps `0..1024` across `0..width` and `0..height` independently (`sx = width/1024, sy = height/1024`), so coordinates measured on a square aspect-preserved preview shift horizontally on 4:5 portraits.
+   - **Always use `target: "canvas"` (`0..1024` = 1x ring frame)** for ring-edge masking, weapon pop-outs, and stirrup/guard loop cleanups.
+   - **Order of operations (`transform` -> `mask`)**: `target: "canvas"` is fixed to the ring. Always finalize `(scale, offset_x, offset_y)` BEFORE applying custom `target: "canvas"` strokes. Use a `1024x1024` 1x grid (`20px` step) with `r = 342` and `r = 407` circles to read exact coordinates.
+
+5. ELIMINATING `preset1` SIDE STEPS AT `y = 564`:
+   Because `preset1` only erases outside `r = 342` below `y = 564`:
+   1) **Wide cloaks / scarves / pauldrons above `y = 564`**: If a cloak or scarf extends outside `r = 343` in `y = 300..564`, `preset1` leaves it over the ring above `y = 564` and cuts it with a harsh horizontal step at `y = 564`. Fix: apply `op: "erase", target: "canvas", protect: true` over the cloak area in `y = 300..600` so it follows the smooth `r = 343` inner ring arc.
+   2) **Active bent elbows / bracers crossing `y = 564`**: If an active elbow or forearm dips below `y = 564` (`y = 564..680`), `preset1` slices off its bottom edge horizontally at `y = 564`. Fix: smoothly `op: "restore", target: "canvas", protect: false` along the anatomical bottom contour of the forearm/bracer (overlapping `y = 564` from above without restoring any cloak below the bracer).
+
+6. STRICT POP-OUT & QUALITY CONTROL RULES:
+   - **No torso/waist/skirts/pouches below `r = 343`**: The lower torso, belt, sash, skirts (chainmail/scale/leather), pouches, and belt charms must be cleanly clipped at `r = 343` (`y = 855`). Never use wide `restore` shapes at the bottom that spill the character's belly or hips outside the ring.
+   - **Clean weapon pop-outs in the lower hemisphere (`4–8` o'clock)**: When a blade, dagger, or crossbow crosses the lower ring (`r > 343, y > 564`), ONLY the weapon itself (blade, guard, grip, pommel, bow prod, stirrup) and the active hand holding it may exist outside `r = 343`. Erase all cloak, tunic, belt, pouch, or charm pixels trapped between the weapon and `r = 343` (or under the blade) using `op: "erase", target: "canvas", protect: true` so the metallic ring rim is cleanly visible between the body and the blade. Stop `restore` strokes right at the true steel tip of the blade.
+   - **Lowered empty arms MUST stay under the mask (`inside r = 343`)**: If a free arm/hand (not holding a weapon or casting a spell) simply hangs down along the side (`3–5` or `7–9` o'clock), it MUST be tucked inside `r = 343` (`op: "erase", target: "canvas", protect: true`), never popped out over the ring.
+   - **Closed weapon loops (crossbow stirrups, sword D-guards)**: Inspect closed loops on a high-contrast background and punch out any trapped background/cloak pixels (`op: "erase", target: "canvas", protect: false`) so the ring or transparent background shows cleanly through the loop.
 """
 
 

@@ -5,7 +5,7 @@
 #define MyAppName "Tokenatra"
 #ifndef MyAppVersion
 ; Fallback: CI передаёт версию через /DMyAppVersion (from rust/src/consts.rs VERSION)
-#define MyAppVersion "26.5.1"
+#define MyAppVersion "26.5.2"
 #endif
 #define MyAppPublisher "SweetyHake"
 #define MyAppURL "https://github.com/SweetyHake/Tokenatra"
@@ -38,8 +38,9 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Name: "registermcp"; Description: "Register MCP server for AI agents (Claude, Cursor, Antigravity, OpenCode)"; GroupDescription: "AI integration:"
 
 [Files]
-; Один нативный бинарник + MCP-прокси + ресурсы. Никакого Python-окружения.
+; Один нативный бинарник + DirectML runtime + MCP-прокси + ресурсы. Никакого Python-окружения.
 Source: "rust\target\release\tokenatra.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: "rust\target\release\DirectML.dll"; DestDir: "{app}"; DestName: "DirectML.dll"; Flags: ignoreversion
 Source: "rust\target\release\TokenatraMCP.exe"; DestDir: "{app}"; DestName: "TokenatraMCP.exe"; Flags: ignoreversion
 Source: "static\*"; DestDir: "{app}\static"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "templates\*"; DestDir: "{app}\templates"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -53,6 +54,15 @@ Source: "example.png"; DestDir: "{app}"; Flags: ignoreversion
 [InstallDelete]
 ; хвосты старой Python-сборки (PyInstaller)
 Type: filesandordirs; Name: "{app}\_internal"
+; устаревшие встроенные кольца, заменённые в v26.5.2 на актуальные из cs-rings
+Type: files; Name: "{app}\token_rings\steel.webp"
+Type: files; Name: "{app}\token_rings\Steel.webp"
+Type: files; Name: "{app}\token_rings\ag-stormsteel.webp"
+Type: files; Name: "{app}\token_rings\purple-crystals.webp"
+Type: files; Name: "{app}\token_rings\white-runic.webp"
+Type: files; Name: "{app}\token_rings\ag-wood-runic.png"
+Type: files; Name: "{app}\token_rings\high-noon.mask.png"
+Type: filesandordirs; Name: "{app}\token_rings\cs-rings"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

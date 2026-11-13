@@ -4,6 +4,7 @@
 
 import { processImage, health } from './api.js';
 import { upload, sanitizeFileName } from './upload.js';
+import { MRINGS_MODULE_ID, getWorldFoundryRingId } from './foundryRings.js';
 
 export function canEditActor(actor) {
   return !!actor && !!actor.isOwner;
@@ -84,8 +85,13 @@ export async function actorArtDataUrl(actor) {
   });
 }
 
-/** Обновить токены актёра, размещённые на сцене (GM). */
+/** Обновить токены актёра, размещённые на сцене (GM или синтетический токен). */
 export async function refreshPlacedTokens(actor, update) {
+  if (actor?.isToken && actor.token) {
+    try { await actor.token.update(update); }
+    catch (err) { /* токен мог быть удалён параллельно */ }
+    return;
+  }
   if (!game.user.isGM) return;
   let tokens = [];
   try { tokens = actor.getActiveTokens?.() ?? []; } catch (err) { tokens = []; }
@@ -100,8 +106,9 @@ export async function refreshPlacedTokens(actor, update) {
 
 /**
  * Применить сохранение из студии к актёру.
- *  - token:   img + texture.src = пререндеренное кольцо, scale 1;
- *  - subject: ring.enabled=true, ring.subject.{texture,scale} + texture.scaleX/Y;
+ *  - token:   пререндеренное кольцо Tokenatra → ring.enabled=false;
+ *  - subject: вырезка субъекта → ring.enabled=true, ring.subject.{texture,scale}
+ *             (+ flags.multiple-rings.ringAppearance, если выбрано кольцо Foundry);
  *  - portrait: img = портрет.
  * Метрики (автоматические) считаются в студии по bbox непрозрачности.
  */
@@ -111,43 +118,56 @@ export async function applyKindToActor(actor, kind, path, m = {}) {
   // scale и ring.subject.scale, для обеих кнопок (Token и Subject)
   const num = (v) => (Number.isFinite(+v) && +v > 0 ? +v : 1);
   const exportScale = Math.min(3, Math.max(1, num(m.scale)));
+  const foundryRingId = typeof m.foundryRingId === 'string' && m.foundryRingId.trim()
+    ? m.foundryRingId.trim()
+    : null;
 
   if (kind === 'portrait') {
     await actor.update({ img: path });
     return;
   }
   if (kind === 'subject') {
-    await actor.update({
+    const actorUpdate = {
       'prototypeToken.texture.src': path,
       'prototypeToken.texture.scaleX': exportScale,
       'prototypeToken.texture.scaleY': exportScale,
       'prototypeToken.ring.enabled': true,
       'prototypeToken.ring.subject.texture': path,
       'prototypeToken.ring.subject.scale': exportScale
-    });
-    await refreshPlacedTokens(actor, {
+    };
+    const tokenUpdate = {
       'texture.src': path,
       'texture.scaleX': exportScale,
       'texture.scaleY': exportScale,
       'ring.enabled': true,
       'ring.subject.texture': path,
       'ring.subject.scale': exportScale
-    });
+    };
+    if (foundryRingId) {
+      actorUpdate[`prototypeToken.flags.${MRINGS_MODULE_ID}.ringAppearance`] = foundryRingId;
+      tokenUpdate[`flags.${MRINGS_MODULE_ID}.ringAppearance`] = foundryRingId;
+      if (!game.modules?.get(MRINGS_MODULE_ID)?.active && foundryRingId !== getWorldFoundryRingId()) {
+        ui.notifications?.warn?.(game.i18n.localize('TKC.WarnMultipleRingsInactive'));
+      }
+    }
+    await actor.update(actorUpdate);
+    await refreshPlacedTokens(actor, tokenUpdate);
     return;
   }
-  // token (с пререндеренным кольцом): масштаб текстуры и ring.subject.scale —
-  // реальное значение из «Экспорта»; портрет актёра (img) не трогаем —
-  // его назначает сохранение портрета
+  // token (с пререндеренным статичным кольцом Tokenatra): выключаем динамическое
+  // кольцо Foundry, чтобы поверх запечённого кольца не рисовалось второе
   await actor.update({
     'prototypeToken.texture.src': path,
     'prototypeToken.texture.scaleX': exportScale,
     'prototypeToken.texture.scaleY': exportScale,
+    'prototypeToken.ring.enabled': false,
     'prototypeToken.ring.subject.scale': exportScale
   });
   await refreshPlacedTokens(actor, {
     'texture.src': path,
     'texture.scaleX': exportScale,
     'texture.scaleY': exportScale,
+    'ring.enabled': false,
     'ring.subject.scale': exportScale
   });
 }
@@ -168,7 +188,7 @@ export async function applyExport(path, fileName, { contextActor = null, autoApp
       callback: async () => {
         try {
           const actor = await createActorFromImage(path, fileName);
-          if (actor && kind !== 'token') await applyKindToActor(actor, kind, path, metrics ?? {});
+          if (actor && (kind !== 'token' || metrics)) await applyKindToActor(actor, kind, path, metrics ?? {});
           console.info(game.i18n.localize('TKC.DoneActorCreated'));
         } catch (err) {
           console.error(game.i18n.localize('TKC.ErrorApply'));

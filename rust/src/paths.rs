@@ -349,7 +349,7 @@ pub fn migrate_legacy_rings() {
             .and_then(|s| s.to_str())
             .unwrap_or_default()
             .to_lowercase();
-        if stem.ends_with(".mask") {
+        if stem.ends_with(".mask") || stem.ends_with(".top") {
             continue;
         }
         if consts::builtin_ring_name(&format!("{}.{}", stem, ext)).is_some() {
@@ -360,16 +360,20 @@ pub fn migrate_legacy_rings() {
             continue;
         }
         if std::fs::rename(&f, &dest).is_ok() {
-            for me in [&ext[..], "png", "webp", "jpg", "jpeg"] {
-                let legacy_mask = f.with_file_name(format!(
-                    "{}.mask.{}",
-                    f.file_stem().and_then(|s| s.to_str()).unwrap_or_default(),
-                    me
-                ));
-                let migrated = dest.with_file_name(legacy_mask.file_name().unwrap_or_default());
-                if legacy_mask.is_file() && !migrated.exists() {
-                    let _ = std::fs::rename(&legacy_mask, &migrated);
+            let orig_stem = f.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            for suffix in ["mask", "top"] {
+                for me in [&ext[..], "png", "webp", "jpg", "jpeg"] {
+                    let legacy_comp = f.with_file_name(format!("{orig_stem}.{suffix}.{me}"));
+                    let migrated = dest.with_file_name(legacy_comp.file_name().unwrap_or_default());
+                    if legacy_comp.is_file() && !migrated.exists() {
+                        let _ = std::fs::rename(&legacy_comp, &migrated);
+                    }
                 }
+            }
+            let legacy_meta = f.with_file_name(format!("{orig_stem}.meta.json"));
+            let migrated_meta = dest.with_file_name(legacy_meta.file_name().unwrap_or_default());
+            if legacy_meta.is_file() && !migrated_meta.exists() {
+                let _ = std::fs::rename(&legacy_meta, &migrated_meta);
             }
         }
     }

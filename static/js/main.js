@@ -369,6 +369,13 @@ function initDefaultSettings() {
             CONFIG.MAX_HISTORY = parseInt(this.value);
         };
     }
+    var agentSessions = $('agentSessionsSelect');
+    if (agentSessions) {
+        agentSessions.value = String(AppConfig.agentSessionsLimit || 8);
+        agentSessions.onchange = function() {
+            AppConfig.setAgentSessionsLimit(parseInt(this.value));
+        };
+    }
     var canvasScaleSelect = $('canvasScaleSelect');
     if (canvasScaleSelect) {
         canvasScaleSelect.value = String(AppConfig.canvasScale || 2);
@@ -645,31 +652,19 @@ function initModelSelector() {
         // Схема «скачивает браузер»: открываем ссылку на модель в системном
         // браузере (hosted-студия — новой вкладкой), файл затем подхватывается
         // через «Загрузить модель с диска». Само приложение больше не качает.
-        serverBtn.onclick = () => openModelLink('full');
-    }
-    const liteBtn = $('downloadModelLiteBtn');
-    if (liteBtn && !liteBtn.dataset.bound) {
-        liteBtn.dataset.bound = '1';
-        liteBtn.onclick = () => openModelLink('lite');
+        serverBtn.onclick = () => openModelLink();
     }
 
     // Тултипы с рекомендованными требованиями (переводятся на languagechange)
     function applyModelTips() {
-        const tips = {
-            downloadModelLiteBtn: I18n.t('BEN2 · 213 МБ · GPU 4+ ГБ VRAM · 8 ГБ ОЗУ'),
-            downloadModelBtn: I18n.t('RMBG-2.0 · 490 МБ · GPU 6+ ГБ VRAM · 16 ГБ ОЗУ')
-        };
-        Object.entries(tips).forEach(([id, tip]) => {
-            const el = $(id);
-            if (el) el.dataset.tooltip = tip;
-        });
+        const el = $('downloadModelBtn');
+        if (el) el.dataset.tooltip = I18n.t('BEN2 · 213 МБ · GPU 4+ ГБ VRAM · 8 ГБ ОЗУ');
     }
     applyModelTips();
     document.addEventListener('languagechange', applyModelTips);
 
-    async function openModelLink(kind) {
-        const key = kind === 'lite' ? 'model_download_url_lite' : 'model_download_url';
-        const url = window._tokenatraModels?.[key];
+    async function openModelLink() {
+        const url = window._tokenatraModels?.model_download_url;
         if (!url) {
             toast(I18n.t('Ссылка на модель ещё не настроена'), true);
             return;
@@ -682,7 +677,7 @@ function initModelSelector() {
             const res = await fetch('/open_model_link', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ kind })
+                body: JSON.stringify({})
             });
             const d = await res.json();
             if (!res.ok || !d.ok) throw new Error(d.error || 'не удалось открыть ссылку');

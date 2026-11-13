@@ -22,27 +22,75 @@ ROOT = Path(__file__).resolve().parent
 MODULE = ROOT / 'foundry-module' / 'tokenatra-connector'
 STUDIO = MODULE / 'studio'
 
-# Имена встроенных колец — синхронно с server.py:BUILTIN_RINGS
+# Кольца, включаемые в hosted-студию модуля Foundry (первое — по умолчанию)
+STUDIO_RING_ORDER = [
+    'rune-steel.webp',
+    'high-noon.webp',
+    'eldritch.webp',
+    'circus.webp',
+    'cosmic.webp',
+    'ag-obsidian-red.webp',
+]
+STUDIO_RING_INDEX = {name: idx for idx, name in enumerate(STUDIO_RING_ORDER)}
+
+# Имена встроенных колец — синхронно с consts.rs:builtin_ring_name
 BUILTIN_RING_NAMES = {
-    'steel.webp': 'Сталь',
-    'ag-obsidian-red.webp': 'Красный обсидиан',
-    'ag-stormsteel.webp': 'Штормовая сталь',
-    'ag-wood-runic.png': 'Руническое дерево',
-    'high-noon.webp': 'Ковбой (High Noon)',
-    'plague.webp': 'Чумной венок',
-    'purple-crystals.webp': 'Аметистовые кристаллы',
+    'ag-obsidian-red.webp': 'Кровавый обсидиан',
+    'ag-wood-runic.webp': 'Рунное дерево',
+    'archer.webp': 'Стрелок',
+    'armor_2x.webp': 'Доспех',
+    'chronopunk.webp': 'Хронопанк',
+    'circus.webp': 'Цирк',
+    'cosmic.webp': 'Космос',
+    'cristmas_2x.webp': 'Рождество',
+    'druid.webp': 'Друид',
+    'eldritch.webp': 'Бездна',
+    'feywild.webp': 'Фейвайльд',
+    'gold-white-rune.webp': 'Золотые руны',
+    'high-noon.webp': 'Ковбой',
+    'kraken.webp': 'Морская пучина',
+    'lava.webp': 'Лава',
+    'plague.webp': 'Чума',
+    'rogue.webp': 'Теневое ремесло',
+    'rune-gold.webp': 'Руны: золото',
+    'rune-green.webp': 'Руны: зелёные',
+    'rune-ice.webp': 'Руны: лёд',
+    'rune-purple.webp': 'Руны: фиолетовые',
+    'rune-red.webp': 'Руны: красные',
+    'rune-steel.webp': 'Руны: сталь',
+    'stained-glass.webp': 'Витраж',
+    'tentacle.webp': 'Щупальца',
     'theathre.webp': 'Театр',
-    'white-runic.webp': 'Белые руны',
 }
 MIME = {'.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}
 THUMB_SIZE = 144  # сайдбар колец: ~10 КБ webp вместо 0.3–4 МБ оригинала
 
 
 def _ring_like(f: Path) -> bool:
-    """Фильтр файлов колец — синхронно с build_manifest."""
+    """Фильтр файлов колец для hosted-студии модуля Foundry."""
+    stem_cf = f.stem.casefold()
     return (f.is_file() and f.suffix.lower() in MIME
-            and f.name.casefold() not in ('token512.webp', 'token1024.webp', 'token2048.webp')
-            and not f.stem.casefold().endswith('.mask'))
+            and f.name.casefold() in STUDIO_RING_INDEX
+            and not stem_cf.endswith('.mask')
+            and not stem_cf.endswith('.top'))
+
+
+def _find_companion(f: Path, suffix: str):
+    for ext in MIME:
+        cand = f.with_name(f'{f.stem}.{suffix}{ext}')
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _read_meta(f: Path) -> dict:
+    mp = f.with_name(f'{f.stem}.meta.json')
+    if mp.is_file():
+        try:
+            return json.loads(mp.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {}
 
 
 def make_ring_thumbs(ring_files) -> None:
@@ -58,7 +106,13 @@ def make_ring_thumbs(ring_files) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for f in ring_files:
         try:
-            img = Image.open(f)
+            img = Image.open(f).convert('RGBA')
+            top = _find_companion(f, 'top')
+            if top is not None:
+                top_im = Image.open(top).convert('RGBA')
+                if top_im.size != img.size:
+                    top_im = top_im.resize(img.size, Image.LANCZOS)
+                img = Image.alpha_composite(img, top_im)
             img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.LANCZOS)
             img.save(out / (f.stem + '.webp'), 'WEBP', quality=80)
         except Exception as e:
@@ -107,24 +161,30 @@ def build_manifest() -> dict:
     for f in sorted(rings_dir.iterdir()):
         if not _ring_like(f):
             continue
-        mask_file = None
-        for ext in MIME:
-            cand = f.with_name(f'{f.stem}.mask{ext}')
-            if cand.is_file():
-                mask_file = cand.name
-                break
+        meta = _read_meta(f)
+        mask_p = _find_companion(f, 'mask')
+        mask_file = mask_p.name if mask_p else None
+        top_file = meta.get('top_file') if meta.get('top_file') and (rings_dir / meta['top_file']).is_file() else None
+        if not top_file:
+            top_p = _find_companion(f, 'top')
+            top_file = top_p.name if top_p else None
+        scale = float(meta.get('scale', 1.0)) if isinstance(meta.get('scale'), (int, float)) else 1.0
         entry = {
-            'name': BUILTIN_RING_NAMES.get(f.name.casefold(), f.stem),
+            'name': BUILTIN_RING_NAMES.get(f.name.casefold(), meta.get('name') or f.stem),
+            'name_en': meta.get('name_en'),
             'file': f.name,
             'mime': MIME[f.suffix.lower()],
             'builtin': True,
             'mask_file': mask_file,
+            'top_file': top_file,
+            'scale': scale,
             'added_at': 0,
         }
         thumb = STUDIO / 'assets' / 'rings' / 'thumbs' / (f.stem + '.webp')
         if thumb.is_file():
             entry['thumb'] = 'thumbs/' + thumb.name
         rings.append(entry)
+    rings.sort(key=lambda r: STUDIO_RING_INDEX.get(r['file'].casefold(), 999))
     presets = [{'name': f.stem, 'file': f.name, 'builtin': True}
                for f in sorted(presets_dir.iterdir())
                if f.is_file() and f.suffix.lower() in MIME]
@@ -160,6 +220,13 @@ def main() -> None:
     ring_files = [f for f in (ROOT / 'token_rings').iterdir() if _ring_like(f)]
     for f in ring_files:
         shutil.copy2(f, STUDIO / 'assets' / 'rings' / f.name)
+        for suffix in ('mask', 'top'):
+            comp = _find_companion(f, suffix)
+            if comp is not None:
+                shutil.copy2(comp, STUDIO / 'assets' / 'rings' / comp.name)
+        mp = f.with_name(f'{f.stem}.meta.json')
+        if mp.is_file():
+            shutil.copy2(mp, STUDIO / 'assets' / 'rings' / mp.name)
     make_ring_thumbs(ring_files)
     for f in (ROOT / 'presets').iterdir():
         if f.is_file() and f.suffix.lower() in MIME:

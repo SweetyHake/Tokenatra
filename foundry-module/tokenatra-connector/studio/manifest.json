@@ -1,85 +1,76 @@
 {
   "rings": [
     {
-      "name": "Красный обсидиан",
-      "file": "ag-obsidian-red.webp",
+      "name": "Руны: сталь",
+      "name_en": "Runes: Steel",
+      "file": "rune-steel.webp",
       "mime": "image/webp",
       "builtin": true,
       "mask_file": null,
+      "top_file": null,
+      "scale": 1.009,
       "added_at": 0,
-      "thumb": "thumbs/ag-obsidian-red.webp"
+      "thumb": "thumbs/rune-steel.webp"
     },
     {
-      "name": "Штормовая сталь",
-      "file": "ag-stormsteel.webp",
-      "mime": "image/webp",
-      "builtin": true,
-      "mask_file": null,
-      "added_at": 0,
-      "thumb": "thumbs/ag-stormsteel.webp"
-    },
-    {
-      "name": "Руническое дерево",
-      "file": "ag-wood-runic.png",
-      "mime": "image/png",
-      "builtin": true,
-      "mask_file": null,
-      "added_at": 0,
-      "thumb": "thumbs/ag-wood-runic.webp"
-    },
-    {
-      "name": "Ковбой (High Noon)",
+      "name": "Ковбой",
+      "name_en": "Cowboy",
       "file": "high-noon.webp",
       "mime": "image/webp",
       "builtin": true,
-      "mask_file": "high-noon.mask.png",
+      "mask_file": null,
+      "top_file": "high-noon.top.webp",
+      "scale": 1.0274,
       "added_at": 0,
       "thumb": "thumbs/high-noon.webp"
     },
     {
-      "name": "Чумной венок",
-      "file": "plague.webp",
+      "name": "Бездна",
+      "name_en": "Eldritch",
+      "file": "eldritch.webp",
       "mime": "image/webp",
       "builtin": true,
       "mask_file": null,
+      "top_file": "eldritch.top.webp",
+      "scale": 1.1541,
       "added_at": 0,
-      "thumb": "thumbs/plague.webp"
+      "thumb": "thumbs/eldritch.webp"
     },
     {
-      "name": "Аметистовые кристаллы",
-      "file": "purple-crystals.webp",
+      "name": "Цирк",
+      "name_en": "Circus",
+      "file": "circus.webp",
       "mime": "image/webp",
       "builtin": true,
       "mask_file": null,
+      "top_file": "circus.top.webp",
+      "scale": 1.1086,
       "added_at": 0,
-      "thumb": "thumbs/purple-crystals.webp"
+      "thumb": "thumbs/circus.webp"
     },
     {
-      "name": "Сталь",
-      "file": "steel.webp",
+      "name": "Космос",
+      "name_en": "Cosmic",
+      "file": "cosmic.webp",
       "mime": "image/webp",
       "builtin": true,
       "mask_file": null,
+      "top_file": null,
+      "scale": 1.0732,
       "added_at": 0,
-      "thumb": "thumbs/steel.webp"
+      "thumb": "thumbs/cosmic.webp"
     },
     {
-      "name": "Театр",
-      "file": "theathre.webp",
+      "name": "Кровавый обсидиан",
+      "name_en": "Blood Obsidian",
+      "file": "ag-obsidian-red.webp",
       "mime": "image/webp",
       "builtin": true,
       "mask_file": null,
+      "top_file": null,
+      "scale": 1.0151,
       "added_at": 0,
-      "thumb": "thumbs/theathre.webp"
-    },
-    {
-      "name": "Белые руны",
-      "file": "white-runic.webp",
-      "mime": "image/webp",
-      "builtin": true,
-      "mask_file": null,
-      "added_at": 0,
-      "thumb": "thumbs/white-runic.webp"
+      "thumb": "thumbs/ag-obsidian-red.webp"
     }
   ],
   "presets": [

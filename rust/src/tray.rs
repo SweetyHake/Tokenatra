@@ -61,52 +61,50 @@ pub fn create(state: &Arc<AppState>) -> Option<Tray> {
         .build()
         .ok()?;
 
-    // thread handling menu/icon clicks (clicks are cheap, model in background)
+    // Handle menu & tray icon events immediately via event handlers
+    // (avoids 200ms polling lag and MouseMove queue starvation)
     let st = state.clone();
-    std::thread::spawn(move || loop {
-        match muda::MenuEvent::receiver().recv_timeout(std::time::Duration::from_millis(200)) {
-            Ok(ev) => match ev.id().as_ref() {
-                "open" => {
-                    let _ = crate::gui_control::send(crate::gui_control::GuiCommand::Show);
-                }
-                "model" => {
-                    if !MODEL_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        let st2 = st.clone();
-                        std::thread::spawn(move || {
-                            if crate::infer::model_loaded(&st2) {
-                                crate::infer::unload_model(&st2);
-                            } else {
-                                let _ = crate::infer::load_session(&st2);
-                            }
-                            MODEL_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
-                        });
-                    }
-                }
-                "quit" => {
-                    let _ = crate::gui_control::send(crate::gui_control::GuiCommand::Quit);
-                }
-                _ => {}
-            },
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-            Err(_) => return,
+    muda::MenuEvent::set_event_handler(Some(move |ev: muda::MenuEvent| match ev.id().as_ref() {
+        "open" => {
+            let _ = crate::gui_control::send(crate::gui_control::GuiCommand::Show);
         }
-        if let Ok(ev) = tray_icon::TrayIconEvent::receiver()
-            .recv_timeout(std::time::Duration::from_millis(0))
-        {
-            // left click or double click opens the window; the menu opens on
-            // right click (menu_on_left_click = false)
-            let open = matches!(
-                ev,
-                tray_icon::TrayIconEvent::Click {
-                    button: tray_icon::MouseButton::Left,
-                    ..
-                } | tray_icon::TrayIconEvent::DoubleClick { .. }
-            );
-            if open {
-                let _ = crate::gui_control::send(crate::gui_control::GuiCommand::Show);
+        "model" => {
+            if !MODEL_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                let st2 = st.clone();
+                std::thread::spawn(move || {
+                    if crate::infer::model_loaded(&st2) {
+                        crate::infer::unload_model(&st2);
+                    } else {
+                        let _ = crate::infer::load_session(&st2);
+                    }
+                    MODEL_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                });
             }
         }
-    });
+        "quit" => {
+            let _ = crate::gui_control::send(crate::gui_control::GuiCommand::Quit);
+        }
+        _ => {}
+    }));
+
+    tray_icon::TrayIconEvent::set_event_handler(Some(move |ev| {
+        // Left click release or left double click opens/restores the window;
+        // context menu opens on right click (menu_on_left_click = false)
+        let open = matches!(
+            ev,
+            tray_icon::TrayIconEvent::Click {
+                button: tray_icon::MouseButton::Left,
+                button_state: tray_icon::MouseButtonState::Up,
+                ..
+            } | tray_icon::TrayIconEvent::DoubleClick {
+                button: tray_icon::MouseButton::Left,
+                ..
+            }
+        );
+        if open {
+            let _ = crate::gui_control::send(crate::gui_control::GuiCommand::Show);
+        }
+    }));
 
     Some(Tray { icon, model_item })
 }

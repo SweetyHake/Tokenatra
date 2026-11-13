@@ -16,6 +16,13 @@ import * as api from './api.js';
 import { relay } from './relay.js';
 import { upload, sanitizeFileName, transliterate } from './upload.js';
 import { applyExport, applyKindToActor, actorArtDataUrl } from './actions.js';
+import {
+  listFoundryRings,
+  getActorExplicitRingId,
+  getActorFoundryRingId,
+  getFoundryRingThumb,
+  renderFoundryRingFull
+} from './foundryRings.js';
 
 // Рендер из PARTS/шаблона даёт только HandlebarsApplicationMixin —
 // голый ApplicationV2 требует собственные _renderHTML/_replaceHTML
@@ -125,6 +132,7 @@ export class TokenatraApp extends HandlebarsApplicationMixin(ApplicationV2) {
     if (existing instanceof TokenatraApp) {
       if (actor) existing.contextActor = actor;
       existing.bringToFront();
+      existing.#sendFoundryRings();
       if (actor) existing.#requestActorArt();
       // Каждое открытие — свежее зондирование Tokenatra (могла запуститься
       // или закрыться с прошлого раза); студия обновит conn на лету
@@ -319,8 +327,55 @@ export class TokenatraApp extends HandlebarsApplicationMixin(ApplicationV2) {
       originalUrl: dataUrl,
       filename: sanitizeFileName((saved.original.split('/').pop() || 'original.png')),
       sourcePath: saved.original,
-      settings: saved.settings || null
+      settings: saved.settings || null,
+      actorExplicitRingId: getActorExplicitRingId(actor),
+      actorFoundryRingId: getActorFoundryRingId(actor),
+      actorRingEnabled: (actor.token?.ring?.enabled ?? actor.prototypeToken?.ring?.enabled ?? true)
     };
+  }
+
+  /** Отправить список динамических колец Foundry в студию и догрузить миниатюры фоном. */
+  #sendFoundryRings() {
+    const { rings, worldRingId, multipleRingsActive } = listFoundryRings();
+    const actor = this.#contextActor;
+    const activeRingId = getActorFoundryRingId(actor);
+    const actorRingEnabled = actor
+      ? (actor.token?.ring?.enabled ?? actor.prototypeToken?.ring?.enabled ?? true)
+      : true;
+    const msg = {
+      type: 'tokenatra:foundry-rings',
+      rings,
+      worldRingId,
+      activeRingId,
+      actorRingEnabled,
+      multipleRingsActive
+    };
+    if (this.#frameReady) this.#postToFrame(msg);
+    else this.#outbox.push(msg);
+
+    // Прогрессивно рендерим недостающие миниатюры (начиная с выбранного кольца)
+    const missing = rings.filter(r => !r.thumbUrl).map(r => r.id);
+    if (!missing.length) return;
+    missing.sort((a, b) => (a === activeRingId ? -1 : b === activeRingId ? 1 : 0));
+    const concurrency = 3;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < missing.length && this.rendered) {
+        const id = missing[cursor++];
+        const thumbRes = await getFoundryRingThumb(id);
+        if (thumbRes?.thumbUrl && this.rendered && this.#frameReady) {
+          this.#postToFrame({
+            type: 'tokenatra:foundry-ring-thumb',
+            id,
+            thumbUrl: thumbRes.thumbUrl,
+            scale: thumbRes.scale || 1
+          });
+        }
+      }
+    };
+    for (let i = 0; i < Math.min(concurrency, missing.length); i++) {
+      worker();
+    }
   }
 
   #onWindowMessage(event) {
@@ -332,7 +387,30 @@ export class TokenatraApp extends HandlebarsApplicationMixin(ApplicationV2) {
     switch (data.type) {
       case 'tokenatra:ready':
         this.#frameReady = true;
+        this.#sendFoundryRings();
         this.#flushOutbox();
+        break;
+      case 'tokenatra:request-foundry-rings':
+        this.#sendFoundryRings();
+        break;
+      case 'tokenatra:get-foundry-ring':
+        renderFoundryRingFull(data.id)
+          .then(res => this.#postToFrame({
+            type: 'tokenatra:foundry-ring-data',
+            reqId: data.reqId,
+            ok: true,
+            id: res.id,
+            scale: res.scale,
+            ringBlob: res.ringBlob,
+            topBlob: res.topBlob
+          }))
+          .catch(err => this.#postToFrame({
+            type: 'tokenatra:foundry-ring-data',
+            reqId: data.reqId,
+            ok: false,
+            id: data.id,
+            error: err?.message || String(err)
+          }));
         break;
       case 'tokenatra:hello':
         // Студия создалась позже, чем родитель успел отправить conn, —
@@ -441,7 +519,8 @@ export class TokenatraApp extends HandlebarsApplicationMixin(ApplicationV2) {
       const metrics = {
         scale: Number(data.scale) || 1,
         scaleX: Number(data.scaleX) || 1,
-        scaleY: Number(data.scaleY) || 1
+        scaleY: Number(data.scaleY) || 1,
+        foundryRingId: typeof data.foundryRingId === 'string' && data.foundryRingId ? data.foundryRingId : null
       };
       const actor = this.#contextActor;
       if (actor && actor.isOwner) {

@@ -830,11 +830,14 @@ var TokenCanvas = {
             // после перехода на {1536,3072,6144} даёт size/4 — кольцо не совпадало
             // с реальной областью токена 1× (size/3 в экспорте).
             var ringSize = Math.round(size / 3);
-            var ringOffset = (size - ringSize) / 2;
+            var ringDrawScale = (state.ringDrawScale && state.ringDrawScale > 0) ? state.ringDrawScale : 1;
+            var ringDrawSize = Math.round(ringSize * ringDrawScale);
+            var ringDrawOffset = Math.round((size - ringDrawSize) / 2);
             var ringImage = state.ringImages[2048] || state.ringImages[1024];
+            var ringTopImage = state.ringTopImage || null;
             if (!dirtyOnly) {
                 if (ringImage) {
-                    this.ctx.drawImage(ringImage, ringOffset, ringOffset, ringSize, ringSize);
+                    this.ctx.drawImage(ringImage, ringDrawOffset, ringDrawOffset, ringDrawSize, ringDrawSize);
                 }
             }
 
@@ -861,7 +864,7 @@ var TokenCanvas = {
                 cctx.clip();
                 cctx.clearRect(dr.x, dr.y, dr.w, dr.h);
                 if (ringImage) {
-                    cctx.drawImage(ringImage, ringOffset, ringOffset, ringSize, ringSize);
+                    cctx.drawImage(ringImage, ringDrawOffset, ringDrawOffset, ringDrawSize, ringDrawSize);
                 }
                 // Старая тень переживает патч (см. полный кадр ветки erasing)
                 if (state.dropShadowEnabled && this._shadowCache) {
@@ -901,6 +904,9 @@ var TokenCanvas = {
                 cctx.imageSmoothingEnabled = true;
                 cctx.imageSmoothingQuality = 'high';
                 cctx.drawImage(this._tempCanvas, dr.x, dr.y, dr.w, dr.h, dr.x, dr.y, dr.w, dr.h);
+                if (ringTopImage) {
+                    cctx.drawImage(ringTopImage, ringDrawOffset, ringDrawOffset, ringDrawSize, ringDrawSize);
+                }
                 cctx.restore();
 
                 // Статичные оверлеи (зоны стирания, защита, границы, пример)
@@ -960,6 +966,9 @@ var TokenCanvas = {
                         this._drawHiddenLayer(dragCtx, this._tempCanvas, state.maskCanvas, size, size, true);
                     }
                     this.ctx.drawImage(this._tempCanvas, 0, 0);
+                    if (ringTopImage) {
+                        this.ctx.drawImage(ringTopImage, ringDrawOffset, ringDrawOffset, ringDrawSize, ringDrawSize);
+                    }
                     if (state.showErasedZones) {
                         this._renderErasedZonesCached(size, scale, w, h, cx, cy);
                     }
@@ -1011,6 +1020,9 @@ var TokenCanvas = {
                             this.ctx.drawImage(this._shadowCache, 0, 0, this._shadowCache.width, this._shadowCache.height, 0, 0, size, size);
                         }
                         this.ctx.drawImage(this._tempCanvas, 0, 0);
+                        if (ringTopImage) {
+                            this.ctx.drawImage(ringTopImage, ringDrawOffset, ringDrawOffset, ringDrawSize, ringDrawSize);
+                        }
                         if (state.showErasedZones) {
                             this._maybeRebuildZones(size, scale, w, h, cx, cy);
                         }
@@ -1027,6 +1039,9 @@ var TokenCanvas = {
                         }
 
                         this.ctx.drawImage(this._tempCanvas, 0, 0);
+                        if (ringTopImage) {
+                            this.ctx.drawImage(ringTopImage, ringDrawOffset, ringDrawOffset, ringDrawSize, ringDrawSize);
+                        }
 
                         if (state.showErasedZones) {
                             this._renderErasedZonesCached(size, scale, w, h, cx, cy);
@@ -1234,7 +1249,7 @@ var TokenCanvas = {
 
     renderForSave: function(withRing) {
         var scaleMode = state.saveScaleMode;
-        var usedScale = scaleMode === 'auto' ? this.detectUsedScale() : (parseInt(scaleMode) || 1);
+        var usedScale = scaleMode === 'auto' ? this.detectUsedScale(withRing) : (parseInt(scaleMode) || 1);
 
         var qualityBase = state.saveQuality;
         var scale3Size = qualityBase * 3;
@@ -1249,10 +1264,13 @@ var TokenCanvas = {
         fullCtx.imageSmoothingQuality = 'high';
 
         var ringSize = qualityBase;
-        var ringOffset = (scale3Size - ringSize) / 2;
+        var ringDrawScale = (state.ringDrawScale && state.ringDrawScale > 0) ? state.ringDrawScale : 1;
+        var ringDrawSize = Math.round(ringSize * ringDrawScale);
+        var ringDrawOffset = Math.round((scale3Size - ringDrawSize) / 2);
         var ringImage = state.ringImages[2048] || state.ringImages[1024];
+        var ringTopImage = state.ringTopImage || null;
         if (withRing && ringImage) {
-            fullCtx.drawImage(ringImage, ringOffset, ringOffset, ringSize, ringSize);
+            fullCtx.drawImage(ringImage, ringDrawOffset, ringDrawOffset, ringDrawSize, ringDrawSize);
         }
 
         if (state.userImage) {
@@ -1297,6 +1315,9 @@ var TokenCanvas = {
                 fullCtx.drawImage(shadowCanvas, 0, 0);
             }
             fullCtx.drawImage(tempCanvas, 0, 0);
+            if (withRing && ringTopImage) {
+                fullCtx.drawImage(ringTopImage, ringDrawOffset, ringDrawOffset, ringDrawSize, ringDrawSize);
+            }
         }
 
         var finalSize = qualityBase * usedScale;
@@ -1313,7 +1334,7 @@ var TokenCanvas = {
         return { canvas: croppedCanvas, finalSize: finalSize, usedScale: usedScale };
     },
 
-    detectUsedScale: function() {
+    detectUsedScale: function(withRing) {
         if (!state.userImage) return 1;
 
         var internalSize = this.internalSize;
@@ -1327,7 +1348,22 @@ var TokenCanvas = {
         scanCanvas.height = SCAN;
         var sCtx = scanCanvas.getContext('2d');
 
+        var ringImage = withRing ? (state.ringImages[2048] || state.ringImages[1024]) : null;
+        var ringTopImage = withRing ? (state.ringTopImage || null) : null;
+        var ringDrawScale = (state.ringDrawScale && state.ringDrawScale > 0) ? state.ringDrawScale : 1;
+        var ringScanSize = (SCAN / 3) * ringDrawScale;
+        var ringScanOffset = (SCAN - ringScanSize) / 2;
+
+        if (withRing && ringImage) {
+            sCtx.drawImage(ringImage, ringScanOffset, ringScanOffset, ringScanSize, ringScanSize);
+        }
+
         this._buildCompositedImage();
+
+        var subjCanvas = document.createElement('canvas');
+        subjCanvas.width = SCAN;
+        subjCanvas.height = SCAN;
+        var subjCtx = subjCanvas.getContext('2d');
 
         var w  = state.userImage.width  * state.imageScale * scale / factor;
         var h  = state.userImage.height * state.imageScale * scale / factor;
@@ -1335,15 +1371,23 @@ var TokenCanvas = {
         var cy = SCAN / 2 + state.imageY * scale / factor;
         var angle = state.imageRotation * Math.PI / 180;
 
-        sCtx.save();
-        sCtx.translate(cx, cy);
-        sCtx.rotate(angle);
-        sCtx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
-        sCtx.restore();
+        subjCtx.save();
+        subjCtx.translate(cx, cy);
+        subjCtx.rotate(angle);
+        subjCtx.drawImage(this._compositedImageCache, -w / 2, -h / 2, w, h);
+        subjCtx.restore();
 
-        sCtx.globalCompositeOperation = 'destination-in';
-        sCtx.drawImage(state.maskCanvas, 0, 0, internalSize, internalSize, 0, 0, SCAN, SCAN);
-        sCtx.globalCompositeOperation = 'source-over';
+        subjCtx.globalCompositeOperation = 'destination-in';
+        subjCtx.drawImage(state.maskCanvas, 0, 0, internalSize, internalSize, 0, 0, SCAN, SCAN);
+        subjCtx.globalCompositeOperation = 'source-over';
+
+        sCtx.drawImage(subjCanvas, 0, 0);
+        subjCanvas.width = 1;
+        subjCanvas.height = 1;
+
+        if (withRing && ringTopImage) {
+            sCtx.drawImage(ringTopImage, ringScanOffset, ringScanOffset, ringScanSize, ringScanSize);
+        }
 
         var data = sCtx.getImageData(0, 0, SCAN, SCAN).data;
 

@@ -55,5 +55,6 @@
   "TKC.ErrorRelay": "GM client is offline — Tokenatra relay unavailable.",
   "TKC.ConnLocal": "Connected to your local Tokenatra (v{version})",
   "TKC.ConnHost": "No local Tokenatra found — using the host's Tokenatra (via the GM client)",
-  "TKC.ConnNone": "Tokenatra is unavailable. Start it on your device, or ask the GM to start it and join the world"
+  "TKC.ConnNone": "Tokenatra is unavailable. Start it on your device, or ask the GM to start it and join the world",
+  "TKC.WarnMultipleRingsInactive": "Multiple Rings module is not active — enable it in Manage Modules to apply per-token Foundry rings."
 }

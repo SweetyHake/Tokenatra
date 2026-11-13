@@ -1,6 +1,6 @@
 [package]
 name = "tokenatra"
-version = "26.5.1"
+version = "26.5.2"
 edition = "2024"
 description = "Tokenatra: token editor & background remover"
 default-run = "tokenatra"
@@ -43,17 +43,17 @@ wry = "0.57"
 tray-icon = "0.21"
 muda = "0.17"
 
-# ONNX Runtime (pyke io). Static prebuilt binaries exist per EP set, and
-# pyke ships no binary with several GPU EPs combined, so targets differ:
-# Windows -> DirectML (AMD/Intel) + CUDA (NVIDIA); macOS/Linux -> CPU only.
-# Optional GPU EPs on other targets: --features cuda | rocm | coreml.
+# ONNX Runtime (pyke io). Static prebuilt binaries exist per EP set:
+# Windows -> DirectML (covers NVIDIA, AMD and Intel out of the box via DX12);
+# macOS -> CoreML; Linux -> CPU by default.
+# Optional GPU EPs via Cargo features: --features cuda | rocm | coreml.
 ort = { version = "2.0.0-rc.15", features = ["half"] }
 crossbeam-channel = "0.5.17"
 half = "2.7.1"
 
 [target.'cfg(windows)'.dependencies]
-# DirectML covers AMD/Intel (and is the NVIDIA fallback); CUDA for NVIDIA
-ort = { version = "2.0.0-rc.15", features = ["directml", "cuda"] }
+# DirectML runs on NVIDIA, AMD and Intel GPUs without requiring external CUDA/cuDNN SDKs
+ort = { version = "2.0.0-rc.15", features = ["directml"] }
 # registry verbs / context menu (win.rs); module itself is cfg(windows)-gated
 winreg = "0.56"
 windows = { version = "0.62", features = [
@@ -67,6 +67,7 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_System_LibraryLoader",
     "Win32_System_Com",
+    "Win32_System_Threading",
 ] }
 
 [features]

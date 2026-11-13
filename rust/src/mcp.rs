@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_VERSION: &str = "2025-06-18";
 const HTTP_TIMEOUT_SECS: u64 = 180;
-const MCP_SERVER_VERSION: &str = "26.5.1";
+const MCP_SERVER_VERSION: &str = "26.5.2";
 
 const INSTRUCTIONS: &str = "\
 Use tools from this server through `execute` under `tools[\"tokenatra\"]`.
@@ -19,7 +19,7 @@ If Tokenatra is not running yet, the first tool call starts `tokenatra.exe --ser
 How a human creates a token in Tokenatra (follow the `example.png` style guide):
 1. Open the image: call `tokenatra_create_session({ image_path: \"C:/path/to/art.webp\" })`.
    It returns `session_id` and `source_info` (`width`, `height`, `opaque_pct`, `already_transparent`, `fit1024_bbox`).
-   The default ring `\"steel\"` and ring protection mask are already active, just like in the GUI.
+   The default ring `\"rune-steel\"` and ring protection mask are already active, just like in the GUI.
 2. Remove background ONLY if needed: check `already_transparent` (or `opaque_pct < 92`).
    - If the background is opaque (`already_transparent: false`), call `tokenatra_remove_background({ session_id })`.
    - NEVER call `tokenatra_remove_background` on an already transparent cutout/subject — re-matting eats fine edges and glow.
@@ -139,7 +139,7 @@ fn tools_list() -> Value {
         },
         {
             "name": "tokenatra_list_assets",
-            "description": "List available token rings (steel, white-runic, ag-stormsteel, etc.) and mask presets (preset1, preset2, preset3, plus user presets).",
+            "description": "List available token rings (rune-steel, high-noon, armor_2x, eldritch, etc.) and mask presets (preset1, preset2, preset3, plus user presets).",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
@@ -158,14 +158,14 @@ fn tools_list() -> Value {
                     },
                     "ring": {
                         "type": "string",
-                        "description": "Initial ring name (default \"steel\", pass \"\" or \"none\" for no ring)"
+                        "description": "Initial ring name (default \"rune-steel\", pass \"\" or \"none\" for no ring)"
                     }
                 }
             }
         },
         {
             "name": "tokenatra_remove_background",
-            "description": "Remove background with the ONNX model (RMBG-2.0 / BEN2 / BiRefNet), or toggle between original and cutout (`showing_original: true/false`). Check `already_transparent` from create_session/inspect first — do NOT call on already-transparent images.",
+            "description": "Remove background with the ONNX model (BEN2), or toggle between original and cutout (`showing_original: true/false`). Check `already_transparent` from create_session/inspect first — do NOT call on already-transparent images.",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id"],
@@ -238,7 +238,7 @@ fn tools_list() -> Value {
         },
         {
             "name": "tokenatra_set_ring",
-            "description": "Set token ring by name (e.g. \"steel\", \"white-runic\", \"ag-stormsteel\"), or remove it (name=null or \"none\").",
+            "description": "Set token ring by name (e.g. \"rune-steel\", \"high-noon\", \"armor_2x\"), or remove it (name=null or \"none\").",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id"],

@@ -5,9 +5,12 @@
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Mutex;
 
-use windows::core::PCWSTR;
+use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIFactory6, DXGI_ADAPTER_FLAG_SOFTWARE,
+    DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
@@ -77,6 +80,35 @@ pub fn resize_webview_to_client() -> bool {
 pub fn post_drag_message(hwnd: HWND) {
     unsafe {
         let _ = PostMessageW(Some(hwnd), WM_APP + 1, WPARAM(0), LPARAM(0));
+    }
+}
+
+/// Restores a hidden/minimized window and brings it to the foreground reliably on Windows.
+pub fn bring_to_front(hwnd: HWND) {
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        } else if !IsWindowVisible(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+        }
+        let fg = GetForegroundWindow();
+        if fg != hwnd {
+            let fg_tid = if !fg.0.is_null() {
+                GetWindowThreadProcessId(fg, None)
+            } else {
+                0
+            };
+            let cur_tid = GetCurrentThreadId();
+            let attached = fg_tid != 0
+                && fg_tid != cur_tid
+                && AttachThreadInput(cur_tid, fg_tid, true).as_bool();
+            let _ = BringWindowToTop(hwnd);
+            let _ = SetForegroundWindow(hwnd);
+            if attached {
+                let _ = AttachThreadInput(cur_tid, fg_tid, false);
+            }
+        }
     }
 }
 
@@ -441,26 +473,120 @@ pub fn resize_loop(h: SendHwnd, edges: (bool, bool, bool, bool)) {
 
 // ===== DXGI =====
 
-pub fn enumerate_dxgi_adapters() -> Option<Vec<(i32, String)>> {
+#[derive(Clone, Debug)]
+pub struct DxgiAdapterInfo {
+    pub index: i32,
+    pub name: String,
+    pub vendor_id: u32,
+    pub dedicated_vram: u64,
+    pub is_software: bool,
+    pub is_high_perf_first: bool,
+}
+
+fn is_virtual_adapter_name(name: &str) -> bool {
+    let low = name.to_lowercase();
+    const VIRTUAL_KEYWORDS: &[&str] = &[
+        "microsoft basic",
+        "microsoft remote",
+        "hyper-v",
+        "warp",
+        "parsec",
+        "virtual",
+        "vmware",
+        "vbox",
+        "qxl",
+        "citrix",
+        "spacedesk",
+        "indirect",
+        "display only",
+        "rdp",
+        "teamviewer",
+        "anydesk",
+        "software renderer",
+        "basic render",
+        "basic display",
+    ];
+    VIRTUAL_KEYWORDS.iter().any(|kw| low.contains(kw))
+}
+
+pub fn enumerate_dxgi_adapters_detailed() -> Option<Vec<DxgiAdapterInfo>> {
     unsafe {
         let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+
+        // Ask Windows DXGI 1.6 which hardware GPU is preferred for HighPerformance
+        let mut high_perf_luid: Option<(i32, u32)> = None;
+        if let Ok(factory6) = factory.cast::<IDXGIFactory6>() {
+            for pref_idx in 0..8 {
+                let Ok(adapter) = factory6.EnumAdapterByGpuPreference::<IDXGIAdapter1>(
+                    pref_idx,
+                    DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                ) else {
+                    break;
+                };
+                if let Ok(desc) = adapter.GetDesc1() {
+                    let sw_flag = (desc.Flags & (DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32)) != 0
+                        || desc.VendorId == 0x1414;
+                    let name_len = desc
+                        .Description
+                        .iter()
+                        .position(|c| *c == 0)
+                        .unwrap_or(desc.Description.len());
+                    let name = String::from_utf16_lossy(&desc.Description[..name_len]);
+                    if !sw_flag && !is_virtual_adapter_name(name.trim()) {
+                        high_perf_luid =
+                            Some((desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart));
+                        break;
+                    }
+                }
+            }
+        }
+
         let mut out = Vec::new();
         for i in 0..32 {
-            let adapter = match factory.EnumAdapters(i) {
+            let adapter = match factory.EnumAdapters1(i) {
                 Ok(a) => a,
                 Err(_) => break,
             };
-            if let Ok(desc) = adapter.GetDesc() {
-                let name_len = desc.Description.iter().position(|c| *c == 0).unwrap_or(128);
-                let name = String::from_utf16_lossy(&desc.Description[..name_len]);
-                let name = name.trim().to_string();
-                if !name.is_empty() {
-                    out.push((i as i32, name));
+            if let Ok(desc) = adapter.GetDesc1() {
+                let name_len = desc
+                    .Description
+                    .iter()
+                    .position(|c| *c == 0)
+                    .unwrap_or(desc.Description.len());
+                let name = String::from_utf16_lossy(&desc.Description[..name_len])
+                    .trim()
+                    .to_string();
+                if name.is_empty() {
+                    continue;
                 }
+                let sw_flag = (desc.Flags & (DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32)) != 0
+                    || desc.VendorId == 0x1414;
+                let is_software = sw_flag || is_virtual_adapter_name(&name);
+                let luid = (desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart);
+                out.push(DxgiAdapterInfo {
+                    index: i as i32,
+                    name,
+                    vendor_id: desc.VendorId,
+                    dedicated_vram: desc.DedicatedVideoMemory as u64,
+                    is_software,
+                    is_high_perf_first: !is_software && high_perf_luid == Some(luid),
+                });
             }
         }
         Some(out)
     }
+}
+
+pub fn cpu_name_from_registry() -> Option<String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let key = hklm
+        .open_subkey(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        .ok()?;
+    let name: String = key.get_value("ProcessorNameString").ok()?;
+    let trimmed = name.trim().to_string();
+    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 // ===== AppUserModelID / dark dialogs / WebView2 GPU =====

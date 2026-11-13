@@ -6,7 +6,7 @@ use serde_json::json;
 
 use axum::http::StatusCode;
 use super::{err_status, ok_json};
-use crate::consts::{model_download_url, model_download_url_lite, APP_NAME};
+use crate::consts::{model_download_url, APP_NAME};
 use crate::paths;
 use crate::state::AppState;
 
@@ -61,7 +61,6 @@ pub async fn models_list() -> Response {
         "models_dir": paths::models_dir().to_string_lossy(),
         "selected": selected.exists().then(|| selected.file_name().and_then(|n| n.to_str()).map(String::from)).flatten(),
         "model_download_url": model_download_url(),
-        "model_download_url_lite": model_download_url_lite(),
     }))
 }
 
@@ -121,14 +120,8 @@ pub async fn select_model(
     }))
 }
 
-pub async fn open_model_link(body: axum::body::Bytes) -> Response {
-    let data: serde_json::Value = serde_json::from_slice(&body).unwrap_or(json!({}));
-    let kind = data.get("kind").and_then(|v| v.as_str());
-    let url = if kind == Some("lite") {
-        model_download_url_lite()
-    } else {
-        model_download_url()
-    };
+pub async fn open_model_link(_body: axum::body::Bytes) -> Response {
+    let url = model_download_url();
     if url.is_empty() {
         return err_status(StatusCode::SERVICE_UNAVAILABLE, "Ссылка на модель ещё не настроена");
     }

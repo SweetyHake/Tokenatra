@@ -21,7 +21,6 @@ const LOGICAL: f32 = 1024.0;
 const LOGICAL_U32: u32 = 1024;
 const OPS_LIMIT: u32 = 200;
 const SESSION_TTL_MIN: u64 = 30;
-const MAX_SESSIONS: usize = 4;
 const MAX_BASE_DIM: u32 = 2048;
 const MAX_HISTORY: usize = 30;
 
@@ -150,8 +149,8 @@ fn with_store<T>(f: impl FnOnce(&mut Vec<SessionSlot>) -> T) -> T {
 }
 
 fn default_ring_name() -> Option<String> {
-    if find_ring_file("steel").is_some() {
-        return Some("steel".to_string());
+    if find_ring_file("rune-steel").is_some() {
+        return Some("rune-steel".to_string());
     }
     let rings = list_dir_images(&paths::builtin_ring_dir(), true);
     rings
@@ -161,8 +160,9 @@ fn default_ring_name() -> Option<String> {
 }
 
 fn store_create(base: RgbaImage, ring_override: Option<Option<String>>) -> Arc<Mutex<AgentSession>> {
+    let max_sessions = crate::config::max_agent_sessions();
     with_store(|v| {
-        while v.len() >= MAX_SESSIONS {
+        while v.len() >= max_sessions {
             let oldest = v
                 .iter()
                 .enumerate()
@@ -288,6 +288,10 @@ fn find_ring_file(name: &str) -> Option<std::path::PathBuf> {
                 if !p.is_file() {
                     continue;
                 }
+                let ext = super::ext_of(&p.to_string_lossy());
+                if !matches!(ext.as_str(), "webp" | "png" | "jpg" | "jpeg") {
+                    continue;
+                }
                 let fname = p
                     .file_name()
                     .and_then(|s| s.to_str())
@@ -298,11 +302,19 @@ fn find_ring_file(name: &str) -> Option<std::path::PathBuf> {
                     .and_then(|s| s.to_str())
                     .unwrap_or_default()
                     .to_lowercase();
-                if fstem.ends_with(".mask") {
+                if fstem.ends_with(".mask") || fstem.ends_with(".top") {
                     continue;
                 }
                 let localized = builtin_ring_name(&fname).map(|s| s.to_lowercase());
-                if fstem == stem || fname == stem || localized.as_deref() == Some(stem.as_str()) {
+                let meta = crate::foundry_rings::read_ring_meta(&p);
+                let meta_name = meta.as_ref().and_then(|m| m.name.as_deref()).map(|s| s.to_lowercase());
+                let meta_name_en = meta.as_ref().and_then(|m| m.name_en.as_deref()).map(|s| s.to_lowercase());
+                if fstem == stem
+                    || fname == stem
+                    || localized.as_deref() == Some(stem.as_str())
+                    || meta_name.as_deref() == Some(stem.as_str())
+                    || meta_name_en.as_deref() == Some(stem.as_str())
+                {
                     return Some(p);
                 }
             }
@@ -317,6 +329,27 @@ fn find_ring_file(name: &str) -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+fn load_ring_assets(ring_name: &str) -> (Option<RgbaImage>, Option<RgbaImage>, f32) {
+    let Some(rp) = find_ring_file(ring_name) else {
+        return (None, None, 1.0);
+    };
+    let ring_img = image::open(&rp).ok().map(|i| i.to_rgba8());
+    let meta = crate::foundry_rings::read_ring_meta(&rp);
+    let scale = meta
+        .as_ref()
+        .and_then(|m| m.scale)
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or(1.0);
+    let top_path = meta
+        .as_ref()
+        .and_then(|m| m.top_file.as_ref())
+        .map(|tf| rp.with_file_name(tf))
+        .filter(|p| p.is_file())
+        .or_else(|| crate::foundry_rings::find_companion_file(&rp, "top"));
+    let top_img = top_path.and_then(|tp| image::open(&tp).ok().map(|i| i.to_rgba8()));
+    (ring_img, top_img, scale)
 }
 
 fn find_protection_mask_file(ring_name: Option<&str>) -> Option<std::path::PathBuf> {
@@ -442,7 +475,7 @@ fn list_dir_images(dir: &std::path::Path, builtin: bool) -> Vec<Value> {
                 .and_then(|s| s.to_str())
                 .unwrap_or_default()
                 .to_string();
-            if stem.to_lowercase().ends_with(".mask") {
+            if stem.to_lowercase().ends_with(".mask") || stem.to_lowercase().ends_with(".top") {
                 continue;
             }
             let fname = p
@@ -450,12 +483,31 @@ fn list_dir_images(dir: &std::path::Path, builtin: bool) -> Vec<Value> {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            let display_name = builtin_ring_name(&fname.to_lowercase()).unwrap_or(&stem);
+            let meta = crate::foundry_rings::read_ring_meta(&p);
+            let display_name = builtin_ring_name(&fname.to_lowercase())
+                .map(String::from)
+                .or_else(|| meta.as_ref().and_then(|m| m.name.clone()))
+                .unwrap_or_else(|| stem.clone());
+            let top_file = meta
+                .as_ref()
+                .and_then(|m| m.top_file.clone())
+                .filter(|tf| p.with_file_name(tf).is_file())
+                .or_else(|| {
+                    crate::foundry_rings::find_companion_file(&p, "top")
+                        .and_then(|tp| tp.file_name().and_then(|n| n.to_str()).map(String::from))
+                });
+            let scale = meta
+                .as_ref()
+                .and_then(|m| m.scale)
+                .filter(|s| s.is_finite() && *s > 0.0)
+                .unwrap_or(1.0);
             out.push(json!({
                 "name": stem,
                 "display_name": display_name,
                 "file": fname,
-                "builtin": builtin
+                "builtin": builtin,
+                "top_file": top_file,
+                "scale": scale
             }));
         }
     }
@@ -829,19 +881,25 @@ fn compose(
     let s3 = size * 3;
     let mut canvas = RgbaImage::new(s3, s3);
 
-    if with_ring
+    let (ring_opt, top_opt, ring_scale) = if with_ring
         && let Some(rname) = &session.ring
-            && let Some(rp) = find_ring_file(rname)
-                && let Ok(ring) = image::open(&rp) {
-                    let ring = image::imageops::resize(
-                        &ring.to_rgba8(),
-                        size,
-                        size,
-                        image::imageops::FilterType::Lanczos3,
-                    );
-                    let off = ((s3 - size) / 2) as i64;
-                    image::imageops::overlay(&mut canvas, &ring, off, off);
-                }
+    {
+        load_ring_assets(rname)
+    } else {
+        (None, None, 1.0)
+    };
+    let ring_draw_size = ((size as f32 * ring_scale).round().max(1.0)) as u32;
+    let ring_off = ((s3 as i64) - (ring_draw_size as i64)) / 2;
+
+    if let Some(ring) = ring_opt {
+        let resized = image::imageops::resize(
+            &ring,
+            ring_draw_size,
+            ring_draw_size,
+            image::imageops::FilterType::Lanczos3,
+        );
+        image::imageops::overlay(&mut canvas, &resized, ring_off, ring_off);
+    }
 
     let subj = render_subject_on_s3(session, size);
     let px_per_logical = size as f32 / LOGICAL;
@@ -868,14 +926,29 @@ fn compose(
 
     image::imageops::overlay(&mut canvas, &subj, 0, 0);
 
+    if let Some(top_img) = top_opt {
+        let resized_top = image::imageops::resize(
+            &top_img,
+            ring_draw_size,
+            ring_draw_size,
+            image::imageops::FilterType::Lanczos3,
+        );
+        image::imageops::overlay(&mut canvas, &resized_top, ring_off, ring_off);
+    }
+
     let used = match scale_mode {
         "1" => 1,
         "2" => 2,
         "3" => 3,
         _ => {
             let scan = 512u32;
+            let scan_src = if with_ring && session.ring.is_some() {
+                &canvas
+            } else {
+                &subj
+            };
             let small = image::imageops::resize(
-                &subj,
+                scan_src,
                 scan,
                 scan,
                 image::imageops::FilterType::Triangle,
@@ -1251,11 +1324,11 @@ pub async fn manifest(State(state): State<std::sync::Arc<AppState>>) -> Response
             "max_base_dim": MAX_BASE_DIM,
             "max_body_bytes": 15_728_640,
             "max_ops_per_session": OPS_LIMIT,
-            "max_sessions": MAX_SESSIONS,
+            "max_sessions": crate::config::max_agent_sessions(),
             "session_ttl_min": SESSION_TTL_MIN,
         },
         "defaults": {
-            "ring": "steel",
+            "ring": default_ring_name(),
             "protection_enabled": true,
             "shadow": {"enabled": false, "angle": 135.0, "distance": 7.0, "blur": 3.0, "opacity": 0.4},
             "color": {"enabled": false, "lightness": 0, "saturation": 0, "contrast": 0}
