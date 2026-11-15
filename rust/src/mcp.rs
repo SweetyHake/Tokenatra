@@ -26,9 +26,9 @@ How a human creates a token in Tokenatra (follow the `example.png` style guide):
 3. Frame the character (`tokenatra_set_transform`) using the `example.png` overlay (`tokenatra_preview({ session_id, example: true })`):
    In the GUI, the human turns on the \"Пример\" (`example.png`) overlay (at `2x` scale) and aligns the character to its three purple markers:
    - **Область головы (Макушка .. Подбородок)**: the character's head (without tall hats or horns) must fit inside the purple oval!
-     - **Макушка (Crown of head)**: `y ~ -130` in 1x ring coords (`y ~ 436` in 2048 2x frame) — the top of the head pops out ABOVE the top rim of the ring (`y = 0`).
-     - **Подбородок (Chin / Jawline)**: `y ~ 410` in 1x ring coords (`y ~ 711` in 2048 2x frame), with eyes around `y ~ 150-200` and face centered on `x ~ 512`.
-   - **Талия / Пояс (Waist / Belt line)**: `y ~ 715` in 1x ring coords (`y ~ 1230` in 2048 2x frame), with the bottom of the torso/skirt reaching the lower inner rim of the ring (`y ~ 865`).
+     - **Макушка (Crown of head)**: `y ~ -76` in 1x ring coords (`y ~ 436` in 2048 2x frame) — the top of the head pops out ABOVE the top rim of the ring (`y = 0`).
+     - **Подбородок (Chin / Jawline)**: `y ~ 199` in 1x ring coords (`y ~ 711` in 2048 2x frame, head height `~ 275 px`), with eyes around `y ~ 60-80` and face centered on `x ~ 512`.
+   - **Талия / Пояс (Waist / Belt line)**: `y ~ 716` in 1x ring coords (`y ~ 1230` in 2048 2x frame), with the bottom of the torso/skirt reaching below the lower inner rim of the ring (`y >= 862`, inner rim `r_in = 343` bottom is `y = 855`).
 4. Mask the bottom / sides (`tokenatra_apply_preset` or `tokenatra_edit_mask`):
    - Call `tokenatra_apply_preset({ session_id, preset: \"preset1\" })` (or `\"preset2\"` for wide shields/wings/weapons).
      Because `canvas_mask` covers the full `3x` canvas (`-1024..2048`), `preset1` keeps the head/hat/weapons popping out above the ring (`y < 0`) while cleanly erasing everything outside the bottom/lower sides of the ring!
@@ -51,28 +51,30 @@ TOKENATRA STUDIO STYLE GUIDE (based on `example.png` at 2x scale)
      to see your character with the purple `example.png` overlay directly on top!
    - The three purple markers on `example.png` are:
      1) **Область головы (Макушка .. Подбородок)**:
-        - The purple oval in the top center (`cx = 524, cy = 134, rx = 362, ry = 274` in 1x logical coords;
+        - The purple oval in the top center (`cx = 535, cy = 62, rx = 181, ry = 137.5` in 1x logical coords, `y = -76..199, x = 354..716`;
           or `y = 436..711, x = 866..1228` in the `2048x2048` 2x frame).
         - **Макушка (Crown of head / hair top, excluding tall hats/horns)**: must touch the top purple line
-          (`y ~ -130` in 1x coords, which is ABOVE the upper ring border `y = 0`!).
-        - **Подбородок (Chin / Jawline)**: must touch the middle purple line (`y ~ 410` in 1x coords;
-          eyes sit around `y ~ 150-200`, face centered at `x ~ 512`).
-        - The entire head (hair + face) fits inside the purple oval!
+          (`y ~ -76` in 1x coords, which is ABOVE the upper ring border `y = 0`!).
+        - **Подбородок (Chin / Jawline)**: must touch the middle purple line (`y ~ 199` in 1x coords;
+          head height `~ 275 px`, eyes sit around `y ~ 60-80`, face centered at `x ~ 512`).
+        - The entire head (hair + face, excluding tall hats/horns) fits strictly inside the purple oval!
      2) **Талия / Пояс (Waist / Belt line)**:
-        - Must align with the bottom purple line (`y ~ 715` in 1x coords, or `y ~ 1230` in 2048 2x coords).
-        - The lower torso / hips continue down to the inner bottom rim of the ring (`y ~ 865`), where they are cut by a smooth arc.
+        - Must align with the bottom purple line (`y ~ 716` in 1x coords, or `y ~ 1230` in 2048 2x coords).
+        - The lower torso / hips continue down past the inner bottom rim of the ring (`y >= 862`, inner rim `r_in = 343` bottom is `y = 855`), where they are masked by the ring.
 
 2. COORDINATE SYSTEM & TRANSFORM MATH:
-   - Logical 1x ring frame is `1024x1024` (`(0,0)` = top-left of the 1x ring, `(512,512)` = ring center).
-   - Coordinates outside `[0..1024]` (like `y = -130` for the crown of the head) are in the 2x/3x pop-out zone above/around the ring!
+   - Logical 1x ring frame is `1024x1024` (`(0,0)` = top-left of the 1x ring, `(512,512)` = ring center, `L = coord_2048 - 512`).
+   - Coordinates outside `[0..1024]` (like `y = -76` for the crown of the head) are in the 2x/3x pop-out zone above/around the ring!
    - Non-square images preserve their aspect ratio automatically (`fit1024` fits the longest side into 1024 px, centered).
    - Transform formula (from source `fit1024` coordinate `f` to 1x logical coordinate `L`):
        L(fx) = 512 + (fx - 512) * scale + offset_x
        L(fy) = 512 + (fy - 512) * scale + offset_y
-   - Solving `scale`, `offset_x`, `offset_y` from Crown `(fx_crown, fy_crown)` -> `y = -130` and Chin `(fx_chin, fy_chin)` -> `y = 410`:
-       scale    = 540 / (fy_chin - fy_crown)     # 540 = 410 - (-130)
-       offset_x = -(fx_face - 512) * scale
-       offset_y = 410 - 512 - (fy_chin - 512) * scale
+   - Solving `scale`, `offset_x`, `offset_y` from Crown `fy_crown` -> `y = -76`, Chin `fy_chin` -> `y = 199`, and Waist `fy_waist` -> `y = 716`:
+       scale_head = 264 / (fy_chin - fy_crown)    # fits inside 275 px oval [-76 .. +199] with ~5 px margin
+       scale_body = 792 / (fy_waist - fy_crown)   # 792 = 716 - (-76)
+       scale      = min(scale_head, scale_body)   # ensures head NEVER exceeds the purple oval (crucial for gnomes/halflings)
+       offset_x   = -(fx_face - 512) * scale
+       offset_y   = 62 - 512 - (0.5 * (fy_crown + fy_chin) - 512) * scale
 
 3. MASKING (PRESETS & PINK CANVAS MASK vs BLUE IMAGE ERASER):
    - The Pink Canvas Mask (`target: \"canvas\"`) spans the full `3x` canvas (`-1024..2048` in 1x coords), so pop-out heads, hats, weapons, and shields outside `0..1024` are preserved!

@@ -1058,8 +1058,8 @@ fn draw_example_overlay(img: &mut RgbaImage, used_scale: u32, example_scale: u32
 /// Draws visual alignment guides on a preview image (1x ring coordinate space):
 /// Matches `example.png` (scaled at 2x over the 1x ring):
 /// - Vertical center line `x = 512` (cyan)
-/// - Head oval (`cx = 524`, `cy = 134`, `rx = 362`, `ry = 274`) & Crown line `y = -140` / Jaw line `y = 408` (magenta)
-/// - Belt line `y = 716` (amber/orange)
+/// - Head oval (`cx = 535`, `cy = 62`, `rx = 181`, `ry = 137.5`) & Crown line `y = -76` / Chin line `y = 199` (magenta)
+/// - Belt line `y = 718` (amber/orange)
 fn draw_preview_guides(img: &mut RgbaImage, used_scale: u32) {
     let (w, h) = img.dimensions();
     if w == 0 || h == 0 {
@@ -1091,24 +1091,24 @@ fn draw_preview_guides(img: &mut RgbaImage, used_scale: u32) {
         }
     }
 
-    // Crown line ("Макушка") y = -140 in 1x coords (visible in 2x/3x preview)
-    let crown_y = map_coord(-140.0, h);
+    // Crown line ("Макушка") y = -76 in 1x coords (visible in 2x/3x preview)
+    let crown_y = map_coord(-76.0, h);
     for x in 0..w as i64 {
         if (x / 6) % 2 == 0 {
             blend_px(img, x, crown_y, [200, 0, 255, 210]);
         }
     }
 
-    // Jaw line ("Челюсть") y = 408 in 1x coords
-    let jaw_y = map_coord(408.0, h);
+    // Chin line ("Подбородок") y = 199 in 1x coords
+    let jaw_y = map_coord(199.0, h);
     for x in 0..w as i64 {
         if (x / 6) % 2 == 0 {
             blend_px(img, x, jaw_y, [200, 0, 255, 210]);
         }
     }
 
-    // Belt line ("Пояс") y = 716 in 1x coords
-    let belt_y = map_coord(716.0, h);
+    // Belt line ("Пояс") y = 718 in 1x coords
+    let belt_y = map_coord(718.0, h);
     for x in 0..w as i64 {
         if (x / 6) % 2 == 0 {
             blend_px(img, x, belt_y, [255, 140, 0, 210]);
