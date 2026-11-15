@@ -437,6 +437,7 @@ pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
         .route("/manifest", get(agent::manifest))
         .route("/assets", get(agent::assets))
         .route("/tools_schema", get(agent::tools_schema))
+        .route("/pipeline", post(agent::op_pipeline))
         .route("/sessions", post(agent::create_session))
         .route(
             "/sessions/{sid}",

@@ -375,7 +375,8 @@ fn find_protection_mask_file(ring_name: Option<&str>) -> Option<std::path::PathB
     }
 }
 
-/// Builds a 1024x1024 protection mask in 1x ring space where 255 = protected (cannot be erased).
+/// Builds a 1024x1024 anti-aliased protection mask in 1x ring space where 255 = fully protected,
+/// 1..254 = smooth inner-rim edge transition, and 0 = unprotected outside the ring.
 fn load_protection_mask_1024(ring_name: Option<&str>) -> Option<GrayImage> {
     let path = find_protection_mask_file(ring_name)?;
     let bytes = std::fs::read(&path).ok()?;
@@ -384,14 +385,33 @@ fn load_protection_mask_1024(ring_name: Option<&str>) -> Option<GrayImage> {
         &img,
         LOGICAL_U32,
         LOGICAL_U32,
-        image::imageops::FilterType::Lanczos3,
+        image::imageops::FilterType::Triangle,
     );
     let mut prot = GrayImage::new(LOGICAL_U32, LOGICAL_U32);
     for (x, y, p) in resized.enumerate_pixels() {
-        let protected = if p.0[3] > 0 { 255u8 } else { 0u8 };
-        prot.put_pixel(x, y, Luma([protected]));
+        prot.put_pixel(x, y, Luma([p.0[3]]));
     }
-    Some(prot)
+    Some(image::imageops::blur(&prot, 0.55))
+}
+
+fn sample_gray_bilinear(img: &GrayImage, x: f32, y: f32) -> u8 {
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 || x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 {
+        return 0;
+    }
+    let x0 = (x.floor() as u32).min(w - 1);
+    let y0 = (y.floor() as u32).min(h - 1);
+    let x1 = (x0 + 1).min(w - 1);
+    let y1 = (y0 + 1).min(h - 1);
+    let fx = (x - x0 as f32).clamp(0.0, 1.0);
+    let fy = (y - y0 as f32).clamp(0.0, 1.0);
+    let p00 = img.get_pixel(x0, y0).0[0] as f32;
+    let p10 = img.get_pixel(x1, y0).0[0] as f32;
+    let p01 = img.get_pixel(x0, y1).0[0] as f32;
+    let p11 = img.get_pixel(x1, y1).0[0] as f32;
+    let top = p00 + (p10 - p00) * fx;
+    let bot = p01 + (p11 - p01) * fx;
+    (top + (bot - top) * fy).round().clamp(0.0, 255.0) as u8
 }
 
 fn find_preset_file(name: &str) -> Option<std::path::PathBuf> {
@@ -428,11 +448,11 @@ fn find_preset_file(name: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Processes a preset image with the exact UI semantics (`TokenPresets.processMaskImage`):
-/// In preset PNGs, dark opaque pixels (`a > 16 && brightness < 220`) mark the CUTOUT region
-/// (removed -> mask = 0), and transparent/white pixels mark the KEPT region (mask = 255).
-/// Builtin presets (`preset1.png` etc.) are 6144x6144 (3x canvas) and stretch 1:1 onto the
-/// 1024x1024 3x logical canvas mask, just like in the UI!
+/// Processes a preset image with smooth anti-aliased edges (`TokenPresets.processMaskImage`):
+/// Dark/purple opaque pixels mark the CUTOUT region (removed -> mask = 0), while transparent
+/// or pure-white pixels mark the KEPT region (mask = 255). Preserves continuous edge alpha
+/// instead of hard-binarizing, and applies a subpixel blur so binary 6144x6144 presets have
+/// clean anti-aliased rims without stair-stepping.
 fn load_preset_mask(path: &std::path::Path, target_w: u32, target_h: u32) -> Result<GrayImage, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let img = image::load_from_memory(&bytes)
@@ -442,16 +462,25 @@ fn load_preset_mask(path: &std::path::Path, target_w: u32, target_h: u32) -> Res
         &img,
         target_w,
         target_h,
-        image::imageops::FilterType::Lanczos3,
+        image::imageops::FilterType::Triangle,
     );
     let mut out = GrayImage::new(target_w, target_h);
     for (x, y, p) in resized.enumerate_pixels() {
         let [r, g, b, a] = p.0;
-        let brightness = (r as u32 + g as u32 + b as u32) / 3;
-        let is_cutout = a > 16 && brightness < 220;
-        out.put_pixel(x, y, Luma([if is_cutout { 0u8 } else { 255u8 }]));
+        let alpha_w = a as f32 / 255.0;
+        let brightness = (r as f32 + g as f32 + b as f32) / 3.0;
+        let dark_w = if brightness >= 245.0 {
+            0.0
+        } else if brightness <= 195.0 {
+            1.0
+        } else {
+            (245.0 - brightness) / 50.0
+        };
+        let cut = (alpha_w * dark_w).clamp(0.0, 1.0);
+        let mask_val = ((1.0 - cut) * 255.0).round() as u8;
+        out.put_pixel(x, y, Luma([mask_val]));
     }
-    Ok(out)
+    Ok(image::imageops::blur(&out, 0.55))
 }
 
 fn list_dir_images(dir: &std::path::Path, builtin: bool) -> Vec<Value> {
@@ -619,11 +648,138 @@ fn stamp_radial_brush(
     }
 }
 
-/// Applies shapes (`circle`, `rect`, `stroke`) to `mask`.
+fn parse_point_pair(p: &Value, sx: f64, sy: f64, ox: f64, oy: f64) -> Option<(f32, f32)> {
+    if let Some(arr) = p.as_array() {
+        if arr.len() >= 2 {
+            let x = arr[0].as_f64()?;
+            let y = arr[1].as_f64()?;
+            if x.is_finite() && y.is_finite() {
+                return Some(((x * sx + ox) as f32, (y * sy + oy) as f32));
+            }
+        }
+        return None;
+    }
+    if let Some(obj) = p.as_object() {
+        let x = obj.get("x").and_then(|v| v.as_f64())?;
+        let y = obj.get("y").and_then(|v| v.as_f64())?;
+        if x.is_finite() && y.is_finite() {
+            return Some(((x * sx + ox) as f32, (y * sy + oy) as f32));
+        }
+    }
+    None
+}
+
+/// Fills a polygon with 4x vertical subpixel scanline anti-aliasing, plus optional soft `feather` border.
+fn fill_polygon_aa(mask: &mut GrayImage, pts: &[(f32, f32)], erase: bool, feather: f32) {
+    if pts.len() < 3 {
+        return;
+    }
+    let (mw, mh) = mask.dimensions();
+    if mw == 0 || mh == 0 {
+        return;
+    }
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for &(_, py) in pts {
+        min_y = min_y.min(py);
+        max_y = max_y.max(py);
+    }
+    let y_start = min_y.floor().max(0.0) as i64;
+    let y_end = max_y.ceil().min((mh - 1) as f32) as i64;
+    if y_start <= y_end {
+        let mut nodes: Vec<f32> = Vec::with_capacity(pts.len());
+        let mut row_cov = vec![0u8; mw as usize];
+        for y in y_start..=y_end {
+            let mut min_xi = mw as usize;
+            let mut max_xi = 0usize;
+            for sub in 0..4 {
+                let yf = y as f32 + (sub as f32 + 0.5) * 0.25;
+                nodes.clear();
+                let mut j = pts.len() - 1;
+                for i in 0..pts.len() {
+                    let (xi, yi) = pts[i];
+                    let (xj, yj) = pts[j];
+                    if (yi <= yf && yj > yf) || (yj <= yf && yi > yf) {
+                        let t = (yf - yi) / (yj - yi);
+                        nodes.push(xi + t * (xj - xi));
+                    }
+                    j = i;
+                }
+                nodes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                for pair in nodes.chunks_exact(2) {
+                    let xa = pair[0].floor().max(0.0) as usize;
+                    let xb = pair[1].ceil().min(mw as f32) as usize;
+                    if xa < xb {
+                        min_xi = min_xi.min(xa);
+                        max_xi = max_xi.max(xb);
+                        for x in xa..xb {
+                            let xc = x as f32 + 0.5;
+                            if xc >= pair[0] && xc <= pair[1] {
+                                row_cov[x] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            if min_xi < max_xi {
+                for x in min_xi..max_xi.min(mw as usize) {
+                    let c = row_cov[x];
+                    if c > 0 {
+                        row_cov[x] = 0;
+                        let strength = c as f32 * 0.25;
+                        let cur = mask.get_pixel(x as u32, y as u32).0[0] as f32;
+                        let next = if erase {
+                            cur * (1.0 - strength)
+                        } else {
+                            cur + (255.0 - cur) * strength
+                        };
+                        mask.put_pixel(x as u32, y as u32, Luma([next.round().clamp(0.0, 255.0) as u8]));
+                    }
+                }
+            }
+        }
+    }
+
+    if feather > 0.5 {
+        let step_len = (feather * 0.35).max(1.0);
+        for i in 0..pts.len() {
+            let (ax, ay) = pts[i];
+            let (bx, by) = pts[(i + 1) % pts.len()];
+            let dist = (bx - ax).hypot(by - ay);
+            let steps = (dist / step_len).ceil().max(1.0) as i64;
+            for t in 0..=steps {
+                let tt = t as f32 / steps as f32;
+                stamp_radial_brush(
+                    mask,
+                    ax + (bx - ax) * tt,
+                    ay + (by - ay) * tt,
+                    feather,
+                    erase,
+                    0.2,
+                );
+            }
+        }
+    }
+}
+
+/// Applies shapes (`circle`, `rect`, `stroke`, `polygon`) to `mask` with strict validation.
+/// Accepts BOTH externally tagged (`{"rect": {"x0":..}}`) and internally tagged (`{"type": "rect", "x0":..}`) objects.
 /// If `full_s3` is true, `mask` is `3*LOGICAL x 3*LOGICAL` (3072x3072) and 1x logical
-/// coordinates `(0..1024)` map to `(1024..2048)` so that shapes can also reach `(-1024..2048)`!
+/// coordinates `(0..1024)` map to `(1024..2048)` so that shapes can reach `(-1024..2048)`.
 /// If `full_s3` is false, `mask` is `image_mask` (`mw x mh`) and `(0..1024)` maps across `0..mw, 0..mh`.
-fn mask_apply_shapes(mask: &mut GrayImage, shapes: &Value, erase: bool, full_s3: bool) {
+fn mask_apply_shapes(
+    mask: &mut GrayImage,
+    shapes: &Value,
+    erase: bool,
+    full_s3: bool,
+) -> Result<usize, String> {
+    let Some(arr) = shapes.as_array() else {
+        return Err("'shapes' must be a JSON array".into());
+    };
+    if arr.is_empty() {
+        return Err("'shapes' array must not be empty".into());
+    }
+
     let (mw, mh) = mask.dimensions();
     let (sx, sy, ox, oy) = if full_s3 {
         let s = (mw as f64) / (LOGICAL as f64 * 3.0);
@@ -634,76 +790,237 @@ fn mask_apply_shapes(mask: &mut GrayImage, shapes: &Value, erase: bool, full_s3:
     let sr = (sx + sy) * 0.5;
     let value = if erase { 0u8 } else { 255u8 };
 
-    if let Some(arr) = shapes.as_array() {
-        for sh in arr {
-            if let Some(c) = sh.get("circle") {
-                let cx = (c["cx"].as_f64().unwrap_or(0.0) * sx + ox).round() as i64;
-                let cy = (c["cy"].as_f64().unwrap_or(0.0) * sy + oy).round() as i64;
-                let r = (c["r"].as_f64().unwrap_or(0.0) * sr).round() as i64;
-                let feather = c["feather"].as_f64().unwrap_or(0.0) * sr;
-                if feather > 0.5 {
-                    let hard = ((r as f64 - feather).max(0.0) / (r as f64).max(1.0)) as f32;
-                    stamp_radial_brush(mask, cx as f32, cy as f32, r as f32, erase, hard);
+    // Validate all shapes up front so a malformed item never leaves a half-mutated mask.
+    enum ParsedShape {
+        Circle { cx: f32, cy: f32, r: f32, feather: f32 },
+        Rect { x0: i64, y0: i64, x1: i64, y1: i64, feather: f32 },
+        Stroke { pts: Vec<(f32, f32)>, radius: f32, hardness: f32 },
+        Polygon { pts: Vec<(f32, f32)>, feather: f32 },
+    }
+
+    let mut parsed: Vec<ParsedShape> = Vec::with_capacity(arr.len());
+
+    for (idx, sh) in arr.iter().enumerate() {
+        let Some(obj) = sh.as_object() else {
+            return Err(format!("shapes[{idx}] must be a JSON object"));
+        };
+
+        let (kind, payload): (&str, &Value) = if let Some(v) = obj.get("circle") {
+            ("circle", v)
+        } else if let Some(v) = obj.get("rect") {
+            ("rect", v)
+        } else if let Some(v) = obj.get("stroke") {
+            ("stroke", v)
+        } else if let Some(v) = obj.get("polygon").or_else(|| obj.get("poly")) {
+            ("polygon", v)
+        } else if let Some(t) = obj
+            .get("type")
+            .or_else(|| obj.get("shape"))
+            .or_else(|| obj.get("kind"))
+            .and_then(|v| v.as_str())
+        {
+            (t, sh)
+        } else {
+            return Err(format!(
+                "shapes[{idx}] unrecognized shape format: expected key 'circle'|'rect'|'stroke'|'polygon' or '\"type\": \"circle\"|\"rect\"|\"stroke\"|\"polygon\"'"
+            ));
+        };
+
+        match kind.trim().to_lowercase().as_str() {
+            "circle" => {
+                let cx_raw = payload
+                    .get("cx")
+                    .or_else(|| payload.get("x"))
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| format!("shapes[{idx}] (circle) requires numeric 'cx'"))?;
+                let cy_raw = payload
+                    .get("cy")
+                    .or_else(|| payload.get("y"))
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| format!("shapes[{idx}] (circle) requires numeric 'cy'"))?;
+                let r_raw = payload
+                    .get("r")
+                    .or_else(|| payload.get("radius"))
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| format!("shapes[{idx}] (circle) requires numeric 'r'"))?;
+                if !cx_raw.is_finite() || !cy_raw.is_finite() || !r_raw.is_finite() || r_raw <= 0.0 {
+                    return Err(format!("shapes[{idx}] (circle) requires finite cx, cy and r > 0"));
+                }
+                let cx = (cx_raw * sx + ox) as f32;
+                let cy = (cy_raw * sy + oy) as f32;
+                let r = (r_raw * sr) as f32;
+                let feather = (payload.get("feather").and_then(|v| v.as_f64()).unwrap_or(0.0) * sr)
+                    .max(0.0) as f32;
+                parsed.push(ParsedShape::Circle { cx, cy, r, feather });
+            }
+            "rect" | "rectangle" | "box" => {
+                let (rx0, ry0, rx1, ry1) = if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                    payload.get("x0").and_then(|v| v.as_f64()),
+                    payload.get("y0").and_then(|v| v.as_f64()),
+                    payload.get("x1").and_then(|v| v.as_f64()),
+                    payload.get("y1").and_then(|v| v.as_f64()),
+                ) {
+                    (x0, y0, x1, y1)
+                } else if let (Some(x), Some(y), Some(w), Some(h)) = (
+                    payload.get("x").and_then(|v| v.as_f64()),
+                    payload.get("y").and_then(|v| v.as_f64()),
+                    payload
+                        .get("width")
+                        .or_else(|| payload.get("w"))
+                        .and_then(|v| v.as_f64()),
+                    payload
+                        .get("height")
+                        .or_else(|| payload.get("h"))
+                        .and_then(|v| v.as_f64()),
+                ) {
+                    (x, y, x + w, y + h)
                 } else {
-                    for dy in -r..=r {
-                        for dx in -r..=r {
-                            if dx * dx + dy * dy <= r * r {
-                                let x = cx + dx;
-                                let y = cy + dy;
-                                if x >= 0 && y >= 0 && (x as u32) < mw && (y as u32) < mh {
-                                    mask.put_pixel(x as u32, y as u32, Luma([value]));
-                                }
-                            }
-                        }
-                    }
+                    return Err(format!(
+                        "shapes[{idx}] (rect) requires numeric 'x0','y0','x1','y1' (or 'x','y','width','height')"
+                    ));
+                };
+                if !rx0.is_finite() || !ry0.is_finite() || !rx1.is_finite() || !ry1.is_finite() {
+                    return Err(format!("shapes[{idx}] (rect) coordinates must be finite"));
                 }
-            } else if let Some(rc) = sh.get("rect") {
-                let x0 = (rc["x0"].as_f64().unwrap_or(0.0) * sx + ox).round() as i64;
-                let y0 = (rc["y0"].as_f64().unwrap_or(0.0) * sy + oy).round() as i64;
-                let x1 = (rc["x1"].as_f64().unwrap_or(0.0) * sx + ox).round() as i64;
-                let y1 = (rc["y1"].as_f64().unwrap_or(0.0) * sy + oy).round() as i64;
-                for y in y0.min(y1)..y1.max(y0) {
-                    for x in x0.min(x1)..x1.max(x0) {
-                        if x >= 0 && y >= 0 && (x as u32) < mw && (y as u32) < mh {
-                            mask.put_pixel(x as u32, y as u32, Luma([value]));
-                        }
-                    }
+                let x0 = (rx0 * sx + ox).round() as i64;
+                let y0 = (ry0 * sy + oy).round() as i64;
+                let x1 = (rx1 * sx + ox).round() as i64;
+                let y1 = (ry1 * sy + oy).round() as i64;
+                if x0 == x1 || y0 == y1 {
+                    return Err(format!("shapes[{idx}] (rect) has zero width or height"));
                 }
-            } else if let Some(st) = sh.get("stroke") {
-                let width = (st["width"].as_f64().unwrap_or(30.0) * sr).max(1.0) as f32;
-                let radius = width * 0.5;
-                let soft = st["soft"].as_bool().unwrap_or(true);
+                let feather = (payload.get("feather").and_then(|v| v.as_f64()).unwrap_or(0.0) * sr)
+                    .max(0.0) as f32;
+                parsed.push(ParsedShape::Rect {
+                    x0: x0.min(x1),
+                    y0: y0.min(y1),
+                    x1: x0.max(x1),
+                    y1: y0.max(y1),
+                    feather,
+                });
+            }
+            "stroke" | "line" => {
+                let pts_arr = payload
+                    .get("points")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| format!("shapes[{idx}] (stroke) requires 'points' array"))?;
+                if pts_arr.is_empty() {
+                    return Err(format!("shapes[{idx}] (stroke) 'points' must not be empty"));
+                }
+                let mut pts = Vec::with_capacity(pts_arr.len());
+                for (pi, p) in pts_arr.iter().enumerate() {
+                    let pt = parse_point_pair(p, sx, sy, ox, oy).ok_or_else(|| {
+                        format!("shapes[{idx}] (stroke) invalid point at points[{pi}], expected [x, y]")
+                    })?;
+                    pts.push(pt);
+                }
+                let width_raw = payload.get("width").and_then(|v| v.as_f64()).unwrap_or(30.0);
+                if !width_raw.is_finite() || width_raw <= 0.0 {
+                    return Err(format!("shapes[{idx}] (stroke) 'width' must be > 0"));
+                }
+                let radius = ((width_raw * sr).max(1.0) * 0.5) as f32;
+                let soft = payload.get("soft").and_then(|v| v.as_bool()).unwrap_or(true);
                 let hardness = if soft { 0.7 } else { 0.99 };
-                if let Some(points) = st["points"].as_array() {
-                    let pts: Vec<(f32, f32)> = points
-                        .iter()
-                        .filter_map(|p| {
-                            Some((
-                                (p[0].as_f64()? * sx + ox) as f32,
-                                (p[1].as_f64()? * sy + oy) as f32,
-                            ))
-                        })
-                        .collect();
-                    if pts.len() == 1 {
-                        stamp_radial_brush(mask, pts[0].0, pts[0].1, radius, erase, hardness);
-                    }
-                    let step_len = (radius * 0.35).max(1.0);
-                    for w in pts.windows(2) {
-                        let (ax, ay) = w[0];
-                        let (bx, by) = w[1];
-                        let dist = (bx - ax).hypot(by - ay);
-                        let steps = (dist / step_len).ceil().max(1.0) as i64;
-                        for t in 0..=steps {
-                            let tt = t as f32 / steps as f32;
-                            let cxp = ax + (bx - ax) * tt;
-                            let cyp = ay + (by - ay) * tt;
-                            stamp_radial_brush(mask, cxp, cyp, radius, erase, hardness);
+                parsed.push(ParsedShape::Stroke {
+                    pts,
+                    radius,
+                    hardness,
+                });
+            }
+            "polygon" | "poly" => {
+                let pts_arr = payload
+                    .get("points")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| format!("shapes[{idx}] (polygon) requires 'points' array"))?;
+                if pts_arr.len() < 3 {
+                    return Err(format!(
+                        "shapes[{idx}] (polygon) requires at least 3 points, got {}",
+                        pts_arr.len()
+                    ));
+                }
+                let mut pts = Vec::with_capacity(pts_arr.len());
+                for (pi, p) in pts_arr.iter().enumerate() {
+                    let pt = parse_point_pair(p, sx, sy, ox, oy).ok_or_else(|| {
+                        format!("shapes[{idx}] (polygon) invalid point at points[{pi}], expected [x, y]")
+                    })?;
+                    pts.push(pt);
+                }
+                let feather = (payload.get("feather").and_then(|v| v.as_f64()).unwrap_or(0.0) * sr)
+                    .max(0.0) as f32;
+                parsed.push(ParsedShape::Polygon { pts, feather });
+            }
+            other => {
+                return Err(format!(
+                    "shapes[{idx}] unknown shape type {other:?}; supported: circle, rect, stroke, polygon"
+                ));
+            }
+        }
+    }
+
+    let count = parsed.len();
+    for item in parsed {
+        match item {
+            ParsedShape::Circle { cx, cy, r, feather } => {
+                let eff_f = feather.max(1.0);
+                let hard = ((r - eff_f).max(0.0) / r.max(1.0)).clamp(0.0, 0.99);
+                stamp_radial_brush(mask, cx, cy, r, erase, hard);
+            }
+            ParsedShape::Rect {
+                x0,
+                y0,
+                x1,
+                y1,
+                feather,
+            } => {
+                if feather > 0.5 {
+                    let pts = vec![
+                        (x0 as f32, y0 as f32),
+                        (x1 as f32, y0 as f32),
+                        (x1 as f32, y1 as f32),
+                        (x0 as f32, y1 as f32),
+                    ];
+                    fill_polygon_aa(mask, &pts, erase, feather);
+                } else {
+                    let xa = x0.max(0) as u32;
+                    let ya = y0.max(0) as u32;
+                    let xb = (x1.max(0) as u32).min(mw);
+                    let yb = (y1.max(0) as u32).min(mh);
+                    for y in ya..yb {
+                        for x in xa..xb {
+                            mask.put_pixel(x, y, Luma([value]));
                         }
                     }
                 }
             }
+            ParsedShape::Stroke {
+                pts,
+                radius,
+                hardness,
+            } => {
+                if pts.len() == 1 {
+                    stamp_radial_brush(mask, pts[0].0, pts[0].1, radius, erase, hardness);
+                }
+                let step_len = (radius * 0.35).max(1.0);
+                for w in pts.windows(2) {
+                    let (ax, ay) = w[0];
+                    let (bx, by) = w[1];
+                    let dist = (bx - ax).hypot(by - ay);
+                    let steps = (dist / step_len).ceil().max(1.0) as i64;
+                    for t in 0..=steps {
+                        let tt = t as f32 / steps as f32;
+                        let cxp = ax + (bx - ax) * tt;
+                        let cyp = ay + (by - ay) * tt;
+                        stamp_radial_brush(mask, cxp, cyp, radius, erase, hardness);
+                    }
+                }
+            }
+            ParsedShape::Polygon { pts, feather } => {
+                fill_polygon_aa(mask, &pts, erase, feather);
+            }
         }
     }
+
+    Ok(count)
 }
 
 // ---------- compose ----------
@@ -767,13 +1084,13 @@ fn build_composited_subject(session: &AgentSession) -> RgbaImage {
 ///   AND notice: in `agent.rs`, when `size = 384` (for preview), `big` was still `1024 * S` instead of `size * S`!
 ///   That was a bug in `agent.rs` line 398 (`let big = (LOGICAL * s_f) as u32;` instead of `(size as f32 * s_f)`),
 ///   which made `preview(384)` draw the subject 2.66x too huge relative to the 384 ring!
-fn render_subject_on_s3(session: &AgentSession, size: u32) -> RgbaImage {
+fn render_unmasked_subject_on_s3(session: &AgentSession, size: u32) -> RgbaImage {
     let s3 = size * 3;
     let base = build_composited_subject(session);
     let (bw, bh) = base.dimensions();
     let max_dim = bw.max(bh).max(1) as f32;
 
-    // Fit into 1x frame (`size` px) when scale == 1.0, preserving aspect ratio!
+    // Fit into 1x frame (`size` px) when scale == 1.0, preserving aspect ratio.
     let fit_scale = (size as f32 / max_dim) * session.scale;
     let target_w = (bw as f32 * fit_scale).round().max(1.0) as u32;
     let target_h = (bh as f32 * fit_scale).round().max(1.0) as u32;
@@ -797,41 +1114,6 @@ fn render_subject_on_s3(session: &AgentSession, size: u32) -> RgbaImage {
         subj_resized
     };
 
-    // Place on s3 x s3 canvas.
-    // Center of s3 is 1.5 * size.
-    // How should offset_x / offset_y be scaled?
-    // Wait: in `tokenatra_recipe` and `TOKEN_STYLE.md` and `SUBJECT_ANALYSIS.md`:
-    // Let's check what offset units are expected!
-    // In `TOKEN_STYLE.md`:
-    //   `L(fx) = 512 + (fx - 512) * S + OX`
-    //   `OX = 512 - (ex - 512) * S`
-    //   `OY = 315 - (ey - 512) * S`
-    //   Look at `TOKEN_STYLE.md` lines 52-63 and 123-129:
-    //   Lotta: S = 1.045, OX = -22, OY = +16.
-    //   Elias: S = 1.75, OX = -48, OY = +85.
-    //   Taumiel: S = 1.71, OX = +96, OY = +202.
-    //   In ALL of `TOKEN_STYLE.md` and `AGENTS.md`:
-    //   `L(f) = 512 + (f - 512)*scale + offset`!
-    //   1 unit of `offset_x` / `offset_y` is 1 logical pixel of the 1024x1024 1x export frame!
-    //   Wait why did `tokenatra_recipe` in `tokenatra_mcp.py` say `O is multiplied by 3 in the export`?
-    //   Because in `agent.rs` line 423, `scale3 = s3 / 1024 = 3.0` multiplied `offset` by 3 while `subj` was 1x!
-    //   Wait: if we check `AGENTS.md`:
-    //   "**Семантика transform**: логический канвас 1024, `L(f) = 512 + (f−512)·scale + offset` (f — fit-координата источника)."
-    //   And in `TOKEN_STYLE.md`:
-    //   `L(fx) = 512 + (fx - 512)*S + OX`
-    //   `S = (870 - 315) / (wy - ey)`
-    //   `OX = 512 - (ex - 512)*S`
-    //   `OY = 315 - (ey - 512)*S`
-    //    When `1 offset unit = 1 pixel in 1024 1x export frame`, the formula `L(f) = 512 + (f - 512)*S + O`
-    //   has NO factor of 3! It's 1:1 with the 1024 export frame AND 1:1 with `state.imageX` in the frontend!
-    //   Let's verify that!
-    //   In the frontend (`tokenCanvas.js` line 1256):
-    //   `var imgRenderScale = internalSize / 1024;`
-    //   `var coordScale = scale3Size / internalSize;` -> `imgRenderScale * coordScale = scale3Size / 1024 = 3 * qualityBase / 1024`
-    //   In the frontend, `1024` is the full `3x` canvas (`internalSize`), so the 1x ring is `1024 / 3 = 341.33` units wide.
-    //   Whereas in the Agent API (`AGENTS.md` and `TOKEN_STYLE.md`), the 1x ring frame is `1024 x 1024`,
-    //   so `S = 1.0` means the subject is `1024 px` wide (filling the 1x ring frame), and `offset_x, offset_y`
-    //   are in pixels of that same `1024 x 1024` 1x ring frame!
     let px_per_logical = size as f32 / LOGICAL;
     let cx = (s3 as f32) * 0.5 + session.offset_x * px_per_logical;
     let cy = (s3 as f32) * 0.5 + session.offset_y * px_per_logical;
@@ -840,24 +1122,12 @@ fn render_subject_on_s3(session: &AgentSession, size: u32) -> RgbaImage {
 
     let mut layer = RgbaImage::new(s3, s3);
     image::imageops::overlay(&mut layer, &subj_rotated, px0, py0);
+    layer
+}
 
-    // Apply pink canvas_mask in 1x export frame coordinates (the central `size x size` region of `s3`,
-    // and extended outside if needed: wait — what if the head sticks out above the 1x frame into 2x/3x?).
-    // Let's check! In the 1x export frame (`[size .. 2*size]`), `canvas_mask` (1024x1024) maps 1:1 to
-    // the `[size .. 2*size]` square! What about pixels outside `[size .. 2*size]` (if someone exports 2x/3x)?
-    // For any `(x, y)` in `s3`, its clamped coordinate in `[size .. 2*size]` (or mapped across 1x)
-    // Wait: in `TOKEN_STYLE.md`:
-    //   `erase rect (0, 270, 1024, 1024)`
-    //   `restore circle (512, 270, r=480)`
-    // Notice those coordinates `(512, 270, r=480)` are in `[0..1024]` of the 1x export frame!
-    // If we map `canvas_mask` (1024x1024) to the 1x export frame `[off .. off + size]` (where `off = size`),
-    // and for pixels outside `[off .. off + size]` we clamp to the nearest edge of `canvas_mask`
-    // (so `y < off` uses `mask_y = 0`, which is 255 = visible, and `y >= off + size` uses `mask_y = size - 1`,
-    // which is 0 = erased at the bottom!), then:
-    // - Inside the 1x export frame, `(0..1024)` is 100% exact pixel-for-pixel!
-    // - Above the 1x frame (if exporting 2x/3x with a tall hat), the top is not clipped because `mask_y = 0` is white (255)!
-    // - Below the 1x frame (where the skirt/legs were erased at the bottom), `mask_y = size - 1` is black (0), so legs stay erased even in 2x/3x!
-    // Apply pink canvas_mask across the entire s3 x s3 canvas (1:1 at size=1024, or resized for preview)
+fn apply_canvas_mask_on_s3(session: &AgentSession, unmasked: &RgbaImage, size: u32) -> RgbaImage {
+    let s3 = size * 3;
+    let mut layer = unmasked.clone();
     let mask_s3 = if session.canvas_mask.dimensions() == (s3, s3) {
         session.canvas_mask.clone()
     } else {
@@ -868,8 +1138,12 @@ fn render_subject_on_s3(session: &AgentSession, size: u32) -> RgbaImage {
             p.0[3] = ((p.0[3] as u32) * (m.0[0] as u32) / 255) as u8;
         }
     }
-
     layer
+}
+
+fn render_subject_on_s3(session: &AgentSession, size: u32) -> RgbaImage {
+    let unmasked = render_unmasked_subject_on_s3(session, size);
+    apply_canvas_mask_on_s3(session, &unmasked, size)
 }
 
 fn compose(
@@ -1107,12 +1381,326 @@ fn draw_preview_guides(img: &mut RgbaImage, used_scale: u32) {
         }
     }
 
-    // Belt line ("Пояс") y = 718 in 1x coords
-    let belt_y = map_coord(718.0, h);
+    // Head oval (cx = 535, cy = 62, rx = 181, ry = 137.5) in 1x coords
+    let steps = 180;
+    for i in 0..steps {
+        if (i / 2) % 2 == 0 {
+            let ang = (i as f32 / steps as f32) * std::f32::consts::TAU;
+            let ox = map_coord(535.0 + 181.0 * ang.cos(), w);
+            let oy = map_coord(62.0 + 137.5 * ang.sin(), h);
+            blend_px(img, ox, oy, [200, 0, 255, 200]);
+        }
+    }
+
+    // Belt line ("Пояс") y = 716 in 1x coords
+    let belt_y = map_coord(716.0, h);
     for x in 0..w as i64 {
         if (x / 6) % 2 == 0 {
             blend_px(img, x, belt_y, [255, 140, 0, 210]);
         }
+    }
+}
+
+fn blend_rgba_px(img: &mut RgbaImage, x: i64, y: i64, color: [u8; 4]) {
+    if x >= 0 && y >= 0 && (x as u32) < img.width() && (y as u32) < img.height() {
+        let dst = img.get_pixel_mut(x as u32, y as u32);
+        let sa = color[3] as f32 / 255.0;
+        let da = dst.0[3] as f32 / 255.0;
+        let out_a = sa + da * (1.0 - sa);
+        if out_a > 0.0 {
+            dst.0[0] = ((color[0] as f32 * sa + dst.0[0] as f32 * da * (1.0 - sa)) / out_a)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            dst.0[1] = ((color[1] as f32 * sa + dst.0[1] as f32 * da * (1.0 - sa)) / out_a)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            dst.0[2] = ((color[2] as f32 * sa + dst.0[2] as f32 * da * (1.0 - sa)) / out_a)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            dst.0[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// Composes a mask X-Ray diagnostic view:
+/// - Dark teal checkerboard background (`#112d2b` / `#193f3c`) so both dark cloaks and bright glows stand out
+/// - 1x token ring (`with_ring`)
+/// - Semi-transparent hot-pink ghost (`[255, 65, 145]`) showing everything `canvas_mask` cut away from the transformed subject
+/// - Final masked subject rendered at 100% opacity on top
+/// - Reference geometry markers: cyan inner protection circle (`r_in = 343`), orange outer ring rim (`r_out = 468`),
+///   and yellow `preset1` horizontal cut line (`y = 564` outside `r_in`).
+fn compose_xray(
+    session: &AgentSession,
+    size: u32,
+    scale_mode: &str,
+    with_ring: bool,
+) -> Result<(RgbaImage, u32), String> {
+    let s3 = size * 3;
+    let mut canvas = RgbaImage::new(s3, s3);
+
+    let (ring_opt, top_opt, ring_scale) = if with_ring
+        && let Some(rname) = &session.ring
+    {
+        load_ring_assets(rname)
+    } else {
+        (None, None, 1.0)
+    };
+    let ring_draw_size = ((size as f32 * ring_scale).round().max(1.0)) as u32;
+    let ring_off = ((s3 as i64) - (ring_draw_size as i64)) / 2;
+
+    if let Some(ring) = ring_opt {
+        let resized = image::imageops::resize(
+            &ring,
+            ring_draw_size,
+            ring_draw_size,
+            image::imageops::FilterType::Lanczos3,
+        );
+        image::imageops::overlay(&mut canvas, &resized, ring_off, ring_off);
+    }
+
+    let unmasked = render_unmasked_subject_on_s3(session, size);
+    let masked = apply_canvas_mask_on_s3(session, &unmasked, size);
+
+    // Hot-pink ghost layer wherever `canvas_mask` attenuated or removed subject pixels
+    let mut ghost = RgbaImage::new(s3, s3);
+    for (gp, (up, mp)) in ghost.pixels_mut().zip(unmasked.pixels().zip(masked.pixels())) {
+        let ua = up.0[3];
+        let ma = mp.0[3];
+        if ua > ma {
+            let cut_a = ua - ma;
+            let ga = ((cut_a as f32) * 0.62).round().clamp(0.0, 255.0) as u8;
+            let gr = (up.0[0] as f32 * 0.28 + 255.0 * 0.72).round().clamp(0.0, 255.0) as u8;
+            let gg = (up.0[1] as f32 * 0.28 + 65.0 * 0.72).round().clamp(0.0, 255.0) as u8;
+            let gb = (up.0[2] as f32 * 0.28 + 145.0 * 0.72).round().clamp(0.0, 255.0) as u8;
+            *gp = Rgba([gr, gg, gb, ga]);
+        }
+    }
+    image::imageops::overlay(&mut canvas, &ghost, 0, 0);
+    image::imageops::overlay(&mut canvas, &masked, 0, 0);
+
+    if let Some(top_img) = top_opt {
+        let resized_top = image::imageops::resize(
+            &top_img,
+            ring_draw_size,
+            ring_draw_size,
+            image::imageops::FilterType::Lanczos3,
+        );
+        image::imageops::overlay(&mut canvas, &resized_top, ring_off, ring_off);
+    }
+
+    let used = match scale_mode {
+        "1" => 1,
+        "2" => 2,
+        "3" => 3,
+        _ => 2,
+    };
+    let final_size = size * used;
+    let crop = ((s3 - final_size) / 2) as u32;
+    let fg = image::imageops::crop_imm(&canvas, crop, crop, final_size, final_size).to_image();
+
+    // Composite over crisp teal checkerboard
+    let tile = (final_size / 32).max(8);
+    let mut out = RgbaImage::new(final_size, final_size);
+    for (x, y, p) in out.enumerate_pixels_mut() {
+        let dark = ((x / tile) + (y / tile)) % 2 == 0;
+        *p = if dark {
+            Rgba([17, 45, 43, 255])
+        } else {
+            Rgba([25, 63, 60, 255])
+        };
+    }
+    image::imageops::overlay(&mut out, &fg, 0, 0);
+    draw_xray_markers(&mut out, used);
+    Ok((out, used))
+}
+
+fn draw_xray_markers(img: &mut RgbaImage, used_scale: u32) {
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 {
+        return;
+    }
+    let map_x = |lx: f32| -> i64 {
+        let norm_1x = lx / LOGICAL;
+        let frac = (used_scale as f32 - 1.0) * 0.5 / (used_scale as f32) + norm_1x / (used_scale as f32);
+        (frac * w as f32).round() as i64
+    };
+    let map_y = |ly: f32| -> i64 {
+        let norm_1x = ly / LOGICAL;
+        let frac = (used_scale as f32 - 1.0) * 0.5 / (used_scale as f32) + norm_1x / (used_scale as f32);
+        (frac * h as f32).round() as i64
+    };
+
+    // Inner protection circle r_in = 343 (cyan dashed) & outer ring rim r_out = 468 (coral dashed)
+    let steps = 360;
+    for i in 0..steps {
+        if (i / 3) % 2 == 0 {
+            let ang = (i as f32 / steps as f32) * std::f32::consts::TAU;
+            let ix = map_x(512.0 + 343.0 * ang.cos());
+            let iy = map_y(512.0 + 343.0 * ang.sin());
+            blend_rgba_px(img, ix, iy, [0, 235, 255, 195]);
+
+            let ox = map_x(512.0 + 468.0 * ang.cos());
+            let oy = map_y(512.0 + 468.0 * ang.sin());
+            blend_rgba_px(img, ox, oy, [255, 125, 60, 155]);
+        }
+    }
+
+    // Horizontal preset1 cut threshold y = 564 outside the inner protection circle (yellow dashed)
+    let y564 = map_y(564.0);
+    let x_left_end = map_x(512.0 - 338.0);
+    let x_right_start = map_x(512.0 + 338.0);
+    for x in 0..w as i64 {
+        if (x <= x_left_end || x >= x_right_start) && (x / 5) % 2 == 0 {
+            blend_rgba_px(img, x, y564, [255, 225, 55, 195]);
+        }
+    }
+}
+
+fn glyph_3x5(ch: char) -> Option<[u8; 5]> {
+    match ch {
+        '0' => Some([0b111, 0b101, 0b101, 0b101, 0b111]),
+        '1' => Some([0b010, 0b110, 0b010, 0b010, 0b111]),
+        '2' => Some([0b111, 0b001, 0b111, 0b100, 0b111]),
+        '3' => Some([0b111, 0b001, 0b111, 0b001, 0b111]),
+        '4' => Some([0b101, 0b101, 0b111, 0b001, 0b001]),
+        '5' => Some([0b111, 0b100, 0b111, 0b001, 0b111]),
+        '6' => Some([0b111, 0b100, 0b111, 0b101, 0b111]),
+        '7' => Some([0b111, 0b001, 0b001, 0b010, 0b010]),
+        '8' => Some([0b111, 0b101, 0b111, 0b101, 0b111]),
+        '9' => Some([0b111, 0b101, 0b111, 0b001, 0b111]),
+        '-' => Some([0b000, 0b000, 0b111, 0b000, 0b000]),
+        _ => None,
+    }
+}
+
+fn draw_bitmap_label(img: &mut RgbaImage, text: &str, x0: i64, y0: i64, scale: i64, fg: [u8; 4]) {
+    let chars: Vec<[u8; 5]> = text.chars().filter_map(glyph_3x5).collect();
+    if chars.is_empty() {
+        return;
+    }
+    let s = scale.max(1);
+    let text_w = (chars.len() as i64) * 4 * s - s;
+    let text_h = 5 * s;
+    let pad = 2;
+    for py in (y0 - pad)..(y0 + text_h + pad) {
+        for px in (x0 - pad)..(x0 + text_w + pad) {
+            blend_rgba_px(img, px, py, [8, 12, 16, 195]);
+        }
+    }
+    for (ci, g) in chars.iter().enumerate() {
+        let gx0 = x0 + (ci as i64) * 4 * s;
+        for (row, &bits) in g.iter().enumerate() {
+            for col in 0..3 {
+                if (bits >> (2 - col)) & 1 == 1 {
+                    for dy in 0..s {
+                        for dx in 0..s {
+                            blend_rgba_px(img, gx0 + col * s + dx, y0 + (row as i64) * s + dy, fg);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Draws a `target: "canvas"` logical coordinate grid (`0..1024` = 1x ring box, `-512..1536` = 2x box)
+/// with minor lines every 20 units, major lines every 100 units, highlighted 0/512/1024 axes,
+/// and crisp numeric labels along the top and left edges for exact `tokenatra_edit_mask` coordinates.
+fn draw_canvas_grid(img: &mut RgbaImage, used_scale: u32) {
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 {
+        return;
+    }
+    let used = used_scale.clamp(1, 3) as i64;
+    let l_min = -((used - 1) * 512);
+    let l_max = 1024 + (used - 1) * 512;
+    let span = (l_max - l_min).max(1) as f32;
+
+    let map_x = |lx: i64| -> i64 { (((lx - l_min) as f32 / span) * w as f32).round() as i64 };
+    let map_y = |ly: i64| -> i64 { (((ly - l_min) as f32 / span) * h as f32).round() as i64 };
+
+    let px_per_20 = (20.0 / span) * (w.min(h) as f32);
+    let step_minor = if px_per_20 >= 4.0 { 20 } else { 50 };
+
+    let first_line = ((l_min + step_minor - 1) / step_minor) * step_minor;
+    let mut lv = first_line;
+    while lv <= l_max {
+        let is_100 = lv % 100 == 0;
+        let col = if lv == 512 {
+            [0, 235, 255, 165]
+        } else if lv == 0 || lv == 1024 {
+            [110, 210, 255, 130]
+        } else if is_100 {
+            [255, 255, 255, 78]
+        } else {
+            [255, 255, 255, 28]
+        };
+
+        let px = map_x(lv);
+        for y in 0..h as i64 {
+            blend_rgba_px(img, px, y, col);
+        }
+        let py = map_y(lv);
+        for x in 0..w as i64 {
+            blend_rgba_px(img, x, py, col);
+        }
+        lv += step_minor;
+    }
+
+    // Center axes x=512, y=512 (512 is not divisible by 20)
+    let cx = map_x(512);
+    for y in 0..h as i64 {
+        blend_rgba_px(img, cx, y, [0, 235, 255, 165]);
+    }
+    let cy = map_y(512);
+    for x in 0..w as i64 {
+        blend_rgba_px(img, x, cy, [0, 235, 255, 165]);
+    }
+    if used > 1 {
+        for bound in [0i64, 1024i64] {
+            let bx = map_x(bound);
+            for y in 0..h as i64 {
+                blend_rgba_px(img, bx, y, [110, 210, 255, 135]);
+            }
+            let by = map_y(bound);
+            for x in 0..w as i64 {
+                blend_rgba_px(img, x, by, [110, 210, 255, 135]);
+            }
+        }
+    }
+
+    let font_scale = if w >= 480 { 2 } else { 1 };
+    let px_per_100 = (100.0 / span) * (w as f32);
+    let label_step = if px_per_100 >= 44.0 { 100 } else { 200 };
+
+    let start_lbl = ((l_min / label_step) - 1) * label_step;
+    let mut v = start_lbl;
+    while v <= l_max {
+        if v > l_min + 25 && v < l_max - 25 {
+            let txt = v.to_string();
+            let char_w = (txt.len() as i64) * 4 * font_scale - font_scale;
+            let fg = if v == 0 || v == 1024 {
+                [140, 230, 255, 255]
+            } else {
+                [245, 248, 252, 245]
+            };
+
+            let tx = (map_x(v) - char_w / 2).clamp(3, (w as i64 - char_w - 3).max(3));
+            draw_bitmap_label(img, &txt, tx, 4, font_scale, fg);
+
+            let ty = map_y(v) - (5 * font_scale) / 2;
+            if ty >= 20 * font_scale / 2 + 8 && ty <= h as i64 - 6 * font_scale {
+                draw_bitmap_label(img, &txt, 4, ty, font_scale, fg);
+            }
+        }
+        v += label_step;
+    }
+    // Always label 512 center if it doesn't collide with an existing 500 label
+    if px_per_100 < 44.0 {
+        let txt = "512";
+        let char_w = 3 * 4 * font_scale - font_scale;
+        draw_bitmap_label(img, txt, map_x(512) - char_w / 2, 4 + 7 * font_scale, font_scale, [0, 240, 255, 255]);
+        draw_bitmap_label(img, txt, 4, map_y(512) - (5 * font_scale) / 2, font_scale, [0, 240, 255, 255]);
     }
 }
 
@@ -1314,7 +1902,7 @@ pub async fn manifest(State(state): State<std::sync::Arc<AppState>>) -> Response
         "ops": [
             "create", "remove_bg", "mask", "transform", "fit", "ring",
             "effects", "history", "portrait", "save_preset", "inspect",
-            "preview", "export", "close"
+            "preview", "export", "pipeline", "close"
         ],
         "mask_ops": ["erase", "restore", "apply_preset", "invert", "feather", "grow", "reset"],
         "mask_targets": ["canvas", "image", "both"],
@@ -1350,15 +1938,16 @@ pub async fn tools_schema() -> Response {
         "tools": [
             {"type": "function", "function": {"name": "tokenatra_create_session", "description": "Create an editing session from an image_path or image_b64", "parameters": {"type": "object", "properties": {"image_path": {"type": "string"}, "image_b64": {"type": "string"}, "ring": {"type": ["string", "null"]}}}}},
             {"type": "function", "function": {"name": "tokenatra_remove_background", "description": "Remove background (ONNX) or toggle showing_original", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "edge_blur": {"type": "number"}, "showing_original": {"type": "boolean"}}, "required": ["session_id"]}}},
-            {"type": "function", "function": {"name": "tokenatra_edit_mask", "description": "Edit visibility mask (1024x1024 logical). target: canvas (pink mask, fixed to ring) | image (blue eraser, moves with subject). ops: erase/restore/apply_preset/invert/feather/grow/reset", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "target": {"type": "string", "enum": ["canvas", "image", "both"]}, "op": {"type": "string", "enum": ["erase", "restore", "apply_preset", "invert", "feather", "grow", "reset"]}, "shapes_json": {"type": "string"}, "preset": {"type": "string"}, "px": {"type": "integer"}, "protect": {"type": "boolean"}}, "required": ["session_id", "op"]}}},
+            {"type": "function", "function": {"name": "tokenatra_edit_mask", "description": "Edit visibility mask (1024x1024 logical). target: canvas (pink mask, fixed to ring) | image (blue eraser, moves with subject). ops: erase/restore/apply_preset/invert/feather/grow/reset. Supports circle, rect, stroke, polygon.", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "target": {"type": "string", "enum": ["canvas", "image", "both"]}, "op": {"type": "string", "enum": ["erase", "restore", "apply_preset", "invert", "feather", "grow", "reset"]}, "shapes": {"type": "array", "items": {"type": "object"}}, "shapes_json": {"type": "string"}, "preset": {"type": "string"}, "px": {"type": "integer"}, "protect": {"type": "boolean"}}, "required": ["session_id", "op"]}}},
             {"type": "function", "function": {"name": "tokenatra_set_transform", "description": "Set subject transform in 1024x1024 1x export frame: L(f) = 512 + (f - 512)*scale + offset", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "scale": {"type": "number"}, "rotation": {"type": "number"}, "offset_x": {"type": "number"}, "offset_y": {"type": "number"}, "fit_zone": {"type": "integer", "enum": [1, 2, 3]}}, "required": ["session_id"]}}},
             {"type": "function", "function": {"name": "tokenatra_set_ring", "description": "Set token ring by name or remove (null)", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "name": {"type": ["string", "null"]}}, "required": ["session_id"]}}},
             {"type": "function", "function": {"name": "tokenatra_set_effects", "description": "Shadow and color correction", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "shadow_json": {"type": "string"}, "color_json": {"type": "string"}}, "required": ["session_id"]}}},
             {"type": "function", "function": {"name": "tokenatra_history", "description": "Undo or redo last editing action", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "action": {"type": "string", "enum": ["undo", "redo"]}}, "required": ["session_id", "action"]}}},
             {"type": "function", "function": {"name": "tokenatra_portrait", "description": "Configure and export a square portrait (PortraitGenerator)", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "variant": {"type": "string", "enum": ["original", "cutout"]}, "scale": {"type": "number"}, "rotation": {"type": "number"}, "offset_x": {"type": "number"}, "offset_y": {"type": "number"}, "size": {"type": "integer"}, "format": {"type": "string", "enum": ["webp", "png", "jpg"]}, "quality": {"type": "integer"}, "output_path": {"type": "string"}}, "required": ["session_id"]}}},
-            {"type": "function", "function": {"name": "tokenatra_inspect", "description": "Session state & alpha bbox stats", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "include_image": {"type": "boolean"}, "preview_size": {"type": "integer"}}, "required": ["session_id"]}}},
-            {"type": "function", "function": {"name": "tokenatra_preview", "description": "Preview image (webp) with optional alignment guides", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "size": {"type": "integer"}, "scale_mode": {"type": "string", "enum": ["auto", "1", "2", "3"]}, "with_ring": {"type": "boolean"}, "guides": {"type": "boolean"}}, "required": ["session_id"]}}},
+            {"type": "function", "function": {"name": "tokenatra_inspect", "description": "Session state & alpha bbox stats", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "include_image": {"type": "boolean"}, "preview_size": {"type": "integer"}, "xray": {"type": "boolean"}, "grid": {"type": "boolean"}, "example": {"type": "boolean"}, "guides": {"type": "boolean"}}, "required": ["session_id"]}}},
+            {"type": "function", "function": {"name": "tokenatra_preview", "description": "Preview image (webp) with optional xray, grid, example, or alignment guides", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "size": {"type": "integer"}, "scale_mode": {"type": "string", "enum": ["auto", "1", "2", "3"]}, "with_ring": {"type": "boolean"}, "xray": {"type": "boolean"}, "grid": {"type": "boolean"}, "example": {"type": "boolean"}, "guides": {"type": "boolean"}}, "required": ["session_id"]}}},
             {"type": "function", "function": {"name": "tokenatra_export", "description": "Export final token image", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "format": {"type": "string", "enum": ["webp", "png", "jpg"]}, "quality": {"type": "integer"}, "size": {"type": "integer"}, "scale_mode": {"type": "string", "enum": ["auto", "1", "2", "3"]}, "with_ring": {"type": "boolean"}, "output_path": {"type": "string"}, "save_to": {"type": "string"}}, "required": ["session_id"]}}},
+            {"type": "function", "function": {"name": "tokenatra_pipeline", "description": "Execute a full multi-step token & portrait workflow in a single call", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "image_path": {"type": "string"}, "ring": {"type": ["string", "null"]}, "remove_bg": {"type": ["boolean", "string"]}, "portrait": {"type": "object"}, "transform": {"type": "object"}, "preset": {"type": "string"}, "mask_ops": {"type": "array", "items": {"type": "object"}}, "effects": {"type": "object"}, "export": {"type": "object"}, "exports": {"type": "array", "items": {"type": "object"}}, "preview": {"type": ["boolean", "object"]}, "close_session": {"type": "boolean"}}}}},
             {"type": "function", "function": {"name": "tokenatra_close_session", "description": "Close session and free memory", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}}, "required": ["session_id"]}}},
             {"type": "function", "function": {"name": "tokenatra_list_assets", "description": "List rings and presets", "parameters": {"type": "object", "properties": {}}}}
         ]
@@ -1546,6 +2135,196 @@ pub async fn op_remove_bg(
     }
 }
 
+fn apply_mask_step(s: &mut AgentSession, v: &Value) -> Result<(), (StatusCode, &'static str, String)> {
+    let op = v["op"].as_str().unwrap_or_default().to_string();
+    let target = v["target"].as_str().unwrap_or("canvas").to_lowercase();
+    let px = v["px"].as_f64().map(|f| f.round().max(0.0) as u32).unwrap_or(0);
+    if let Some(pe) = v["protection_enabled"].as_bool() {
+        s.protection_enabled = pe;
+    }
+    let protect = v["protect"].as_bool().unwrap_or(s.protection_enabled);
+    let params = v.clone();
+
+    // Accept either `shapes` array OR `shapes_json` string
+    let parsed_shapes_opt: Option<Value> = if let Some(arr) = v.get("shapes")
+        && !arr.is_null()
+    {
+        Some(arr.clone())
+    } else if let Some(raw_str) = v.get("shapes_json").and_then(|x| x.as_str()) {
+        if raw_str.trim().is_empty() {
+            None
+        } else {
+            let pv: Value = serde_json::from_str(raw_str).map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    format!("shapes_json is not valid JSON: {e}"),
+                )
+            })?;
+            Some(pv)
+        }
+    } else {
+        None
+    };
+
+    match op.as_str() {
+        "erase" | "restore" => {
+            let erase = op == "erase";
+            let Some(ref shapes_val) = parsed_shapes_opt else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "shapes array required for erase/restore".into(),
+                ));
+            };
+            if target == "image" || target == "blue" {
+                let prev = s.image_mask.clone();
+                mask_apply_shapes(&mut s.image_mask, shapes_val, erase, false)
+                    .map_err(|msg| (StatusCode::BAD_REQUEST, "bad_request", msg))?;
+                if erase
+                    && protect
+                    && let Some(prot_1024) = load_protection_mask_1024(s.ring.as_deref())
+                {
+                    let (iw, ih) = s.image_mask.dimensions();
+                    let max_dim = iw.max(ih).max(1) as f32;
+                    let fit_scale = (LOGICAL / max_dim) * s.scale;
+                    let theta = s.rotation.to_radians();
+                    let cos_r = theta.cos();
+                    let sin_r = theta.sin();
+                    let cx = 512.0 + s.offset_x;
+                    let cy = 512.0 + s.offset_y;
+                    for (x, y, p) in s.image_mask.enumerate_pixels_mut() {
+                        let old_v = prev.get_pixel(x, y).0[0];
+                        if p.0[0] >= old_v {
+                            continue;
+                        }
+                        let lx = (x as f32 - iw as f32 * 0.5) * fit_scale;
+                        let ly = (y as f32 - ih as f32 * 0.5) * fit_scale;
+                        let rx = cos_r * lx - sin_r * ly + cx;
+                        let ry = sin_r * lx + cos_r * ly + cy;
+                        let prot_a = sample_gray_bilinear(&prot_1024, rx, ry);
+                        if prot_a > 0 {
+                            let floor = ((old_v as u32 * prot_a as u32 + 127) / 255) as u8;
+                            if p.0[0] < floor {
+                                p.0[0] = floor;
+                            }
+                        }
+                    }
+                }
+            } else {
+                let prev = s.canvas_mask.clone();
+                mask_apply_shapes(&mut s.canvas_mask, shapes_val, erase, true)
+                    .map_err(|msg| (StatusCode::BAD_REQUEST, "bad_request", msg))?;
+                if erase
+                    && protect
+                    && let Some(prot_1024) = load_protection_mask_1024(s.ring.as_deref())
+                {
+                    let off = LOGICAL_U32;
+                    for y in 0..LOGICAL_U32 {
+                        for x in 0..LOGICAL_U32 {
+                            let prot_a = prot_1024.get_pixel(x, y).0[0];
+                            if prot_a > 0 {
+                                let old_v = prev.get_pixel(off + x, off + y).0[0];
+                                let cur_v = s.canvas_mask.get_pixel(off + x, off + y).0[0];
+                                let floor = ((old_v as u32 * prot_a as u32 + 127) / 255) as u8;
+                                if cur_v < floor {
+                                    s.canvas_mask.put_pixel(off + x, off + y, Luma([floor]));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "invert" => {
+            let m = if target == "image" || target == "blue" {
+                &mut s.image_mask
+            } else {
+                &mut s.canvas_mask
+            };
+            for p in m.pixels_mut() {
+                p.0[0] = 255 - p.0[0];
+            }
+        }
+        "reset" => {
+            if target == "image" || target == "blue" {
+                s.image_mask =
+                    GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
+            } else if target == "both" {
+                s.canvas_mask =
+                    GrayImage::from_pixel(LOGICAL_U32 * 3, LOGICAL_U32 * 3, Luma([255u8]));
+                s.image_mask =
+                    GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
+            } else {
+                s.canvas_mask =
+                    GrayImage::from_pixel(LOGICAL_U32 * 3, LOGICAL_U32 * 3, Luma([255u8]));
+            }
+        }
+        "feather" => {
+            if px == 0 {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "px required for feather".into(),
+                ));
+            }
+            if target == "image" || target == "blue" {
+                s.image_mask = image::imageops::blur(&s.image_mask, px as f32 * 0.5);
+            } else {
+                s.canvas_mask = image::imageops::blur(&s.canvas_mask, px as f32 * 0.5);
+            }
+        }
+        "grow" => {
+            if px == 0 {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "px required for grow".into(),
+                ));
+            }
+            use imageproc::distance_transform::Norm;
+            if target == "image" || target == "blue" {
+                s.image_mask =
+                    imageproc::morphology::dilate(&s.image_mask, Norm::LInf, px.min(255) as u8);
+            } else {
+                s.canvas_mask =
+                    imageproc::morphology::dilate(&s.canvas_mask, Norm::LInf, px.min(255) as u8);
+            }
+        }
+        "apply_preset" => {
+            let pname = v["preset"].as_str().unwrap_or_default();
+            let Some(pp) = find_preset_file(pname) else {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    "unknown_preset",
+                    format!("preset not found: {pname}"),
+                ));
+            };
+            match load_preset_mask(&pp, LOGICAL_U32 * 3, LOGICAL_U32 * 3) {
+                Ok(m) => s.canvas_mask = m,
+                Err(e) => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "bad_request",
+                        format!("preset decode failed: {e}"),
+                    ));
+                }
+            }
+        }
+        other => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "bad_mask_op",
+                format!("unknown mask op {other:?}"),
+            ));
+        }
+    }
+
+    s.log_op(&format!("mask.{op}"), params);
+    s.push_history();
+    Ok(())
+}
+
 pub async fn op_mask(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -> Response {
     let Some(axum::Json(v)) = body else {
         return bad("bad_request", "JSON body required");
@@ -1556,126 +2335,53 @@ pub async fn op_mask(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -
             Err(r) => return r,
         };
         let mut s = arc.lock().unwrap();
-        let op = v["op"].as_str().unwrap_or_default().to_string();
-        let target = v["target"].as_str().unwrap_or("canvas").to_lowercase();
-        let px = v["px"].as_u64().unwrap_or(0) as u32;
-        if let Some(pe) = v["protection_enabled"].as_bool() {
-            s.protection_enabled = pe;
+        if let Err((status, code, msg)) = apply_mask_step(&mut s, &v) {
+            return agent_err(status, code, &msg);
         }
-        let protect = v["protect"].as_bool().unwrap_or(s.protection_enabled);
-        let params = v.clone();
-
-        match op.as_str() {
-            "erase" | "restore" => {
-                let erase = op == "erase";
-                if v["shapes"].as_array().is_none() {
-                    return bad("bad_request", "shapes array required for erase/restore");
-                }
-                if target == "image" || target == "blue" {
-                    let prev = s.image_mask.clone();
-                    mask_apply_shapes(&mut s.image_mask, &v["shapes"], erase, false);
-                    if erase && protect
-                        && let Some(prot_1024) = load_protection_mask_1024(s.ring.as_deref()) {
-                            let (iw, ih) = s.image_mask.dimensions();
-                            let max_dim = iw.max(ih).max(1) as f32;
-                            let fit_scale = (LOGICAL / max_dim) * s.scale;
-                            let theta = s.rotation.to_radians();
-                            let cos_r = theta.cos();
-                            let sin_r = theta.sin();
-                            let cx = 512.0 + s.offset_x;
-                            let cy = 512.0 + s.offset_y;
-                            for (x, y, p) in s.image_mask.enumerate_pixels_mut() {
-                                let old_v = prev.get_pixel(x, y).0[0];
-                                if p.0[0] >= old_v {
-                                    continue;
-                                }
-                                let lx = (x as f32 - iw as f32 * 0.5) * fit_scale;
-                                let ly = (y as f32 - ih as f32 * 0.5) * fit_scale;
-                                let rx = cos_r * lx - sin_r * ly + cx;
-                                let ry = sin_r * lx + cos_r * ly + cy;
-                                if rx >= 0.0 && ry >= 0.0 && rx < LOGICAL && ry < LOGICAL
-                                    && prot_1024.get_pixel(rx as u32, ry as u32).0[0] > 0 {
-                                        p.0[0] = old_v;
-                                    }
-                            }
-                        }
-                } else {
-                    let prev = s.canvas_mask.clone();
-                    mask_apply_shapes(&mut s.canvas_mask, &v["shapes"], erase, true);
-                    if erase && protect
-                        && let Some(prot_1024) = load_protection_mask_1024(s.ring.as_deref()) {
-                            let off = LOGICAL_U32;
-                            for y in 0..LOGICAL_U32 {
-                                for x in 0..LOGICAL_U32 {
-                                    if prot_1024.get_pixel(x, y).0[0] > 0 {
-                                        let old_v = prev.get_pixel(off + x, off + y).0[0];
-                                        s.canvas_mask.put_pixel(off + x, off + y, Luma([old_v]));
-                                    }
-                                }
-                            }
-                        }
-                }
-            }
-            "invert" => {
-                let m = if target == "image" || target == "blue" {
-                    &mut s.image_mask
-                } else {
-                    &mut s.canvas_mask
-                };
-                for p in m.pixels_mut() {
-                    p.0[0] = 255 - p.0[0];
-                }
-            }
-            "reset" => {
-                if target == "image" || target == "blue" {
-                    s.image_mask = GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
-                } else if target == "both" {
-                    s.canvas_mask = GrayImage::from_pixel(LOGICAL_U32 * 3, LOGICAL_U32 * 3, Luma([255u8]));
-                    s.image_mask = GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
-                } else {
-                    s.canvas_mask = GrayImage::from_pixel(LOGICAL_U32 * 3, LOGICAL_U32 * 3, Luma([255u8]));
-                }
-            }
-            "feather" => {
-                if px == 0 {
-                    return bad("bad_request", "px required for feather");
-                }
-                if target == "image" || target == "blue" {
-                    s.image_mask = image::imageops::blur(&s.image_mask, px as f32 * 0.5);
-                } else {
-                    s.canvas_mask = image::imageops::blur(&s.canvas_mask, px as f32 * 0.5);
-                }
-            }
-            "grow" => {
-                if px == 0 {
-                    return bad("bad_request", "px required for grow");
-                }
-                use imageproc::distance_transform::Norm;
-                if target == "image" || target == "blue" {
-                    s.image_mask = imageproc::morphology::dilate(&s.image_mask, Norm::LInf, px.min(255) as u8);
-                } else {
-                    s.canvas_mask = imageproc::morphology::dilate(&s.canvas_mask, Norm::LInf, px.min(255) as u8);
-                }
-            }
-            "apply_preset" => {
-                let pname = v["preset"].as_str().unwrap_or_default();
-                let Some(pp) = find_preset_file(pname) else {
-                    return agent_err(StatusCode::NOT_FOUND, "unknown_preset", "preset not found");
-                };
-                match load_preset_mask(&pp, LOGICAL_U32 * 3, LOGICAL_U32 * 3) {
-                    Ok(m) => s.canvas_mask = m,
-                    Err(e) => return bad("bad_request", &format!("preset decode failed: {e}")),
-                }
-            }
-            other => return bad("bad_mask_op", &format!("unknown mask op {other:?}")),
-        }
-
-        s.log_op(&format!("mask.{op}"), params);
-        s.push_history();
         let stats = inspect_session(&s);
         ok_json(json!({"ok": true, "mask": stats}))
     })
     .await
+}
+
+fn apply_transform_step(s: &mut AgentSession, v: &Value) -> Result<(), (StatusCode, &'static str, String)> {
+    if let Some(sc) = v["scale"].as_f64()
+        && (!sc.is_finite() || sc <= 0.0 || sc > 8.0)
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "scale out of range (0.01..8.0)".into(),
+        ));
+    }
+    if let Some(zone) = v["fit_zone"].as_u64() {
+        let z = zone.clamp(1, 3) as f32;
+        s.scale = z;
+        s.offset_x = 0.0;
+        s.offset_y = 0.0;
+        s.rotation = 0.0;
+    }
+    if let Some(x) = v["scale"].as_f64() {
+        s.scale = x as f32;
+    }
+    if let Some(x) = v["rotation"].as_f64()
+        && x.is_finite()
+    {
+        s.rotation = x as f32;
+    }
+    if let Some(x) = v["offset_x"].as_f64()
+        && x.is_finite()
+    {
+        s.offset_x = x as f32;
+    }
+    if let Some(x) = v["offset_y"].as_f64()
+        && x.is_finite()
+    {
+        s.offset_y = x as f32;
+    }
+    s.log_op("transform", v.clone());
+    s.push_history();
+    Ok(())
 }
 
 pub async fn op_transform(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -> Response {
@@ -1688,34 +2394,9 @@ pub async fn op_transform(Path(sid): Path<String>, body: Option<axum::Json<Value
             Err(r) => return r,
         };
         let mut s = arc.lock().unwrap();
-        let params = v.clone();
-
-        if let Some(sc) = v["scale"].as_f64()
-            && (sc <= 0.0 || sc > 8.0)
-        {
-            return bad("bad_request", "scale out of range (0.01..8.0)");
+        if let Err((status, code, msg)) = apply_transform_step(&mut s, &v) {
+            return agent_err(status, code, &msg);
         }
-        if let Some(zone) = v["fit_zone"].as_u64() {
-            let z = zone.clamp(1, 3) as f32;
-            s.scale = z;
-            s.offset_x = 0.0;
-            s.offset_y = 0.0;
-            s.rotation = 0.0;
-        }
-        if let Some(x) = v["scale"].as_f64() {
-            s.scale = x as f32;
-        }
-        if let Some(x) = v["rotation"].as_f64() {
-            s.rotation = x as f32;
-        }
-        if let Some(x) = v["offset_x"].as_f64() {
-            s.offset_x = x as f32;
-        }
-        if let Some(x) = v["offset_y"].as_f64() {
-            s.offset_y = x as f32;
-        }
-        s.log_op("transform", params);
-        s.push_history();
         let stats = inspect_session(&s);
         let resp = json!({
             "ok": true,
@@ -1755,16 +2436,7 @@ pub async fn op_ring(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -
     ok_json(json!({"ok": true, "ring": name}))
 }
 
-pub async fn op_effects(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -> Response {
-    let Some(axum::Json(v)) = body else {
-        return bad("bad_request", "JSON body required");
-    };
-    let arc = match session_op_guard(&sid) {
-        Ok(s) => s,
-        Err(r) => return r,
-    };
-    let mut s = arc.lock().unwrap();
-    let params = v.clone();
+fn apply_effects_step(s: &mut AgentSession, v: &Value) {
     if let Some(sh) = v["shadow"].as_object() {
         if let Some(en) = sh.get("enabled").and_then(|x| x.as_bool()) {
             s.shadow_enabled = en;
@@ -1796,7 +2468,19 @@ pub async fn op_effects(Path(sid): Path<String>, body: Option<axum::Json<Value>>
             s.color_contrast = c as f32;
         }
     }
-    s.log_op("effects", params);
+    s.log_op("effects", v.clone());
+}
+
+pub async fn op_effects(Path(sid): Path<String>, body: Option<axum::Json<Value>>) -> Response {
+    let Some(axum::Json(v)) = body else {
+        return bad("bad_request", "JSON body required");
+    };
+    let arc = match session_op_guard(&sid) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let mut s = arc.lock().unwrap();
+    apply_effects_step(&mut s, &v);
     let resp = json!({
         "ok": true,
         "effects": {
@@ -1972,6 +2656,14 @@ pub async fn op_preview(
             .get("example")
             .map(|v| v == "1" || v == "true")
             .unwrap_or(false);
+        let xray = q
+            .get("xray")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        let grid = q
+            .get("grid")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
         let example_scale: u32 = q
             .get("example_scale")
             .and_then(|v| v.parse().ok())
@@ -1982,9 +2674,9 @@ pub async fn op_preview(
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(0.65_f32)
             .clamp(0.1, 1.0);
-        // When `example=1` is requested and `scale_mode` is not explicitly given, default to "2"
-        // so the entire 2x `example.png` template ("Макушка", "Челюсть", "Пояс") is visible!
-        let default_sm = if show_example { "2" } else { "1" };
+        // When `example=1`, `xray=1`, or `grid=1` is requested and `scale_mode` is not explicitly given,
+        // default to "2" so pop-out heads, staves, sleeves, and `-512..1536` coordinates are visible.
+        let default_sm = if show_example || xray || grid { "2" } else { "1" };
         let scale_mode = q.get("scale_mode").map(|s| s.as_str()).unwrap_or(default_sm);
         let with_ring = q
             .get("with_ring")
@@ -1997,7 +2689,11 @@ pub async fn op_preview(
 
         let composed = {
             let s = arc.lock().unwrap();
-            compose(&s, size, scale_mode, with_ring)
+            if xray {
+                compose_xray(&s, size, scale_mode, with_ring)
+            } else {
+                compose(&s, size, scale_mode, with_ring)
+            }
         };
         match composed {
             Ok((mut img, used)) => {
@@ -2006,6 +2702,9 @@ pub async fn op_preview(
                 }
                 if guides {
                     draw_preview_guides(&mut img, used);
+                }
+                if grid {
+                    draw_canvas_grid(&mut img, used);
                 }
                 match crate::imaging::save_image(
                     &image::DynamicImage::ImageRgba8(img),
@@ -2077,6 +2776,14 @@ pub async fn op_inspect(
                 .get("example")
                 .map(|v| v == "1" || v == "true")
                 .unwrap_or(false);
+            let xray = q
+                .get("xray")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false);
+            let grid = q
+                .get("grid")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false);
             let example_scale: u32 = q
                 .get("example_scale")
                 .and_then(|v| v.parse().ok())
@@ -2087,19 +2794,27 @@ pub async fn op_inspect(
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(0.65_f32)
                 .clamp(0.1, 1.0);
-            let default_sm = if show_example { "2" } else { "1" };
+            let default_sm = if show_example || xray || grid { "2" } else { "1" };
             let scale_mode = q.get("scale_mode").map(|s| s.as_str()).unwrap_or(default_sm);
             let guides = q
                 .get("guides")
                 .map(|v| v == "1" || v == "true")
                 .unwrap_or(false);
-            if let Ok((mut img, used)) = compose(&s, size, scale_mode, true) {
+            let composed = if xray {
+                compose_xray(&s, size, scale_mode, true)
+            } else {
+                compose(&s, size, scale_mode, true)
+            };
+            if let Ok((mut img, used)) = composed {
                 drop(s);
                 if show_example {
                     draw_example_overlay(&mut img, used, example_scale, example_opacity);
                 }
                 if guides {
                     draw_preview_guides(&mut img, used);
+                }
+                if grid {
+                    draw_canvas_grid(&mut img, used);
                 }
                 if let Ok((bytes, _)) = crate::imaging::save_image(
                     &image::DynamicImage::ImageRgba8(img),
@@ -2159,6 +2874,496 @@ pub async fn op_export(
             },
             Err(e) => agent_err(StatusCode::INTERNAL_SERVER_ERROR, "compose_error", &e),
         }
+    })
+    .await
+}
+
+fn infer_format_from_spec(spec: &Value, save_to: Option<&str>, default_fmt: &str) -> Result<String, String> {
+    if let Some(f) = spec.get("format").and_then(|v| v.as_str())
+        && !f.trim().is_empty()
+    {
+        let fl = f.trim().to_lowercase();
+        let norm = if fl == "jpeg" { "jpg".to_string() } else { fl };
+        if !["webp", "png", "jpg"].contains(&norm.as_str()) {
+            return Err(format!("unsupported format {f:?}; expected webp, png, or jpg"));
+        }
+        return Ok(norm);
+    }
+    if let Some(st) = save_to {
+        let ext = std::path::Path::new(st)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        if matches!(ext.as_str(), "webp" | "png" | "jpg" | "jpeg") {
+            return Ok(if ext == "jpeg" { "jpg".to_string() } else { ext });
+        }
+    }
+    Ok(default_fmt.to_string())
+}
+
+fn save_bytes_to_target(payload: &[u8], fmt: &str, save_to: &str, prefix: &str) -> Result<String, String> {
+    let s = save_to.trim();
+    if s.is_empty() {
+        return Err("save_to path is empty".into());
+    }
+    let target = std::path::Path::new(s);
+    let ext = target
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    if matches!(ext.as_str(), "png" | "webp" | "jpg" | "jpeg") && !target.is_dir() {
+        if let Some(parent) = target.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent).map_err(|e| format!("failed to create parent dir: {e}"))?;
+        }
+        paths::atomic_write(target, payload).map_err(|e| format!("failed to write {}: {e}", target.display()))?;
+        return Ok(target.to_string_lossy().to_string());
+    }
+    if !target.exists() {
+        std::fs::create_dir_all(target)
+            .map_err(|e| format!("failed to create directory {}: {e}", target.display()))?;
+    }
+    if !target.is_dir() {
+        return Err(format!(
+            "save_to is neither an image file path nor a directory: {s}"
+        ));
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let file_path = target.join(format!("{prefix}-{stamp}.{fmt}"));
+    paths::atomic_write(&file_path, payload)
+        .map_err(|e| format!("failed to write {}: {e}", file_path.display()))?;
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+fn source_already_transparent(img: &RgbaImage) -> bool {
+    let (w, h) = img.dimensions();
+    let total = (w * h).max(1) as f64;
+    let mut opaque = 0u64;
+    for p in img.pixels() {
+        if p.0[3] >= 250 {
+            opaque += 1;
+        }
+    }
+    let opaque_pct = (opaque as f64 / total) * 100.0;
+    opaque_pct < 92.0
+}
+
+/// Composite single-call token & portrait pipeline (`POST /agent/v1/pipeline`).
+/// Runs session open (or reuses `session_id`), smart `remove_bg` (`"auto"` | `"always"` | `"never"`),
+/// optional `portrait` export, `transform`, `preset`, `mask_ops`, `effects`, one or more `export`s,
+/// optional `preview` (including `xray` and `grid`), and optional `close_session`.
+pub async fn op_pipeline(
+    State(state): State<std::sync::Arc<AppState>>,
+    body: Option<axum::Json<Value>>,
+) -> Response {
+    let Some(axum::Json(v)) = body else {
+        return bad("bad_request", "JSON body required");
+    };
+    let st = state.clone();
+    run_blocking(move || {
+        // 1. Resolve existing session or create a new one from image_path / image
+        let (arc, sid_str, created_inline) = if let Some(sid) = v
+            .get("session_id")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            match session_op_guard(sid) {
+                Ok(a) => (a, sid.to_string(), false),
+                Err(r) => return r,
+            }
+        } else {
+            let ring_override = if v.get("ring").is_some() {
+                if v["ring"].is_null() {
+                    Some(None)
+                } else if let Some(rname) = v["ring"].as_str() {
+                    let trimmed = rname.trim();
+                    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") || trimmed.eq_ignore_ascii_case("null") {
+                        Some(None)
+                    } else {
+                        if find_ring_file(trimmed).is_none() {
+                            return agent_err(StatusCode::NOT_FOUND, "unknown_asset", "ring not found");
+                        }
+                        Some(Some(trimmed.to_string()))
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let base = match decode_source(&v) {
+                Ok(img) => img,
+                Err(r) => return r,
+            };
+            let a = store_create(base, ring_override);
+            let id = a.lock().unwrap().id.clone();
+            (a, id, true)
+        };
+
+        let cleanup_on_err = |created: bool, id: &str| {
+            if created {
+                store_remove(id);
+            }
+        };
+
+        // Optional ring update when reusing an existing session
+        if !created_inline && v.get("ring").is_some() {
+            let rname_opt = if v["ring"].is_null() {
+                None
+            } else {
+                v["ring"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|x| !x.is_empty() && !x.eq_ignore_ascii_case("none") && !x.eq_ignore_ascii_case("null"))
+                    .map(String::from)
+            };
+            if let Some(ref rn) = rname_opt
+                && find_ring_file(rn).is_none()
+            {
+                return agent_err(StatusCode::NOT_FOUND, "unknown_asset", "ring not found");
+            }
+            let mut s = arc.lock().unwrap();
+            s.ring = rname_opt.clone();
+            s.log_op("ring", json!({"name": rname_opt}));
+        }
+
+        // 2. Background removal ("auto" | "always" | "never" | bool)
+        let rm_mode = match v.get("remove_bg") {
+            Some(Value::Bool(true)) => "always",
+            Some(Value::Bool(false)) => "never",
+            Some(Value::String(s)) => match s.trim().to_lowercase().as_str() {
+                "always" | "true" | "1" | "force" => "always",
+                "never" | "false" | "0" | "skip" => "never",
+                _ => "auto",
+            },
+            _ => {
+                if created_inline {
+                    "auto"
+                } else {
+                    "never"
+                }
+            }
+        };
+        let edge_blur = v.get("edge_blur").and_then(|x| x.as_f64()).unwrap_or(1.0);
+
+        let should_run_rm = {
+            let s = arc.lock().unwrap();
+            match rm_mode {
+                "always" => true,
+                "auto" => !s.bg_removed && !source_already_transparent(&s.original),
+                _ => false,
+            }
+        };
+
+        let mut bg_remove_ran = false;
+        if should_run_rm {
+            let orig = arc.lock().unwrap().original.clone();
+            st.mark_activity();
+            let infer_res = crate::infer::remove_background(&st, image::DynamicImage::ImageRgba8(orig), edge_blur);
+            st.mark_activity();
+            match infer_res {
+                Ok(rgba) => {
+                    let mut s = arc.lock().unwrap();
+                    s.cutout = Some(rgba);
+                    s.bg_removed = true;
+                    s.showing_original = false;
+                    s.portrait_variant = "cutout".to_string();
+                    s.image_mask = GrayImage::from_pixel(s.original.width(), s.original.height(), Luma([255u8]));
+                    s.log_op("remove_bg", json!({"edge_blur": edge_blur}));
+                    s.push_history();
+                    bg_remove_ran = true;
+                }
+                Err(e) => {
+                    cleanup_on_err(created_inline, &sid_str);
+                    return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "infer_error", &e.to_string());
+                }
+            }
+        }
+
+        // 3. Optional portrait export
+        let mut portrait_out: Option<Value> = None;
+        if let Some(p_spec) = v.get("portrait").and_then(|x| x.as_object()) {
+            let p_val = Value::Object(p_spec.clone());
+            let save_to = p_val
+                .get("save_to")
+                .or_else(|| p_val.get("output_path"))
+                .and_then(|x| x.as_str());
+            let fmt = match infer_format_from_spec(&p_val, save_to, "webp") {
+                Ok(f) => f,
+                Err(msg) => {
+                    cleanup_on_err(created_inline, &sid_str);
+                    return bad("bad_request", &format!("portrait: {msg}"));
+                }
+            };
+            let size = p_val.get("size").and_then(|x| x.as_u64()).unwrap_or(1024).clamp(256, 4096) as u32;
+            let quality = p_val.get("quality").and_then(|x| x.as_u64()).unwrap_or(95).clamp(10, 100) as u8;
+            let img = {
+                let mut s = arc.lock().unwrap();
+                if let Some(var) = p_val.get("variant").and_then(|x| x.as_str()) {
+                    s.portrait_variant = if var == "cutout" { "cutout".into() } else { "original".into() };
+                } else if s.cutout.is_some() {
+                    s.portrait_variant = "cutout".into();
+                }
+                if let Some(sc) = p_val.get("scale").and_then(|x| x.as_f64()) {
+                    s.portrait_scale = sc.clamp(0.05, 8.0) as f32;
+                }
+                if let Some(rot) = p_val.get("rotation").and_then(|x| x.as_f64()) {
+                    s.portrait_rotation = rot as f32;
+                }
+                if let Some(ox) = p_val.get("offset_x").and_then(|x| x.as_f64()) {
+                    s.portrait_x = ox as f32;
+                }
+                if let Some(oy) = p_val.get("offset_y").and_then(|x| x.as_f64()) {
+                    s.portrait_y = oy as f32;
+                }
+                s.log_op("portrait", p_val.clone());
+                render_portrait(&s, size)
+            };
+            let (bytes, mime) = match crate::imaging::save_image(&image::DynamicImage::ImageRgba8(img), &fmt, quality) {
+                Ok(bm) => bm,
+                Err(e) => {
+                    cleanup_on_err(created_inline, &sid_str);
+                    return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "encode_error", &e.to_string());
+                }
+            };
+            if let Some(st_path) = save_to {
+                match save_bytes_to_target(&bytes, &fmt, st_path, "tokenatra-portrait") {
+                    Ok(saved) => {
+                        portrait_out = Some(json!({
+                            "path": saved,
+                            "format": fmt,
+                            "size": size,
+                        }));
+                    }
+                    Err(msg) => {
+                        cleanup_on_err(created_inline, &sid_str);
+                        return bad("io_error", &format!("portrait: {msg}"));
+                    }
+                }
+            } else {
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                portrait_out = Some(json!({
+                    "format": fmt,
+                    "size": size,
+                    "data_url": format!("data:{mime};base64,{b64}"),
+                }));
+            }
+        }
+
+        // 4. Transform, Preset, Mask Ops, Effects
+        {
+            let mut s = arc.lock().unwrap();
+            if let Some(tr) = v.get("transform")
+                && !tr.is_null()
+                && let Err((status, code, msg)) = apply_transform_step(&mut s, tr)
+            {
+                drop(s);
+                cleanup_on_err(created_inline, &sid_str);
+                return agent_err(status, code, &format!("transform: {msg}"));
+            }
+
+            if let Some(pname) = v.get("preset").and_then(|x| x.as_str()).map(str::trim).filter(|x| !x.is_empty())
+                && let Err((status, code, msg)) = apply_mask_step(&mut s, &json!({"op": "apply_preset", "preset": pname}))
+            {
+                drop(s);
+                cleanup_on_err(created_inline, &sid_str);
+                return agent_err(status, code, &msg);
+            }
+
+            if let Some(ops_arr) = v.get("mask_ops").and_then(|x| x.as_array()) {
+                for (mi, mop) in ops_arr.iter().enumerate() {
+                    if let Err((status, code, msg)) = apply_mask_step(&mut s, mop) {
+                        drop(s);
+                        cleanup_on_err(created_inline, &sid_str);
+                        return agent_err(status, code, &format!("mask_ops[{mi}]: {msg}"));
+                    }
+                }
+            }
+
+            if let Some(eff) = v.get("effects")
+                && eff.is_object()
+            {
+                apply_effects_step(&mut s, eff);
+            }
+        }
+
+        // 5. Token / Subject Exports (`export` object and/or `exports` array)
+        let mut export_specs: Vec<Value> = Vec::new();
+        if let Some(ex_one) = v.get("export")
+            && ex_one.is_object()
+        {
+            export_specs.push(ex_one.clone());
+        }
+        if let Some(ex_many) = v.get("exports").and_then(|x| x.as_array()) {
+            for item in ex_many {
+                if item.is_object() {
+                    export_specs.push(item.clone());
+                }
+            }
+        }
+
+        let mut exports_out: Vec<Value> = Vec::with_capacity(export_specs.len());
+        for (ei, ex_spec) in export_specs.iter().enumerate() {
+            let save_to = ex_spec
+                .get("save_to")
+                .or_else(|| ex_spec.get("output_path"))
+                .and_then(|x| x.as_str());
+            let fmt = match infer_format_from_spec(ex_spec, save_to, "webp") {
+                Ok(f) => f,
+                Err(msg) => {
+                    cleanup_on_err(created_inline, &sid_str);
+                    return bad("bad_request", &format!("exports[{ei}]: {msg}"));
+                }
+            };
+            let quality = ex_spec.get("quality").and_then(|x| x.as_u64()).unwrap_or(95).clamp(10, 100) as u8;
+            let size = ex_spec.get("size").and_then(|x| x.as_u64()).unwrap_or(1024).clamp(256, 2048) as u32;
+            let scale_mode = ex_spec.get("scale_mode").and_then(|x| x.as_str()).unwrap_or("1");
+            let with_ring = ex_spec.get("with_ring").and_then(|x| x.as_bool()).unwrap_or(true);
+
+            let composed = {
+                let s = arc.lock().unwrap();
+                compose(&s, size, scale_mode, with_ring)
+            };
+            let (img, used) = match composed {
+                Ok(iu) => iu,
+                Err(msg) => {
+                    cleanup_on_err(created_inline, &sid_str);
+                    return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "compose_error", &msg);
+                }
+            };
+            let out_dim = img.width();
+            let (bytes, mime) = match crate::imaging::save_image(&image::DynamicImage::ImageRgba8(img), &fmt, quality) {
+                Ok(bm) => bm,
+                Err(e) => {
+                    cleanup_on_err(created_inline, &sid_str);
+                    return agent_err(StatusCode::INTERNAL_SERVER_ERROR, "encode_error", &e.to_string());
+                }
+            };
+            if let Some(st_path) = save_to {
+                match save_bytes_to_target(&bytes, &fmt, st_path, "tokenatra-export") {
+                    Ok(saved) => {
+                        exports_out.push(json!({
+                            "path": saved,
+                            "format": fmt,
+                            "width": out_dim,
+                            "height": out_dim,
+                            "used_scale": used,
+                            "with_ring": with_ring,
+                        }));
+                    }
+                    Err(msg) => {
+                        cleanup_on_err(created_inline, &sid_str);
+                        return bad("io_error", &format!("exports[{ei}]: {msg}"));
+                    }
+                }
+            } else {
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                exports_out.push(json!({
+                    "format": fmt,
+                    "width": out_dim,
+                    "height": out_dim,
+                    "used_scale": used,
+                    "with_ring": with_ring,
+                    "data_url": format!("data:{mime};base64,{b64}"),
+                }));
+            }
+        }
+
+        // 6. Optional visual preview (regular, example, xray, and/or grid)
+        let mut preview_data_url: Option<String> = None;
+        let prev_spec_opt: Option<Value> = match v.get("preview") {
+            Some(Value::Bool(true)) => Some(json!({})),
+            Some(Value::Object(m)) => Some(Value::Object(m.clone())),
+            _ => None,
+        };
+        if let Some(ps) = prev_spec_opt {
+            let p_size = ps.get("size").and_then(|x| x.as_u64()).unwrap_or(512).clamp(64, 1024) as u32;
+            let p_xray = ps.get("xray").and_then(|x| x.as_bool()).unwrap_or(false);
+            let p_grid = ps.get("grid").and_then(|x| x.as_bool()).unwrap_or(false);
+            let p_ex = ps.get("example").and_then(|x| x.as_bool()).unwrap_or(false);
+            let p_guides = ps.get("guides").and_then(|x| x.as_bool()).unwrap_or(false);
+            let p_ex_scale = ps.get("example_scale").and_then(|x| x.as_u64()).unwrap_or(2).clamp(1, 3) as u32;
+            let p_ex_op = ps.get("example_opacity").and_then(|x| x.as_f64()).unwrap_or(0.65).clamp(0.1, 1.0) as f32;
+            let p_ring = ps.get("with_ring").and_then(|x| x.as_bool()).unwrap_or(true);
+            let def_sm = if p_xray || p_grid || p_ex { "2" } else { "1" };
+            let p_sm = ps.get("scale_mode").and_then(|x| x.as_str()).unwrap_or(def_sm);
+
+            let composed = {
+                let s = arc.lock().unwrap();
+                if p_xray {
+                    compose_xray(&s, p_size, p_sm, p_ring)
+                } else {
+                    compose(&s, p_size, p_sm, p_ring)
+                }
+            };
+            if let Ok((mut pimg, used)) = composed {
+                if p_ex {
+                    draw_example_overlay(&mut pimg, used, p_ex_scale, p_ex_op);
+                }
+                if p_guides {
+                    draw_preview_guides(&mut pimg, used);
+                }
+                if p_grid {
+                    draw_canvas_grid(&mut pimg, used);
+                }
+                if let Ok((bytes, _)) =
+                    crate::imaging::save_image(&image::DynamicImage::ImageRgba8(pimg), "webp", 90)
+                {
+                    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+                    preview_data_url = Some(format!("data:image/webp;base64,{b64}"));
+                }
+            }
+        }
+
+        let (stats, tr_json, ring_val, bg_rem) = {
+            let s = arc.lock().unwrap();
+            (
+                inspect_session(&s),
+                json!({
+                    "scale": s.scale,
+                    "rotation": s.rotation,
+                    "offset_x": s.offset_x,
+                    "offset_y": s.offset_y,
+                }),
+                s.ring.clone(),
+                s.bg_removed,
+            )
+        };
+
+        let close_after = v
+            .get("close_session")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(created_inline);
+        if close_after {
+            store_remove(&sid_str);
+        }
+
+        let mut out = json!({
+            "ok": true,
+            "session_id": sid_str,
+            "session_closed": close_after,
+            "bg_removed": bg_rem,
+            "bg_remove_ran": bg_remove_ran,
+            "ring": ring_val,
+            "transform": tr_json,
+            "exports": exports_out,
+            "mask": stats,
+        });
+        if let Some(po) = portrait_out {
+            out["portrait"] = po;
+        }
+        if let Some(pdu) = preview_data_url {
+            out["preview_data_url"] = Value::String(pdu);
+        }
+        ok_json(out)
     })
     .await
 }

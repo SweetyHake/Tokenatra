@@ -82,24 +82,31 @@ TOKENATRA STUDIO STYLE GUIDE (based on `example.png` at 2x scale)
      - `\"preset1\"`: standard pop-out mask — keeps the entire inner ring circle + the upper pop-out zone for the head/hat/hair, and erases everything outside the bottom and lower sides of the ring.
      - `\"preset2\"`: wide pop-out mask — keeps upper-left and upper-right pop-outs (great for shields, wings, raised weapons) while cutting the bottom below the ring rim.
      - `\"preset3\"`: narrow vertical column pop-out.
+   - **Custom Shapes (`tokenatra_edit_mask`)**:
+     Pass native `shapes: [...]` array (or legacy `shapes_json`). Both externally tagged (`{\"polygon\":{\"points\":[[x,y],...],\"feather\":4}}`) and internally tagged (`{\"type\":\"polygon\",\"points\":[[x,y],...]}`) objects are supported for `circle`, `rect`, `stroke`, and `polygon`.
    - **Manual Bottom Arc (for `subject.webp` cutouts without a ring, or full-body art)**:
      Call `tokenatra_edit_mask` (`target: \"canvas\"`, `protect: false`):
-       1) `op: \"erase\"`,   `shapes_json: '[{\"rect\":{\"x0\":-512,\"y0\":270,\"x1\":1536,\"y1\":1536}}]'`
-       2) `op: \"restore\"`, `shapes_json: '[{\"circle\":{\"cx\":512,\"cy\":270,\"r\":595}}]'`  (arc bottom at `y = 865`, matching the inner ring rim)
+       1) `op: \"erase\"`,   `shapes: [{\"rect\":{\"x0\":-512,\"y0\":270,\"x1\":1536,\"y1\":1536}}]`
+       2) `op: \"restore\"`, `shapes: [{\"circle\":{\"cx\":512,\"cy\":270,\"r\":595}}]`  (arc bottom at `y = 865`, matching the inner ring rim)
        3) `op: \"feather\"`, `px: 8`
+   - **X-Ray Mask Audit & Coordinate Grid (`tokenatra_preview`)**:
+     Call `tokenatra_preview({ session_id, xray: true, grid: true })` to inspect cut-away pixels as a hot-pink ghost over the ring, check `r_in = 343` / `r_out = 468` / `y = 564` markers, and read exact `-512..1536` `target: \"canvas\"` coordinates directly from the image!
 
-4. STEP-BY-STEP WORKFLOW:
-   1) `tokenatra_create_session({ image_path: \"...\" })` -> check `already_transparent`.
-   2) If `already_transparent == false`, call `tokenatra_remove_background({ session_id })`.
-   3) Call `tokenatra_set_transform` and `tokenatra_preview({ session_id, example: true })`.
-   4) Look at the returned image with the purple `example.png` overlay:
-      - Is the head inside the purple oval (\"Область головы\", between \"Макушка\" and \"Челюсть\")?
-      - Is the waist on the \"Пояс\" line?
-      Adjust `scale`, `offset_x`, `offset_y` (1-2 iterations) until the head fits the oval and the waist sits on \"Пояс\".
-   5) Apply mask (`tokenatra_apply_preset` with `\"preset1\"` or `\"preset2\"`, or custom `tokenatra_edit_mask`).
-   6) Export (`tokenatra_export`):
-      - For a **Token with Ring** where the head/hat/weapons pop out above the ring: use `with_ring: true, scale_mode: \"auto\"` (or `\"2\"`), `size: 1024`.
-      - For a **Subject cutout** (`subject.webp` in `STokens`, used by Foundry dynamic ring or series tokens): enable drop shadow (`{\"enabled\":true,\"angle\":135,\"distance\":7,\"blur\":3,\"opacity\":0.4}`) and export with `with_ring: false, scale_mode: \"2\", size: 1024, format: \"webp\"`.
+4. STEP-BY-STEP OR SINGLE-CALL PIPELINE WORKFLOW:
+   - **Single-Call Fast Path (`tokenatra_pipeline`)**:
+     Pass `image_path`, `remove_bg: \"auto\"`, `portrait: { save_to, size: 2048 }`, `transform: { scale, offset_x, offset_y }`, `preset: \"preset1\"`, optional `mask_ops`, `effects`, `export` (or `exports`), and `preview: { xray: true }` (`close_session: false` if you want to keep the session open for follow-up mask tweaks).
+   - **Interactive Step-by-Step**:
+     1) `tokenatra_create_session({ image_path: \"...\" })` -> check `already_transparent`.
+     2) If `already_transparent == false`, call `tokenatra_remove_background({ session_id })`.
+     3) Call `tokenatra_set_transform` and `tokenatra_preview({ session_id, example: true })`.
+     4) Look at the returned image with the purple `example.png` overlay:
+        - Is the head inside the purple oval (\"Область головы\", between \"Макушка\" and \"Подбородок\")?
+        - Is the waist on the \"Пояс\" line?
+        Adjust `scale`, `offset_x`, `offset_y` (1-2 iterations) until the head fits the oval and the waist sits on \"Пояс\".
+     5) Apply mask (`tokenatra_apply_preset` with `\"preset1\"` or `\"preset2\"`, or custom `tokenatra_edit_mask`), then verify with `tokenatra_preview({ session_id, xray: true, grid: true })`.
+     6) Export (`tokenatra_export`):
+        - For a **Token with Ring** where the head/hat/weapons pop out above the ring: use `with_ring: true, scale_mode: \"auto\"` (or `\"2\"`), `size: 1024`.
+        - For a **Subject cutout** (`subject.webp` in `STokens`, used by Foundry dynamic ring or series tokens): enable drop shadow (`{\"enabled\":true,\"angle\":135,\"distance\":7,\"blur\":3,\"opacity\":0.4}`) and export with `with_ring: false, scale_mode: \"2\", size: 1024, format: \"webp\"`.
 ";
 
 fn server_url() -> String {
@@ -183,7 +190,7 @@ fn tools_list() -> Value {
         },
         {
             "name": "tokenatra_edit_mask",
-            "description": "Edit visibility masks in 1024x1024 logical coords. Supports both GUI mask tools via `target`: \"canvas\" (Pink Mask, fixed in 1x token frame, default) or \"image\" (Blue Eraser, in source image coords, moves/scales with subject) or \"both\" (for reset). ops: erase, restore, apply_preset, invert, feather, grow, reset. shapes_json: [{\"circle\":{\"cx\":512,\"cy\":470,\"r\":395,\"feather\":8}}, {\"rect\":{\"x0\":0,\"y0\":470,\"x1\":1024,\"y1\":1024}}, {\"stroke\":{\"points\":[[200,800],[512,880],[824,800]],\"width\":60,\"soft\":true}}]. When `protect=true` (default), `erase` respects the ring inner circle protection mask so anything inside the ring is safe! Set `protect=false` to cut inside the ring.",
+            "description": "Edit visibility masks in 1024x1024 logical coords (`-512..1536` for 2x zone on `canvas`). Supports `target`: \"canvas\" (Pink Mask, fixed in 1x token frame, default), \"image\" (Blue Eraser, in source image coords, moves/scales with subject), or \"both\" (for reset). ops: erase, restore, apply_preset, invert, feather, grow, reset. Pass native `shapes` array (preferred) or `shapes_json`. Supported shapes (both `{\"polygon\":{...}}` and `{\"type\":\"polygon\",...}` accepted): circle `{cx, cy, r, feather?}`, rect `{x0, y0, x1, y1, feather?}`, stroke `{points:[[x,y],...], width?, soft?}`, polygon `{points:[[x,y],...], feather?}` (>=3 points). Invalid shapes return an explicit error. When `protect=true` (default), `erase` smoothly respects the anti-aliased ring inner circle protection mask.",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id", "op"],
@@ -198,9 +205,14 @@ fn tools_list() -> Value {
                         "type": "string",
                         "enum": ["erase", "restore", "apply_preset", "invert", "feather", "grow", "reset"]
                     },
+                    "shapes": {
+                        "type": "array",
+                        "items": { "type": "object" },
+                        "description": "Array of shapes (`circle`, `rect`, `stroke`, `polygon`) in 1024 logical coords (`-512..1536` on 2x canvas). Accepts `{\"rect\":{\"x0\":0,\"y0\":560,\"x1\":200,\"y1\":900}}` or `{\"type\":\"polygon\",\"points\":[[120,520],[210,540],[190,680]],\"feather\":4}`."
+                    },
                     "shapes_json": {
                         "type": "string",
-                        "description": "JSON array of shapes (circle / rect / stroke) in 0..1024 coords"
+                        "description": "Legacy JSON-encoded string of `shapes` array (kept for backward compatibility; prefer `shapes`)"
                     },
                     "preset": { "type": "string", "description": "Preset name for apply_preset (e.g. preset1, preset2, preset3)" },
                     "px": { "type": "number", "description": "Radius in px for feather / grow (e.g. 8)" },
@@ -252,12 +264,14 @@ fn tools_list() -> Value {
         },
         {
             "name": "tokenatra_set_effects",
-            "description": "Set drop shadow and color correction (just like the GUI accordions). shadow_json: {\"enabled\":true,\"angle\":135,\"distance\":7,\"blur\":3,\"opacity\":0.4}; color_json: {\"enabled\":true,\"saturation\":5,\"lightness\":-5,\"contrast\":0} (percent).",
+            "description": "Set drop shadow and color correction (just like the GUI accordions). Accepts object `shadow` / `color` or JSON strings `shadow_json` / `color_json`. Shadow: {\"enabled\":true,\"angle\":135,\"distance\":7,\"blur\":3,\"opacity\":0.4}; Color: {\"enabled\":true,\"saturation\":5,\"lightness\":-5,\"contrast\":0} (percent).",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id"],
                 "properties": {
                     "session_id": { "type": "string" },
+                    "shadow": { "type": "object", "description": "{\"enabled\":true,\"angle\":135,\"distance\":7,\"blur\":3,\"opacity\":0.4}" },
+                    "color": { "type": "object", "description": "{\"enabled\":true,\"saturation\":5,\"lightness\":-5,\"contrast\":0}" },
                     "shadow_json": { "type": "string" },
                     "color_json": { "type": "string" }
                 }
@@ -297,7 +311,7 @@ fn tools_list() -> Value {
         },
         {
             "name": "tokenatra_inspect",
-            "description": "Inspect current state: `source_info` (width, height, opaque_pct, already_transparent, fit1024_bbox), composed 1x `bbox`, `coverage_pct`, 3x3 grid, `warnings`, and history status. `include_image=true` also returns a visual preview (with optional `example=true` overlay or `guides=true`).",
+            "description": "Inspect current state: `source_info` (width, height, opaque_pct, already_transparent, fit1024_bbox), composed 1x `bbox`, `coverage_pct`, 3x3 grid, `warnings`, and history status. `include_image=true` also returns a visual preview (supports `xray=true`, `grid=true`, `example=true`, `guides=true`).",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id"],
@@ -305,7 +319,10 @@ fn tools_list() -> Value {
                     "session_id": { "type": "string" },
                     "include_image": { "type": "boolean" },
                     "preview_size": { "type": "number", "description": "64..1024, default 512" },
-                    "example": { "type": "boolean", "description": "Overlay example.png style template (\"Макушка\", \"Область головы\", \"Челюсть\", \"Пояс\")" },
+                    "scale_mode": { "type": "string", "enum": ["auto", "1", "2", "3"] },
+                    "xray": { "type": "boolean", "description": "Render X-Ray mask diagnostic view (teal checkerboard + hot-pink cut ghost + r_in=343 / r_out=468 / y=564 markers)" },
+                    "grid": { "type": "boolean", "description": "Overlay labeled `target: \"canvas\"` coordinate grid (`-512..1536` at 2x)" },
+                    "example": { "type": "boolean", "description": "Overlay example.png style template (\"Макушка\", \"Область головы\", \"Подбородок\", \"Пояс\")" },
                     "example_opacity": { "type": "number", "description": "0.1..1.0, default 0.65" },
                     "guides": { "type": "boolean", "description": "Draw alignment guides" }
                 }
@@ -313,7 +330,7 @@ fn tools_list() -> Value {
         },
         {
             "name": "tokenatra_preview",
-            "description": "Look at the current token (like `look` in Blender MCP). Pass `example=true` to overlay the `example.png` style guide (\"Макушка\", \"Область головы\", \"Челюсть\", \"Пояс\") on a 2x canvas so you can visually verify that the head fits inside the purple oval and the waist aligns with \"Пояс\"!",
+            "description": "Look at the current token. Supports `example=true` (purple `example.png` framing template), `xray=true` (mask X-Ray audit: teal checkerboard + hot-pink ghost of cut pixels + `r_in=343`, `r_out=468`, `y=564` markers), and `grid=true` (labeled `-512..1536` coordinate grid for `tokenatra_edit_mask`). Defaults to `scale_mode=\"2\"` whenever `example`, `xray`, or `grid` is enabled!",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id"],
@@ -322,7 +339,9 @@ fn tools_list() -> Value {
                     "size": { "type": "number", "description": "64..1024, default 512" },
                     "scale_mode": { "type": "string", "enum": ["auto", "1", "2", "3"] },
                     "with_ring": { "type": "boolean", "description": "default true" },
-                    "example": { "type": "boolean", "description": "Overlay example.png style template (\"Макушка\", \"Область головы\", \"Челюсть\", \"Пояс\")" },
+                    "xray": { "type": "boolean", "description": "Render X-Ray mask diagnostic view (hot-pink cut ghost + ring rim markers)" },
+                    "grid": { "type": "boolean", "description": "Overlay labeled `target: \"canvas\"` coordinate grid (`-512..1536` at 2x, `0..1024` at 1x)" },
+                    "example": { "type": "boolean", "description": "Overlay example.png style template (\"Макушка\", \"Область головы\", \"Подбородок\", \"Пояс\")" },
                     "example_scale": { "type": "number", "description": "1, 2, or 3 (default 2, matching the GUI)" },
                     "example_opacity": { "type": "number", "description": "0.1..1.0, default 0.65" },
                     "guides": { "type": "boolean", "description": "Draw alignment guides on the preview image" }
@@ -345,6 +364,60 @@ fn tools_list() -> Value {
                     "save_to": {
                         "type": "string",
                         "description": "Destination file path (e.g. \"C:/.../token.png\") or existing directory path"
+                    }
+                }
+            }
+        },
+        {
+            "name": "tokenatra_pipeline",
+            "description": "Execute a complete multi-step token & portrait workflow in a SINGLE call: open `image_path` (or reuse `session_id`), smart `remove_bg` (`\"auto\"` only runs ONNX when `opaque_pct >= 92`, preventing double-matting), optional `portrait` save, `transform`, `preset`, `mask_ops` list, `effects`, one or more `export`/`exports`, optional `preview` (e.g. `{\"xray\":true,\"grid\":true}`), and optional `close_session` (defaults to `true` when creating a new session, `false` when reusing `session_id`; set `close_session: false` to keep the session open for follow-up mask tweaks after inspecting the X-Ray!).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string", "description": "Existing session ID (omit when opening `image_path` / `image_b64`)" },
+                    "image_path": { "type": "string", "description": "Local source image path" },
+                    "image_b64": { "type": "string", "description": "Base64 image or local file path" },
+                    "ring": { "type": "string", "description": "Ring name (default \"rune-steel\", or \"none\" to disable)" },
+                    "remove_bg": {
+                        "type": "string",
+                        "enum": ["auto", "always", "never"],
+                        "description": "Default \"auto\" for new images (runs BEN2 ONNX only if opaque_pct >= 92%), \"never\" when reusing session_id"
+                    },
+                    "edge_blur": { "type": "number", "description": "ONNX edge blur 0..10, default 1" },
+                    "portrait": {
+                        "type": "object",
+                        "description": "Optional square portrait export: { save_to, variant?: \"cutout\"|\"original\", size?: 2048, format?: \"webp\", quality?: 95, scale?, offset_x?, offset_y?, rotation? }"
+                    },
+                    "transform": {
+                        "type": "object",
+                        "description": "{ scale, offset_x, offset_y, rotation?, fit_zone? }"
+                    },
+                    "preset": { "type": "string", "description": "Mask preset name, e.g. \"preset1\" or \"preset2\"" },
+                    "mask_ops": {
+                        "type": "array",
+                        "items": { "type": "object" },
+                        "description": "Ordered mask edits applied after `preset`: [{ op, target?, protect?, shapes?, px?, preset? }]"
+                    },
+                    "effects": {
+                        "type": "object",
+                        "description": "{ shadow?: { enabled, angle, distance, blur, opacity }, color?: { enabled, saturation, lightness, contrast } }"
+                    },
+                    "export": {
+                        "type": "object",
+                        "description": "Single token/subject export: { save_to, format?: \"webp\", quality?: 95, size?: 1024, scale_mode?: \"2\", with_ring?: false }"
+                    },
+                    "exports": {
+                        "type": "array",
+                        "items": { "type": "object" },
+                        "description": "Multiple exports in one pass (e.g. both ringed token and ringless subject)"
+                    },
+                    "preview": {
+                        "type": "object",
+                        "description": "Attach a visual preview image to the response: { xray?: true, grid?: false, example?: false, guides?: false, size?: 512, scale_mode?: \"2\", with_ring?: true }"
+                    },
+                    "close_session": {
+                        "type": "boolean",
+                        "description": "Close session after pipeline finishes (default true when opened from image_path, false when reusing session_id)"
                     }
                 }
             }
@@ -975,6 +1048,12 @@ fn call_tool(name: &str, args: &Value) -> Result<ToolOutput, McpError> {
             if let Some(sz) = args.get("preview_size").and_then(|v| v.as_i64()) {
                 qs.push(format!("preview_size={sz}"));
             }
+            if args.get("xray").and_then(|v| v.as_bool()).unwrap_or(false) {
+                qs.push("xray=1".into());
+            }
+            if args.get("grid").and_then(|v| v.as_bool()).unwrap_or(false) {
+                qs.push("grid=1".into());
+            }
             if args.get("example").and_then(|v| v.as_bool()).unwrap_or(false) {
                 qs.push("example=1".into());
             }
@@ -1006,16 +1085,24 @@ fn call_tool(name: &str, args: &Value) -> Result<ToolOutput, McpError> {
             let sid = req_sid(args)?;
             let size = args.get("size").and_then(|v| v.as_i64()).unwrap_or(512);
             let example = args.get("example").and_then(|v| v.as_bool()).unwrap_or(false);
+            let xray = args.get("xray").and_then(|v| v.as_bool()).unwrap_or(false);
+            let grid = args.get("grid").and_then(|v| v.as_bool()).unwrap_or(false);
             let mut qs = vec![format!("size={size}")];
             if let Some(sm) = args.get("scale_mode").and_then(|v| v.as_str()) {
                 qs.push(format!("scale_mode={sm}"));
-            } else if example {
+            } else if example || xray || grid {
                 qs.push("scale_mode=2".into());
             } else {
                 qs.push("scale_mode=1".into());
             }
             if let Some(wr) = args.get("with_ring").and_then(|v| v.as_bool()) {
                 qs.push(format!("with_ring={}", if wr { "1" } else { "0" }));
+            }
+            if xray {
+                qs.push("xray=1".into());
+            }
+            if grid {
+                qs.push("grid=1".into());
             }
             if example {
                 qs.push("example=1".into());
@@ -1087,6 +1174,84 @@ fn call_tool(name: &str, args: &Value) -> Result<ToolOutput, McpError> {
             Ok(ToolOutput {
                 text: Some(format!("Saved: {path}")),
                 image: Some(json!({ "data": b64, "mimeType": mime_for(&fmt) })),
+            })
+        }
+        "tokenatra_pipeline" => {
+            let Some(args_obj) = args.as_object() else {
+                return Err(McpError::Tool("pipeline arguments must be a JSON object".into()));
+            };
+            let mut body = args_obj.clone();
+
+            // Resolve input image path relative to caller's cwd if given
+            if let Some(p_str) = body
+                .get("image_path")
+                .or_else(|| body.get("path"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+            {
+                let p = Path::new(&p_str);
+                if !p.is_file() {
+                    return Err(McpError::Tool(format!("image_path does not exist: {p_str}")));
+                }
+                body.insert("image_path".into(), Value::String(resolve_clean_path(p)));
+            } else if let Some(b64_or_path) = body
+                .get("image_b64")
+                .or_else(|| body.get("image"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+            {
+                if looks_like_file_path(&b64_or_path) {
+                    let p = Path::new(&b64_or_path);
+                    if !p.is_file() {
+                        return Err(McpError::Tool(format!("file does not exist: {b64_or_path}")));
+                    }
+                    body.remove("image_b64");
+                    body.insert("image_path".into(), Value::String(resolve_clean_path(p)));
+                } else {
+                    body.insert("image".into(), Value::String(b64_or_path));
+                }
+            }
+
+            // Normalize relative `save_to` / `output_path` inside `portrait`, `export`, and `exports`
+            let normalize_save_path = |obj: &mut serde_json::Map<String, Value>| {
+                for key in ["save_to", "output_path"] {
+                    if let Some(raw) = obj
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                    {
+                        obj.insert(key.into(), Value::String(resolve_clean_path(Path::new(&raw))));
+                    }
+                }
+            };
+            if let Some(p_obj) = body.get_mut("portrait").and_then(|v| v.as_object_mut()) {
+                normalize_save_path(p_obj);
+            }
+            if let Some(ex_obj) = body.get_mut("export").and_then(|v| v.as_object_mut()) {
+                normalize_save_path(ex_obj);
+            }
+            if let Some(ex_arr) = body.get_mut("exports").and_then(|v| v.as_array_mut()) {
+                for item in ex_arr {
+                    if let Some(ex_obj) = item.as_object_mut() {
+                        normalize_save_path(ex_obj);
+                    }
+                }
+            }
+
+            let mut res = http_call_json("POST", "/agent/v1/pipeline", Some(&Value::Object(body)))?;
+            let image_block = res
+                .as_object_mut()
+                .and_then(|obj| obj.remove("preview_data_url"))
+                .and_then(|v| v.as_str().map(data_url_block));
+            Ok(ToolOutput {
+                text: Some(serde_json::to_string_pretty(&res).unwrap_or_default()),
+                image: image_block,
             })
         }
         "tokenatra_close_session" => {
