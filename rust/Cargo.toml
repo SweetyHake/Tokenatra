@@ -1,6 +1,6 @@
 [package]
 name = "tokenatra"
-version = "26.5.2"
+version = "26.5.3"
 edition = "2024"
 description = "Tokenatra: token editor & background remover"
 default-run = "tokenatra"

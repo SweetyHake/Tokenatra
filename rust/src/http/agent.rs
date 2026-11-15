@@ -706,34 +706,40 @@ fn fill_polygon_aa(mask: &mut GrayImage, pts: &[(f32, f32)], erase: bool, feathe
                     j = i;
                 }
                 nodes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                for pair in nodes.chunks_exact(2) {
-                    let xa = pair[0].floor().max(0.0) as usize;
-                    let xb = pair[1].ceil().min(mw as f32) as usize;
+                let mut idx = 0;
+                while idx + 1 < nodes.len() {
+                    let x0 = nodes[idx];
+                    let x1 = nodes[idx + 1];
+                    idx += 2;
+                    let xa = x0.floor().max(0.0) as usize;
+                    let xb = x1.ceil().min(mw as f32).min(row_cov.len() as f32) as usize;
                     if xa < xb {
                         min_xi = min_xi.min(xa);
                         max_xi = max_xi.max(xb);
-                        for x in xa..xb {
-                            let xc = x as f32 + 0.5;
-                            if xc >= pair[0] && xc <= pair[1] {
-                                row_cov[x] += 1;
+                        for (x, cov) in row_cov[xa..xb].iter_mut().enumerate() {
+                            let xc = (xa + x) as f32 + 0.5;
+                            if xc >= x0 && xc <= x1 {
+                                *cov += 1;
                             }
                         }
                     }
                 }
             }
-            if min_xi < max_xi {
-                for x in min_xi..max_xi.min(mw as usize) {
-                    let c = row_cov[x];
+            let end_xi = max_xi.min(mw as usize).min(row_cov.len());
+            if min_xi < end_xi {
+                for (dx, cov) in row_cov[min_xi..end_xi].iter_mut().enumerate() {
+                    let c = *cov;
                     if c > 0 {
-                        row_cov[x] = 0;
+                        *cov = 0;
+                        let x = (min_xi + dx) as u32;
                         let strength = c as f32 * 0.25;
-                        let cur = mask.get_pixel(x as u32, y as u32).0[0] as f32;
+                        let cur = mask.get_pixel(x, y as u32).0[0] as f32;
                         let next = if erase {
                             cur * (1.0 - strength)
                         } else {
                             cur + (255.0 - cur) * strength
                         };
-                        mask.put_pixel(x as u32, y as u32, Luma([next.round().clamp(0.0, 255.0) as u8]));
+                        mask.put_pixel(x, y as u32, Luma([next.round().clamp(0.0, 255.0) as u8]));
                     }
                 }
             }
@@ -1495,14 +1501,14 @@ fn compose_xray(
         _ => 2,
     };
     let final_size = size * used;
-    let crop = ((s3 - final_size) / 2) as u32;
+    let crop = (s3 - final_size) / 2;
     let fg = image::imageops::crop_imm(&canvas, crop, crop, final_size, final_size).to_image();
 
     // Composite over crisp teal checkerboard
     let tile = (final_size / 32).max(8);
     let mut out = RgbaImage::new(final_size, final_size);
     for (x, y, p) in out.enumerate_pixels_mut() {
-        let dark = ((x / tile) + (y / tile)) % 2 == 0;
+        let dark = (((x / tile) + (y / tile)) & 1) == 0;
         *p = if dark {
             Rgba([17, 45, 43, 255])
         } else {

@@ -1,5 +1,5 @@
 // App constants.
-pub const VERSION: &str = "26.5.2";
+pub const VERSION: &str = "26.5.3";
 pub const APP_NAME: &str = "Tokenatra";
 pub const GITHUB_REPO: &str = "SweetyHake/Tokenatra";
 pub const PORT: u16 = 7878;

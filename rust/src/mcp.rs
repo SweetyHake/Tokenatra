@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_VERSION: &str = "2025-06-18";
 const HTTP_TIMEOUT_SECS: u64 = 180;
-const MCP_SERVER_VERSION: &str = "26.5.2";
+const MCP_SERVER_VERSION: &str = "26.5.3";
 
 const INSTRUCTIONS: &str = "\
 Use tools from this server through `execute` under `tools[\"tokenatra\"]`.

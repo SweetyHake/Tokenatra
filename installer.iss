@@ -5,7 +5,7 @@
 #define MyAppName "Tokenatra"
 #ifndef MyAppVersion
 ; Fallback: CI передаёт версию через /DMyAppVersion (from rust/src/consts.rs VERSION)
-#define MyAppVersion "26.5.2"
+#define MyAppVersion "26.5.3"
 #endif
 #define MyAppPublisher "SweetyHake"
 #define MyAppURL "https://github.com/SweetyHake/Tokenatra"
@@ -115,15 +115,30 @@ begin
     MigrateFromPython;
 end;
 
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  R1, R2: Integer;
+begin
+  Result := '';
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM {#MyAppExeName}',
+    '', SW_HIDE, ewWaitUntilTerminated, R1);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM TokenatraMCP.exe',
+    '', SW_HIDE, ewWaitUntilTerminated, R2);
+  if (R1 = 0) or (R2 = 0) then
+    Sleep(800);
+end;
+
 function InitializeUninstall(): Boolean;
 var
-  ResultCode: Integer;
+  R1, R2: Integer;
 begin
   Result := True;
-  // При деинсталляции молча убиваем запущенное приложение (0 = успешно).
+  // При деинсталляции молча убиваем запущенное приложение и MCP-сервер (0 = успешно).
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM {#MyAppExeName}',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if ResultCode = 0 then
+    '', SW_HIDE, ewWaitUntilTerminated, R1);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM TokenatraMCP.exe',
+    '', SW_HIDE, ewWaitUntilTerminated, R2);
+  if (R1 = 0) or (R2 = 0) then
     Sleep(1000);
 end;
 

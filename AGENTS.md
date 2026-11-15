@@ -41,20 +41,21 @@ JSON поверх HTTP, только localhost, заголовок `X-Tokenatra-
 
 ```
 GET  /agent/v1/manifest  /assets  /tools_schema
+POST /agent/v1/pipeline                         single-call batch pipeline (remove_bg, portrait, transform, preset, mask_ops, effects, export(s), preview)
 POST /agent/v1/sessions                         {image_path | image: base64|data_url, ring}
 GET/DELETE /agent/v1/sessions/{id}
 POST /agent/v1/sessions/{id}/remove_bg          {edge_blur, showing_original}
 POST /agent/v1/sessions/{id}/mask               {target: canvas|image|both, op, shapes|preset|px, protect}
-      op: erase|restore (shapes rect/circle/stroke), apply_preset, invert, feather, grow, reset
+      op: erase|restore (shapes rect/circle/stroke/polygon), apply_preset, invert, feather, grow, reset
 POST /agent/v1/sessions/{id}/transform          {scale, rotation, offset_x, offset_y, fit_zone}
 POST /agent/v1/sessions/{id}/ring               {name|null}
 POST /agent/v1/sessions/{id}/effects            {shadow, color}
 POST /agent/v1/sessions/{id}/history            {action: undo|redo}
-POST /agent/v1/sessions/{id}/portrait           {variant, scale, rotation, offset_x, offset_y, size, format, quality}
+POST /agent/v1/sessions/{id}/portrait           {variant, scale, rotation, offset_x, offset_y, size, format, quality, output_path}
 POST /agent/v1/sessions/{id}/save_preset        {name}
-GET  /agent/v1/sessions/{id}/preview?size=512&scale_mode=1&guides=1
-GET  /agent/v1/sessions/{id}/inspect?include_image=1&guides=1
-POST /agent/v1/sessions/{id}/export             {format, quality, size, scale_mode, with_ring}
+GET  /agent/v1/sessions/{id}/preview?size=512&scale_mode=1&guides=1&example=1&xray=1&grid=1
+GET  /agent/v1/sessions/{id}/inspect?include_image=1&guides=1&example=1&xray=1&grid=1
+POST /agent/v1/sessions/{id}/export             {format, quality, size, scale_mode, with_ring, output_path}
 ```
 
 Лимиты: 8 сессий (LRU), TTL 30 мин, 200 операций/сессию, body ≤ 15 МБ,
