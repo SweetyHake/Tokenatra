@@ -13,6 +13,7 @@ pub enum GuiCommand {
     Quit,
     Show,
     ModelStateChanged(bool),
+    EvalJs(String),
     /// Window drag by header (Linux/macOS; Windows uses a Win32 hook).
     #[cfg_attr(windows, allow(dead_code))]
     DragWindow,

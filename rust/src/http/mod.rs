@@ -438,6 +438,8 @@ pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
         .route("/assets", get(agent::assets))
         .route("/tools_schema", get(agent::tools_schema))
         .route("/pipeline", post(agent::op_pipeline))
+        .route("/qa_sheet", post(agent::op_qa_sheet))
+        .route("/gui_sync", post(agent::op_gui_sync))
         .route("/sessions", post(agent::create_session))
         .route(
             "/sessions/{sid}",
@@ -454,6 +456,10 @@ pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
         .route("/sessions/{sid}/preview", get(agent::op_preview))
         .route("/sessions/{sid}/inspect", get(agent::op_inspect))
         .route("/sessions/{sid}/export", post(agent::op_export))
+        .route("/sessions/{sid}/sync_state", get(agent::op_sync_state))
+        .route("/sessions/{sid}/layer/{layer}", get(agent::op_sync_layer))
+        .route("/sessions/{sid}/gui_update", post(agent::op_gui_update))
+        .route("/sessions/{sid}/gui_mask", post(agent::op_gui_mask))
         .layer(axum::extract::DefaultBodyLimit::max(15 * 1024 * 1024))
         .with_state(state.clone());
 

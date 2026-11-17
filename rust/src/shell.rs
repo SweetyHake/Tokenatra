@@ -320,6 +320,9 @@ fn handle_gui_command(
                 t.set_model_loaded(loaded);
             }
         }
+        GuiCommand::EvalJs(script) => {
+            let _ = webview.evaluate_script(&script);
+        }
         GuiCommand::ToggleFullscreen => {
             // Linux/macOS: native tao borderless works fine.
             #[cfg(windows)]

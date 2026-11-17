@@ -2096,6 +2096,9 @@ var TokenCanvas = {
 
     loadImage: function(file, filePath) {
         var self = this;
+        if (window.TokenAgentSync && !TokenAgentSync.isApplying()) {
+            TokenAgentSync.detachLocal();
+        }
 
         urlManager.revoke('userImage');
         state.userImageUrl = null;

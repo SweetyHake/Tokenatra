@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_VERSION: &str = "2025-06-18";
 const HTTP_TIMEOUT_SECS: u64 = 180;
-const MCP_SERVER_VERSION: &str = "26.5.3";
+pub const MCP_SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const INSTRUCTIONS: &str = "\
 Use tools from this server through `execute` under `tools[\"tokenatra\"]`.
@@ -20,9 +20,11 @@ How a human creates a token in Tokenatra (follow the `example.png` style guide):
 1. Open the image: call `tokenatra_create_session({ image_path: \"C:/path/to/art.webp\" })`.
    It returns `session_id` and `source_info` (`width`, `height`, `opaque_pct`, `already_transparent`, `fit1024_bbox`).
    The default ring `\"rune-steel\"` and ring protection mask are already active, just like in the GUI.
+   If the Tokenatra desktop window is open, changes also sync live onto its canvas (`tokenatra_gui_sync` to push/detach).
 2. Remove background ONLY if needed: check `already_transparent` (or `opaque_pct < 92`).
    - If the background is opaque (`already_transparent: false`), call `tokenatra_remove_background({ session_id })`.
    - NEVER call `tokenatra_remove_background` on an already transparent cutout/subject — re-matting eats fine edges and glow.
+   - Check 1:1 eye gaze anytime with `tokenatra_preview({ session_id, eyes: true })` (or batch `tokenatra_qa_sheet({ mode: \"eyes\", ... })`).
 3. Frame the character (`tokenatra_set_transform`) using the `example.png` overlay (`tokenatra_preview({ session_id, example: true })`):
    In the GUI, the human turns on the \"Пример\" (`example.png`) overlay (at `2x` scale) and aligns the character to its three purple markers:
    - **Область головы (Макушка .. Подбородок)**: the character's head (without tall hats or horns) must fit inside the purple oval!
@@ -33,8 +35,12 @@ How a human creates a token in Tokenatra (follow the `example.png` style guide):
    - Call `tokenatra_apply_preset({ session_id, preset: \"preset1\" })` (or `\"preset2\"` for wide shields/wings/weapons).
      Because `canvas_mask` covers the full `3x` canvas (`-1024..2048`), `preset1` keeps the head/hat/weapons popping out above the ring (`y < 0`) while cleanly erasing everything outside the bottom/lower sides of the ring!
    - Or use `tokenatra_edit_mask` (`target: \"canvas\"` = Pink Mask fixed to ring; `target: \"image\"` = Blue Eraser attached to character).
-5. Look at your work with the Example overlay (`tokenatra_preview({ session_id, example: true })`):
-   Pass `example: true` to composite `example.png` (\"Макушка\", \"Область головы\", \"Подбородок\", \"Талия / Пояс\") directly over the preview at `2x` scale and return that image to you! Adjust `scale`, `offset_x`, `offset_y` until the head sits right inside the purple oval and the waist hits \"Талия / Пояс\".
+   - Check `mask.qa` returned by `tokenatra_inspect` / `tokenatra_pipeline` — the built-in mask linter automatically detects `detached_islands` (severed hands/weapons), `bottom_ring_gap`, and `step_564`!
+5. Look at your work (`tokenatra_preview`):
+   - Default `size` is `768`, producing a crisp `1536x1536` `2x` preview (exact 2x2 Gemini vision tile fit).
+   - Pass `example: true` to verify framing against \"Макушка\", \"Область головы\", \"Подбородок\", \"Пояс\".
+   - Pass `xray: true, grid: true` to inspect cut-away pixels (hot-pink ghost) with coordinates, or pass `crop: [x0, y0, x1, y1]` (e.g. `[100, 420, 460, 780]`) for a zoomed macro-crop with fine `10 px` grid lines around hands, guards, or `y = 564` seams!
+   - For multi-token packs, use `tokenatra_qa_sheet` (`mode: \"xray\"` / `\"eyes\"` / `\"showcase\"`) to audit 4 or 16 tokens per image.
 6. Export (`tokenatra_export`):
    - Use `scale_mode: \"auto\"` (or `\"2\"` / `\"1\"`): if the head/hat/weapons pop out beyond the 1x ring (`y < 0`), `\"auto\"` exports a `2x` (or `3x`) canvas so the pop-out head/hat/shield is NEVER clipped at the border!
    - If you want a `subject.webp` (cutout without ring, like `Gambit/subject.webp`), enable drop shadow (`tokenatra_set_effects`) and export with `with_ring: false, scale_mode: \"2\", size: 1024` (which produces a `2048x2048` subject).
@@ -89,8 +95,12 @@ TOKENATRA STUDIO STYLE GUIDE (based on `example.png` at 2x scale)
        1) `op: \"erase\"`,   `shapes: [{\"rect\":{\"x0\":-512,\"y0\":270,\"x1\":1536,\"y1\":1536}}]`
        2) `op: \"restore\"`, `shapes: [{\"circle\":{\"cx\":512,\"cy\":270,\"r\":595}}]`  (arc bottom at `y = 865`, matching the inner ring rim)
        3) `op: \"feather\"`, `px: 8`
-   - **X-Ray Mask Audit & Coordinate Grid (`tokenatra_preview`)**:
-     Call `tokenatra_preview({ session_id, xray: true, grid: true })` to inspect cut-away pixels as a hot-pink ghost over the ring, check `r_in = 343` / `r_out = 468` / `y = 564` markers, and read exact `-512..1536` `target: \"canvas\"` coordinates directly from the image!
+   - **X-Ray Mask Audit, Macro Crop, Eye Gaze & Auto-Linter**:
+     - `tokenatra_preview({ session_id, xray: true, grid: true })` returns a `1536x1536` (`size=768` at 2x) X-Ray view with hot-pink cut ghost, 2px `r_in=343` / `r_out=468` / `y=564` markers, and crisp `5x7` coordinate grid.
+     - Pass `crop: [x0, y0, x1, y1]` (e.g. `[120, 460, 480, 820]`) with `xray: true, grid: true` to zoom into a specific hand/weapon/seam with `10 px` grid lines!
+     - Pass `eyes: true` to inspect 1:1 full-resolution eye gaze directly from the source art.
+     - `mask.qa` (returned by `tokenatra_inspect` and `tokenatra_pipeline`) automatically checks `detached_islands`, `bottom_ring_gap`, and `step_564`.
+     - Use `tokenatra_qa_sheet` (`mode: \"xray\" | \"eyes\" | \"showcase\"`) for 4-up / 16-up batch QA across sessions or directories.
 
 4. STEP-BY-STEP OR SINGLE-CALL PIPELINE WORKFLOW:
    - **Single-Call Fast Path (`tokenatra_pipeline`)**:
@@ -103,7 +113,7 @@ TOKENATRA STUDIO STYLE GUIDE (based on `example.png` at 2x scale)
         - Is the head inside the purple oval (\"Область головы\", between \"Макушка\" and \"Подбородок\")?
         - Is the waist on the \"Пояс\" line?
         Adjust `scale`, `offset_x`, `offset_y` (1-2 iterations) until the head fits the oval and the waist sits on \"Пояс\".
-     5) Apply mask (`tokenatra_apply_preset` with `\"preset1\"` or `\"preset2\"`, or custom `tokenatra_edit_mask`), then verify with `tokenatra_preview({ session_id, xray: true, grid: true })`.
+     5) Apply mask (`tokenatra_apply_preset` with `\"preset1\"` or `\"preset2\"`, or custom `tokenatra_edit_mask`), then verify with `tokenatra_preview({ session_id, xray: true, grid: true })` (plus `crop` for tight weapon/hand details) and `mask.qa.clean`.
      6) Export (`tokenatra_export`):
         - For a **Token with Ring** where the head/hat/weapons pop out above the ring: use `with_ring: true, scale_mode: \"auto\"` (or `\"2\"`), `size: 1024`.
         - For a **Subject cutout** (`subject.webp` in `STokens`, used by Foundry dynamic ring or series tokens): enable drop shadow (`{\"enabled\":true,\"angle\":135,\"distance\":7,\"blur\":3,\"opacity\":0.4}`) and export with `with_ring: false, scale_mode: \"2\", size: 1024, format: \"webp\"`.
@@ -168,6 +178,10 @@ fn tools_list() -> Value {
                     "ring": {
                         "type": "string",
                         "description": "Initial ring name (default \"rune-steel\", pass \"\" or \"none\" for no ring)"
+                    },
+                    "live_sync": {
+                        "type": "boolean",
+                        "description": "Live-sync changes into the open Tokenatra GUI window (default true)"
                     }
                 }
             }
@@ -311,17 +325,20 @@ fn tools_list() -> Value {
         },
         {
             "name": "tokenatra_inspect",
-            "description": "Inspect current state: `source_info` (width, height, opaque_pct, already_transparent, fit1024_bbox), composed 1x `bbox`, `coverage_pct`, 3x3 grid, `warnings`, and history status. `include_image=true` also returns a visual preview (supports `xray=true`, `grid=true`, `example=true`, `guides=true`).",
+            "description": "Inspect current state: `source_info` (width, height, opaque_pct, already_transparent, fit1024_bbox), composed 1x `bbox`, `coverage_pct`, 3x3 grid, `warnings`, automatic mask QA linter `qa` (`clean`, `detached_islands`, `bottom_ring_gap`, `step_564`), and history status. `include_image=true` also returns a visual preview (supports `xray=true`, `grid=true`, `grid_step`, `crop`, `eyes`, `example=true`, `guides=true`).",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id"],
                 "properties": {
                     "session_id": { "type": "string" },
                     "include_image": { "type": "boolean" },
-                    "preview_size": { "type": "number", "description": "64..1024, default 512" },
+                    "preview_size": { "type": "number", "description": "64..1024, default 768 (1536x1536 at 2x)" },
                     "scale_mode": { "type": "string", "enum": ["auto", "1", "2", "3"] },
-                    "xray": { "type": "boolean", "description": "Render X-Ray mask diagnostic view (teal checkerboard + hot-pink cut ghost + r_in=343 / r_out=468 / y=564 markers)" },
+                    "xray": { "type": "boolean", "description": "Render X-Ray mask diagnostic view (teal checkerboard + hot-pink cut ghost + 2px r_in=343 / r_out=468 / y=564 markers)" },
                     "grid": { "type": "boolean", "description": "Overlay labeled `target: \"canvas\"` coordinate grid (`-512..1536` at 2x)" },
+                    "grid_step": { "type": "number", "description": "Minor grid spacing in logical px (5..200; auto-picks 10 px on tight crops)" },
+                    "crop": { "description": "Logical 1x viewport crop `[x0, y0, x1, y1]` or `\"x0,y0,x1,y1\"` for macro inspection" },
+                    "eyes": { "type": "boolean", "description": "Return a 1:1 full-resolution eye-gaze crop from the source portrait" },
                     "example": { "type": "boolean", "description": "Overlay example.png style template (\"Макушка\", \"Область головы\", \"Подбородок\", \"Пояс\")" },
                     "example_opacity": { "type": "number", "description": "0.1..1.0, default 0.65" },
                     "guides": { "type": "boolean", "description": "Draw alignment guides" }
@@ -330,17 +347,20 @@ fn tools_list() -> Value {
         },
         {
             "name": "tokenatra_preview",
-            "description": "Look at the current token. Supports `example=true` (purple `example.png` framing template), `xray=true` (mask X-Ray audit: teal checkerboard + hot-pink ghost of cut pixels + `r_in=343`, `r_out=468`, `y=564` markers), and `grid=true` (labeled `-512..1536` coordinate grid for `tokenatra_edit_mask`). Defaults to `scale_mode=\"2\"` whenever `example`, `xray`, or `grid` is enabled!",
+            "description": "Look at the current token. Default `size=768` (`1536x1536` at 2x, matching native 2x2 vision tiles). Supports `example=true`, `xray=true` (hot-pink ghost + 2px rim markers), `grid=true` (crisp 5x7 coordinate grid), `crop: [x0, y0, x1, y1]` (zoomed macro view with 10px grid), and `eyes=true` (1:1 eye-gaze crop). Defaults to `scale_mode=\"2\"` whenever `example`, `xray`, or `grid` is enabled.",
             "inputSchema": {
                 "type": "object",
                 "required": ["session_id"],
                 "properties": {
                     "session_id": { "type": "string" },
-                    "size": { "type": "number", "description": "64..1024, default 512" },
+                    "size": { "type": "number", "description": "64..1024, default 768 (or 1024 max side for `crop`)" },
                     "scale_mode": { "type": "string", "enum": ["auto", "1", "2", "3"] },
                     "with_ring": { "type": "boolean", "description": "default true" },
                     "xray": { "type": "boolean", "description": "Render X-Ray mask diagnostic view (hot-pink cut ghost + ring rim markers)" },
                     "grid": { "type": "boolean", "description": "Overlay labeled `target: \"canvas\"` coordinate grid (`-512..1536` at 2x, `0..1024` at 1x)" },
+                    "grid_step": { "type": "number", "description": "Minor grid spacing in logical px (5..200; auto 10px on tight crops)" },
+                    "crop": { "description": "Logical 1x viewport crop `[x0, y0, x1, y1]` or `\"x0,y0,x1,y1\"` (e.g. `[100, 420, 460, 780]`) for zoomed hand/weapon/seam detail" },
+                    "eyes": { "type": "boolean", "description": "Extract a 1:1 full-resolution eye-gaze crop from the source portrait" },
                     "example": { "type": "boolean", "description": "Overlay example.png style template (\"Макушка\", \"Область головы\", \"Подбородок\", \"Пояс\")" },
                     "example_scale": { "type": "number", "description": "1, 2, or 3 (default 2, matching the GUI)" },
                     "example_opacity": { "type": "number", "description": "0.1..1.0, default 0.65" },
@@ -378,6 +398,7 @@ fn tools_list() -> Value {
                     "image_path": { "type": "string", "description": "Local source image path" },
                     "image_b64": { "type": "string", "description": "Base64 image or local file path" },
                     "ring": { "type": "string", "description": "Ring name (default \"rune-steel\", or \"none\" to disable)" },
+                    "live_sync": { "type": "boolean", "description": "Live-sync session with open GUI window (defaults to true when session stays open, false when auto-closing)" },
                     "remove_bg": {
                         "type": "string",
                         "enum": ["auto", "always", "never"],
@@ -413,12 +434,48 @@ fn tools_list() -> Value {
                     },
                     "preview": {
                         "type": "object",
-                        "description": "Attach a visual preview image to the response: { xray?: true, grid?: false, example?: false, guides?: false, size?: 512, scale_mode?: \"2\", with_ring?: true }"
+                        "description": "Attach a visual preview image to the response: { xray?: true, grid?: false, grid_step?: 10, crop?: [x0,y0,x1,y1], eyes?: false, example?: false, guides?: false, size?: 768, scale_mode?: \"2\", with_ring?: true }"
                     },
                     "close_session": {
                         "type": "boolean",
                         "description": "Close session after pipeline finishes (default true when opened from image_path, false when reusing session_id)"
                     }
+                }
+            }
+        },
+        {
+            "name": "tokenatra_qa_sheet",
+            "description": "Render a paginated batch QA contact sheet (`xray`: 2x2 clean+X-Ray pairs with auto-linter tags OK/ISLAND/GAP/STEP; `eyes`: 4x4 1:1 eye-gaze grid; `showcase`: 4x4 ringed showcase grid) from open `session_ids`, explicit `items`, or directories (`subjects_dir` + `portraits_dir` / `input_dir`).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mode": { "type": "string", "enum": ["xray", "eyes", "showcase"], "description": "Sheet mode (default \"xray\")" },
+                    "session_ids": { "type": "array", "items": { "type": "string" }, "description": "Active session IDs to audit directly from memory" },
+                    "items": { "type": "array", "items": { "type": "object" }, "description": "Explicit file entries: [{ name?, subject_path?, portrait_path?, image_path?, transform? }]" },
+                    "image_paths": { "type": "array", "items": { "type": "string" }, "description": "List of image paths for `eyes` or `showcase`" },
+                    "subjects_dir": { "type": "string", "description": "Folder of exported 2x subject cutouts (for `xray` / `showcase`)" },
+                    "portraits_dir": { "type": "string", "description": "Optional matching portraits folder for pink ghost X-Ray overlay" },
+                    "input_dir": { "type": "string", "description": "Folder of source portraits (for `eyes` mode)" },
+                    "transforms_json": { "type": "string", "description": "Optional JSON mapping filename -> { scale, offset_x, offset_y } for instant X-Ray alignment" },
+                    "prefix": { "type": "string", "description": "Optional filename prefix filter" },
+                    "ring": { "type": "string", "description": "Ring name (default \"rune-steel\")" },
+                    "page": { "type": "number", "description": "1-based page index (default 1)" },
+                    "per_page": { "type": "number", "description": "Items per sheet (default 4 for xray, 16 for eyes/showcase)" },
+                    "max_width": { "type": "number", "description": "Maximum sheet width in px (512..3072, default 1536)" },
+                    "save_to": { "type": "string", "description": "Optional path/folder to save the rendered contact sheet" }
+                }
+            }
+        },
+        {
+            "name": "tokenatra_gui_sync",
+            "description": "Control Live GUI Sync between an agent session and the open Tokenatra desktop window (`push`: load session onto GUI canvas and optionally show/unhide window; `detach`: unlink agent session from GUI; `status`: check window/tray state and active sessions).",
+            "inputSchema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": { "type": "string", "enum": ["push", "detach", "status"] },
+                    "session_id": { "type": "string", "description": "Session ID (optional for status/detach; defaults to most recent session for push)" },
+                    "show_window": { "type": "boolean", "description": "For `push`: restore window from tray and bring to front" }
                 }
             }
         },
@@ -797,6 +854,67 @@ struct ToolOutput {
     image: Option<Value>,
 }
 
+fn crop_query_param(args: &Value) -> Result<Option<String>, McpError> {
+    let Some(c) = args.get("crop") else {
+        return Ok(None);
+    };
+    if c.is_null() {
+        return Ok(None);
+    }
+    let raw = if let Some(arr) = c.as_array() {
+        if arr.len() != 4 {
+            return Err(McpError::Tool("crop array must have 4 numbers [x0,y0,x1,y1]".into()));
+        }
+        let mut parts = Vec::with_capacity(4);
+        for item in arr {
+            let n = item.as_f64().ok_or_else(|| McpError::Tool("crop elements must be numbers".into()))?;
+            parts.push(format!("{n}"));
+        }
+        parts.join(",")
+    } else if let Some(s) = c.as_str() {
+        let t = s.trim();
+        if t.is_empty() {
+            return Ok(None);
+        }
+        t.to_string()
+    } else {
+        return Err(McpError::Tool("crop must be [x0,y0,x1,y1] or 'x0,y0,x1,y1'".into()));
+    };
+    let enc = percent_encoding::utf8_percent_encode(&raw, percent_encoding::NON_ALPHANUMERIC).to_string();
+    Ok(Some(format!("crop={enc}")))
+}
+
+fn append_common_preview_qs(args: &Value, qs: &mut Vec<String>) -> Result<(), McpError> {
+    if args.get("xray").and_then(|v| v.as_bool()).unwrap_or(false) {
+        qs.push("xray=1".into());
+    }
+    if args.get("grid").and_then(|v| v.as_bool()).unwrap_or(false) {
+        qs.push("grid=1".into());
+    }
+    if let Some(gs) = args.get("grid_step").and_then(|v| v.as_i64()) {
+        qs.push(format!("grid_step={gs}"));
+    }
+    if let Some(cp) = crop_query_param(args)? {
+        qs.push(cp);
+    }
+    if args.get("eyes").and_then(|v| v.as_bool()).unwrap_or(false) {
+        qs.push("eyes=1".into());
+    }
+    if args.get("example").and_then(|v| v.as_bool()).unwrap_or(false) {
+        qs.push("example=1".into());
+    }
+    if let Some(es) = args.get("example_scale").and_then(|v| v.as_i64()) {
+        qs.push(format!("example_scale={es}"));
+    }
+    if let Some(eo) = args.get("example_opacity").and_then(|v| v.as_f64()) {
+        qs.push(format!("example_opacity={eo}"));
+    }
+    if args.get("guides").and_then(|v| v.as_bool()).unwrap_or(false) {
+        qs.push("guides=1".into());
+    }
+    Ok(())
+}
+
 fn req_sid(args: &Value) -> Result<&str, McpError> {
     args.get("session_id")
         .and_then(|v| v.as_str())
@@ -872,6 +990,10 @@ fn call_tool(name: &str, args: &Value) -> Result<ToolOutput, McpError> {
                         body.insert("ring".into(), Value::String(r_str.to_string()));
                     }
                 }
+            }
+
+            if let Some(ls) = args.get("live_sync").and_then(|v| v.as_bool()) {
+                body.insert("live_sync".into(), Value::Bool(ls));
             }
 
             let res = http_call_json("POST", "/agent/v1/sessions", Some(&Value::Object(body)))?;
@@ -1048,24 +1170,10 @@ fn call_tool(name: &str, args: &Value) -> Result<ToolOutput, McpError> {
             if let Some(sz) = args.get("preview_size").and_then(|v| v.as_i64()) {
                 qs.push(format!("preview_size={sz}"));
             }
-            if args.get("xray").and_then(|v| v.as_bool()).unwrap_or(false) {
-                qs.push("xray=1".into());
-            }
-            if args.get("grid").and_then(|v| v.as_bool()).unwrap_or(false) {
-                qs.push("grid=1".into());
-            }
-            if args.get("example").and_then(|v| v.as_bool()).unwrap_or(false) {
-                qs.push("example=1".into());
-            }
-            if let Some(op) = args.get("example_opacity").and_then(|v| v.as_f64()) {
-                qs.push(format!("example_opacity={op}"));
-            }
-            if args.get("guides").and_then(|v| v.as_bool()).unwrap_or(false) {
-                qs.push("guides=1".into());
-            }
             if let Some(sm) = args.get("scale_mode").and_then(|v| v.as_str()) {
                 qs.push(format!("scale_mode={sm}"));
             }
+            append_common_preview_qs(args, &mut qs)?;
             let suffix = if qs.is_empty() {
                 String::new()
             } else {
@@ -1083,42 +1191,25 @@ fn call_tool(name: &str, args: &Value) -> Result<ToolOutput, McpError> {
         }
         "tokenatra_preview" => {
             let sid = req_sid(args)?;
-            let size = args.get("size").and_then(|v| v.as_i64()).unwrap_or(512);
-            let example = args.get("example").and_then(|v| v.as_bool()).unwrap_or(false);
-            let xray = args.get("xray").and_then(|v| v.as_bool()).unwrap_or(false);
-            let grid = args.get("grid").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mut qs = vec![format!("size={size}")];
+            let mut qs: Vec<String> = Vec::new();
+            if let Some(sz) = args.get("size").and_then(|v| v.as_i64()) {
+                qs.push(format!("size={sz}"));
+            }
             if let Some(sm) = args.get("scale_mode").and_then(|v| v.as_str()) {
                 qs.push(format!("scale_mode={sm}"));
-            } else if example || xray || grid {
-                qs.push("scale_mode=2".into());
-            } else {
-                qs.push("scale_mode=1".into());
             }
             if let Some(wr) = args.get("with_ring").and_then(|v| v.as_bool()) {
                 qs.push(format!("with_ring={}", if wr { "1" } else { "0" }));
             }
-            if xray {
-                qs.push("xray=1".into());
-            }
-            if grid {
-                qs.push("grid=1".into());
-            }
-            if example {
-                qs.push("example=1".into());
-            }
-            if let Some(es) = args.get("example_scale").and_then(|v| v.as_i64()) {
-                qs.push(format!("example_scale={es}"));
-            }
-            if let Some(eo) = args.get("example_opacity").and_then(|v| v.as_f64()) {
-                qs.push(format!("example_opacity={eo}"));
-            }
-            if args.get("guides").and_then(|v| v.as_bool()).unwrap_or(false) {
-                qs.push("guides=1".into());
-            }
+            append_common_preview_qs(args, &mut qs)?;
+            let query_tail = if qs.is_empty() {
+                String::new()
+            } else {
+                format!("?{}", qs.join("&"))
+            };
             let payload = http_call_raw(
                 "GET",
-                &format!("/agent/v1/sessions/{sid}/preview?{}", qs.join("&")),
+                &format!("/agent/v1/sessions/{sid}/preview{query_tail}"),
                 None,
             )?;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&payload);
@@ -1252,6 +1343,56 @@ fn call_tool(name: &str, args: &Value) -> Result<ToolOutput, McpError> {
             Ok(ToolOutput {
                 text: Some(serde_json::to_string_pretty(&res).unwrap_or_default()),
                 image: image_block,
+            })
+        }
+        "tokenatra_qa_sheet" => {
+            let mut body = args.as_object().cloned().unwrap_or_default();
+            for key in ["subjects_dir", "portraits_dir", "input_dir", "transforms_json", "save_to", "output_path"] {
+                if let Some(raw) = body
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                {
+                    body.insert(key.into(), Value::String(resolve_clean_path(Path::new(&raw))));
+                }
+            }
+            for arr_key in ["image_paths", "subject_paths"] {
+                if let Some(arr) = body.get_mut(arr_key).and_then(|v| v.as_array_mut()) {
+                    for el in arr.iter_mut() {
+                        if let Some(s) = el.as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from) {
+                            *el = Value::String(resolve_clean_path(Path::new(&s)));
+                        }
+                    }
+                }
+            }
+            if let Some(items) = body.get_mut("items").and_then(|v| v.as_array_mut()) {
+                for it in items.iter_mut() {
+                    if let Some(obj) = it.as_object_mut() {
+                        for k in ["subject_path", "portrait_path", "image_path"] {
+                            if let Some(s) = obj.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(String::from) {
+                                obj.insert(k.into(), Value::String(resolve_clean_path(Path::new(&s))));
+                            }
+                        }
+                    }
+                }
+            }
+            let mut res = http_call_json("POST", "/agent/v1/qa_sheet", Some(&Value::Object(body)))?;
+            let image_block = res
+                .as_object_mut()
+                .and_then(|obj| obj.remove("image_data_url"))
+                .and_then(|v| v.as_str().map(data_url_block));
+            Ok(ToolOutput {
+                text: Some(serde_json::to_string_pretty(&res).unwrap_or_default()),
+                image: image_block,
+            })
+        }
+        "tokenatra_gui_sync" => {
+            let res = http_call_json("POST", "/agent/v1/gui_sync", Some(args))?;
+            Ok(ToolOutput {
+                text: Some(serde_json::to_string_pretty(&res).unwrap_or_default()),
+                image: None,
             })
         }
         "tokenatra_close_session" => {
@@ -1488,7 +1629,156 @@ fn home_dir() -> Option<PathBuf> {
     }
 }
 
-fn upsert_mcp_servers_file(config_path: &Path, cmd: &str, args: &[String], create_parent: bool) -> bool {
+fn parse_version_tuple(s: &str) -> Option<(u32, u32, u32)> {
+    let mut nums = [0u32; 3];
+    let mut found = 0usize;
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                i += 1;
+            }
+            let token = &s[start..i];
+            let parts: Vec<&str> = token.split('.').filter(|p| !p.is_empty()).collect();
+            if parts.len() >= 2 {
+                if let (Ok(maj), Ok(min)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                    let pat = parts.get(2).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+                    nums = [maj, min, pat];
+                    found = 3;
+                    break;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    (found == 3).then_some((nums[0], nums[1], nums[2]))
+}
+
+fn is_dev_build_path(p: &str) -> bool {
+    let norm = p.replace('\\', "/").to_lowercase();
+    norm.contains("/target/release/") || norm.contains("/target/debug/")
+}
+
+fn normalize_path_cmp(p: &str) -> String {
+    let clean = resolve_clean_path(Path::new(p));
+    #[cfg(windows)]
+    {
+        clean.replace('/', "\\").to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        clean
+    }
+}
+
+fn probe_mcp_version(cmd: &str, args: &[String]) -> Option<(u32, u32, u32)> {
+    if cmd.trim().is_empty() || !Path::new(cmd).is_file() {
+        return None;
+    }
+    let mut command = Command::new(cmd);
+    command
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command.spawn().ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let init_req = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"probe\",\"version\":\"1\"}}}\n";
+        let _ = stdin.write_all(init_req.as_bytes());
+        let _ = stdin.flush();
+        drop(stdin);
+    }
+    let stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = io::BufReader::new(stdout);
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let _ = tx.send(line);
+    });
+    let line = match rx.recv_timeout(Duration::from_millis(1500)) {
+        Ok(l) => l,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(val) = serde_json::from_str::<Value>(trimmed)
+        && let Some(ver) = val
+            .get("result")
+            .and_then(|r| r.get("serverInfo"))
+            .and_then(|s| s.get("version"))
+            .and_then(|v| v.as_str())
+        && let Some(tuple) = parse_version_tuple(ver)
+    {
+        return Some(tuple);
+    }
+    parse_version_tuple(trimmed)
+}
+
+fn should_keep_existing_entry_with_probe<F>(
+    existing_cmd: &str,
+    existing_args: &[String],
+    new_cmd: &str,
+    force: bool,
+    probe: F,
+) -> bool
+where
+    F: FnOnce(&str, &[String]) -> Option<(u32, u32, u32)>,
+{
+    if force {
+        return false;
+    }
+    if existing_cmd.trim().is_empty() || !Path::new(existing_cmd).is_file() {
+        return false;
+    }
+    if normalize_path_cmp(existing_cmd) == normalize_path_cmp(new_cmd) {
+        return true;
+    }
+    let our_ver = parse_version_tuple(MCP_SERVER_VERSION).unwrap_or((0, 0, 0));
+    if let Some(ext_ver) = probe(existing_cmd, existing_args) {
+        if ext_ver > our_ver {
+            return true;
+        }
+        if ext_ver == our_ver && is_dev_build_path(existing_cmd) && !is_dev_build_path(new_cmd) {
+            return true;
+        }
+    }
+    false
+}
+
+fn should_keep_existing_entry(
+    existing_cmd: &str,
+    existing_args: &[String],
+    new_cmd: &str,
+    force: bool,
+) -> bool {
+    should_keep_existing_entry_with_probe(existing_cmd, existing_args, new_cmd, force, probe_mcp_version)
+}
+
+fn upsert_mcp_servers_file(
+    config_path: &Path,
+    cmd: &str,
+    args: &[String],
+    create_parent: bool,
+    force: bool,
+) -> bool {
     let Some(parent) = config_path.parent() else {
         return false;
     };
@@ -1521,6 +1811,21 @@ fn upsert_mcp_servers_file(config_path: &Path, cmd: &str, args: &[String], creat
         return false;
     };
 
+    if let Some(existing) = servers_obj.get("tokenatra") {
+        let existing_cmd = existing
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let existing_args: Vec<String> = existing
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        if should_keep_existing_entry(existing_cmd, &existing_args, cmd, force) {
+            return true;
+        }
+    }
+
     let desired = json!({
         "command": cmd,
         "args": args
@@ -1537,7 +1842,13 @@ fn upsert_mcp_servers_file(config_path: &Path, cmd: &str, args: &[String], creat
     }
 }
 
-fn upsert_opencode_file(config_path: &Path, cmd: &str, args: &[String], create_parent: bool) -> bool {
+fn upsert_opencode_file(
+    config_path: &Path,
+    cmd: &str,
+    args: &[String],
+    create_parent: bool,
+    force: bool,
+) -> bool {
     let Some(parent) = config_path.parent() else {
         return false;
     };
@@ -1572,6 +1883,20 @@ fn upsert_opencode_file(config_path: &Path, cmd: &str, args: &[String], create_p
         return false;
     };
 
+    if let Some(existing) = servers_obj.get("tokenatra")
+        && let Some(arr) = existing.get("command").and_then(|v| v.as_array())
+        && let Some(existing_cmd) = arr.first().and_then(|v| v.as_str())
+    {
+        let existing_args: Vec<String> = arr
+            .iter()
+            .skip(1)
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        if should_keep_existing_entry(existing_cmd, &existing_args, cmd, force) {
+            return true;
+        }
+    }
+
     let mut cmd_vec = vec![cmd.to_string()];
     cmd_vec.extend(args.iter().cloned());
     let desired = json!({
@@ -1595,13 +1920,14 @@ fn upsert_opencode_file(config_path: &Path, cmd: &str, args: &[String], create_p
 #[allow(dead_code)]
 pub fn register_mcp_clients(force_create_primary: bool) -> Vec<String> {
     let (cmd, args) = mcp_command_and_args();
+    let force = force_create_primary;
     let mut updated: Vec<String> = Vec::new();
 
     if let Some(home) = home_dir() {
         // 1. Google Antigravity (~/.gemini/config/mcp_config.json)
         let agy_cfg = home.join(".gemini").join("config").join("mcp_config.json");
         let agy_exists = home.join(".gemini").exists() || force_create_primary;
-        if agy_exists && upsert_mcp_servers_file(&agy_cfg, &cmd, &args, true) {
+        if agy_exists && upsert_mcp_servers_file(&agy_cfg, &cmd, &args, true, force) {
             updated.push(agy_cfg.to_string_lossy().to_string());
         }
 
@@ -1609,7 +1935,7 @@ pub fn register_mcp_clients(force_create_primary: bool) -> Vec<String> {
         let cursor_dir = home.join(".cursor");
         let cursor_cfg = cursor_dir.join("mcp.json");
         if (cursor_dir.exists() || cursor_cfg.is_file())
-            && upsert_mcp_servers_file(&cursor_cfg, &cmd, &args, false)
+            && upsert_mcp_servers_file(&cursor_cfg, &cmd, &args, false, force)
         {
             updated.push(cursor_cfg.to_string_lossy().to_string());
         }
@@ -1618,7 +1944,7 @@ pub fn register_mcp_clients(force_create_primary: bool) -> Vec<String> {
         let windsurf_dir = home.join(".codeium").join("windsurf");
         let windsurf_cfg = windsurf_dir.join("mcp_config.json");
         if (windsurf_dir.exists() || windsurf_cfg.is_file())
-            && upsert_mcp_servers_file(&windsurf_cfg, &cmd, &args, false)
+            && upsert_mcp_servers_file(&windsurf_cfg, &cmd, &args, false, force)
         {
             updated.push(windsurf_cfg.to_string_lossy().to_string());
         }
@@ -1627,7 +1953,7 @@ pub fn register_mcp_clients(force_create_primary: bool) -> Vec<String> {
         let opencode_dir = home.join(".config").join("opencode");
         let opencode_cfg = opencode_dir.join("opencode.json");
         if (opencode_dir.exists() || opencode_cfg.is_file())
-            && upsert_opencode_file(&opencode_cfg, &cmd, &args, false)
+            && upsert_opencode_file(&opencode_cfg, &cmd, &args, false, force)
         {
             updated.push(opencode_cfg.to_string_lossy().to_string());
         }
@@ -1639,7 +1965,7 @@ pub fn register_mcp_clients(force_create_primary: bool) -> Vec<String> {
         let claude_dir = PathBuf::from(appdata).join("Claude");
         let claude_cfg = claude_dir.join("claude_desktop_config.json");
         if (claude_dir.exists() || claude_cfg.is_file())
-            && upsert_mcp_servers_file(&claude_cfg, &cmd, &args, false)
+            && upsert_mcp_servers_file(&claude_cfg, &cmd, &args, false, force)
         {
             updated.push(claude_cfg.to_string_lossy().to_string());
         }
@@ -1649,7 +1975,7 @@ pub fn register_mcp_clients(force_create_primary: bool) -> Vec<String> {
         let claude_dir = home.join("Library/Application Support/Claude");
         let claude_cfg = claude_dir.join("claude_desktop_config.json");
         if (claude_dir.exists() || claude_cfg.is_file())
-            && upsert_mcp_servers_file(&claude_cfg, &cmd, &args, false)
+            && upsert_mcp_servers_file(&claude_cfg, &cmd, &args, false, force)
         {
             updated.push(claude_cfg.to_string_lossy().to_string());
         }
@@ -1659,11 +1985,68 @@ pub fn register_mcp_clients(force_create_primary: bool) -> Vec<String> {
         let claude_dir = home.join(".config/Claude");
         let claude_cfg = claude_dir.join("claude_desktop_config.json");
         if (claude_dir.exists() || claude_cfg.is_file())
-            && upsert_mcp_servers_file(&claude_cfg, &cmd, &args, false)
+            && upsert_mcp_servers_file(&claude_cfg, &cmd, &args, false, force)
         {
             updated.push(claude_cfg.to_string_lossy().to_string());
         }
     }
 
     updated
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_version_extracts_semver_triplet() {
+        assert_eq!(parse_version_tuple("26.5.4"), Some((26, 5, 4)));
+        assert_eq!(parse_version_tuple("tokenatra-mcp 26.10.2"), Some((26, 10, 2)));
+        assert_eq!(parse_version_tuple("v1.2"), Some((1, 2, 0)));
+        assert_eq!(parse_version_tuple("invalid"), None);
+    }
+
+    #[test]
+    fn downgrade_guard_keeps_newer_or_dev_existing_binary() {
+        let existing = std::env::current_exe().unwrap();
+        let existing_str = existing.to_string_lossy().to_string();
+        let installed_dummy = r"C:\Program Files (x86)\Tokenatra\TokenatraMCP.exe";
+        let our = parse_version_tuple(MCP_SERVER_VERSION).unwrap();
+        let newer = (our.0, our.1, our.2 + 1);
+
+        // Newer registered binary must never be overwritten when force=false
+        assert!(should_keep_existing_entry_with_probe(
+            &existing_str,
+            &[],
+            installed_dummy,
+            false,
+            |_, _| Some(newer)
+        ));
+        // Older registered binary should be upgraded
+        assert!(!should_keep_existing_entry_with_probe(
+            &existing_str,
+            &[],
+            installed_dummy,
+            false,
+            |_, _| Some((1, 0, 0))
+        ));
+        // Equal version in target/release or target/debug is preserved against non-dev install
+        assert!(is_dev_build_path(r"Z:\Tokenatra\rust\target\release\TokenatraMCP.exe"));
+        assert!(!is_dev_build_path(installed_dummy));
+        assert!(should_keep_existing_entry_with_probe(
+            &existing_str,
+            &[],
+            installed_dummy,
+            false,
+            |_, _| Some(our)
+        ));
+        // Explicit --install-mcp (force=true) always overrides
+        assert!(!should_keep_existing_entry_with_probe(
+            &existing_str,
+            &[],
+            installed_dummy,
+            true,
+            |_, _| Some(newer)
+        ));
+    }
 }

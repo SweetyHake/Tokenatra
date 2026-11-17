@@ -55,6 +55,9 @@ var TokenHistory = {
             state.historyIndex++;
         }
         if (typeof TokenEditor !== 'undefined' && TokenEditor._updateUndoButtons) TokenEditor._updateUndoButtons();
+        if (window.TokenAgentSync && !TokenAgentSync.isApplying()) {
+            TokenAgentSync.schedulePushToAgent({ canvasMask: true, imageMask: true });
+        }
     },
 
     _restoreMaskFromSnap(canvas, snap) {
@@ -129,6 +132,9 @@ var TokenHistory = {
         TokenCanvas.updateScaleUI();
         TokenCanvas.updateRotationUI();
         TokenCanvas.render();
+        if (window.TokenAgentSync && !TokenAgentSync.isApplying()) {
+            TokenAgentSync.schedulePushToAgent({ canvasMask: true, imageMask: true });
+        }
     },
 
     undo() {

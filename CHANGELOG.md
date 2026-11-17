@@ -1,5 +1,13 @@
 # Changelog
 
+## v26.5.4 (2026-11-17)
+
+- Added MCP downgrade guard in `register_mcp_clients` (probes existing binaries via JSON-RPC `initialize` and keeps active dev builds or newer versions unless `--install-mcp` is explicitly passed) and `--version` / `-V` flags for `tokenatra` and `TokenatraMCP`.
+- Upgraded default `tokenatra_preview` resolution to `768` (`1536x1536` at `2x`, matching native vision tile grids, WebP `quality=92`) with `2px` X-Ray rim markers, crisp `5x7` coordinate grid labels, sniper macro `crop: [x0, y0, x1, y1]` (with `10px` grid), and `eyes: true` `1:1` eye-gaze crops.
+- Added programmatic mask QA linter (`mask.qa` in `tokenatra_inspect` and `tokenatra_pipeline`) to detect `detached_islands`, `bottom_ring_gap`, and horizontal `step_564` cuts with exact `bbox` coordinates.
+- Added native batch contact-sheet generator `tokenatra_qa_sheet` (`POST /agent/v1/qa_sheet`) supporting `xray`, `eyes`, and `showcase` modes over active sessions or disk directories (`subjects_dir` + `portraits_dir` + `transforms_json`).
+- Added bidirectional Live GUI Sync (`tokenatra_gui_sync`, `POST /agent/v1/gui_sync`, and `static/js/agentSync.js`) for inspecting and tweaking agent sessions live inside the desktop studio without clobbering manual user work.
+
 ## v26.5.3 (2026-11-15)
 
 - Added `xray` and `grid` diagnostic overlays to `tokenatra_preview` and `tokenatra_inspect` (teal checkerboard, hot-pink cut ghost, ring radii `r_in=343` / `r_out=468`, `y=564` preset line, and `-512..1536` coordinate grid).

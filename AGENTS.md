@@ -42,7 +42,9 @@ JSON поверх HTTP, только localhost, заголовок `X-Tokenatra-
 ```
 GET  /agent/v1/manifest  /assets  /tools_schema
 POST /agent/v1/pipeline                         single-call batch pipeline (remove_bg, portrait, transform, preset, mask_ops, effects, export(s), preview)
-POST /agent/v1/sessions                         {image_path | image: base64|data_url, ring}
+POST /agent/v1/qa_sheet                         batch contact sheet builder (xray, eyes, showcase) from sessions or directories
+POST /agent/v1/gui_sync                         bidirectional Live GUI Sync control (`push`, `detach`, `status`)
+POST /agent/v1/sessions                         {image_path | image: base64|data_url, ring, live_sync}
 GET/DELETE /agent/v1/sessions/{id}
 POST /agent/v1/sessions/{id}/remove_bg          {edge_blur, showing_original}
 POST /agent/v1/sessions/{id}/mask               {target: canvas|image|both, op, shapes|preset|px, protect}
@@ -53,13 +55,24 @@ POST /agent/v1/sessions/{id}/effects            {shadow, color}
 POST /agent/v1/sessions/{id}/history            {action: undo|redo}
 POST /agent/v1/sessions/{id}/portrait           {variant, scale, rotation, offset_x, offset_y, size, format, quality, output_path}
 POST /agent/v1/sessions/{id}/save_preset        {name}
-GET  /agent/v1/sessions/{id}/preview?size=512&scale_mode=1&guides=1&example=1&xray=1&grid=1
-GET  /agent/v1/sessions/{id}/inspect?include_image=1&guides=1&example=1&xray=1&grid=1
+GET  /agent/v1/sessions/{id}/preview            ?size=768 (1536x1536 at 2x)&scale_mode=1&guides=1&example=1&xray=1&grid=1&grid_step=20&crop=x0,y0,x1,y1&eyes=1
+GET  /agent/v1/sessions/{id}/inspect            ?include_image=1&preview_size=768&xray=1&grid=1&grid_step=20&crop=x0,y0,x1,y1&eyes=1 (includes mask.qa linter)
 POST /agent/v1/sessions/{id}/export             {format, quality, size, scale_mode, with_ring, output_path}
+GET  /agent/v1/sessions/{id}/sync_state         Live GUI Sync state snapshot
+GET  /agent/v1/sessions/{id}/layer/{layer}      sync layers (`original`, `cutout`, `canvas_mask`, `image_mask`)
+POST /agent/v1/sessions/{id}/gui_update         push transform/effects/ring/toggles from GUI window back to session
+POST /agent/v1/sessions/{id}/gui_mask           push edited canvas/image PNG alpha mask from GUI window back to session
 ```
 
 Лимиты: 8 сессий (LRU), TTL 30 мин, 200 операций/сессию, body ≤ 15 МБ,
 base dim ≤ 2048, экспорт 256–2048.
+
+CLI-флаги и защита регистрации MCP:
+- `tokenatra --version` / `-V` и `TokenatraMCP --version` / `-V` печатают версию пакета `env!("CARGO_PKG_VERSION")`.
+- `register_mcp_clients(false)` при обычном запуске проверяет уже прописанный бинарник через JSON-RPC `initialize` и не перезаписывает более свежую версию или активную dev-сборку `target\release\TokenatraMCP.exe` (`--install-mcp` форсирует перезапись).
+
+Авто-линтер масок (`mask.qa` в `inspect` и `pipeline`):
+- Проверяет по `3x` альфа-буферу три класса дефектов: `detached_islands` (островки ≥ 48 лог. px²), `bottom_ring_gap` (`bottom_rim_fill_pct < 85%` в нижней арке у `r_in = 343`) и `step_564` (горизонтальная ступенька `preset1` шириной ≥ 18 лог. px на `y = 564`), выдавая точные `bbox` и `warnings`.
 
 **Семантика transform**: логический канвас 1024, `L(f) = 512 + (f−512)·scale + offset`
 (f — fit-координата источника). `scale_mode: "1"` — экспорт ровно область кольца 1×

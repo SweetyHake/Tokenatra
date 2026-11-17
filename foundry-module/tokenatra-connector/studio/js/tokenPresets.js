@@ -645,6 +645,9 @@ const TokenPresets = {
                     state.protectionMask = null;
                 }
                 TokenCanvas.render();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) {
+                    TokenAgentSync.schedulePushToAgent({});
+                }
             })
             .catch(() => {
                 if (loadId === this._ringLoadId) toast('Не удалось загрузить кольцо или маску', true);
@@ -1187,6 +1190,9 @@ const TokenPresets = {
                     state.protectionMask = null;
                 }
                 TokenCanvas.render();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) {
+                    TokenAgentSync.schedulePushToAgent({});
+                }
             })
             .catch(() => {
                 if (loadId === this._ringLoadId) toast('Не удалось загрузить кольцо или маску', true);

@@ -314,6 +314,7 @@ const TokenEditor = {
             TokenCanvas._ccDirty = true;
             TokenCanvas.render();
             if (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) PortraitGenerator.render();
+            if (window.TokenAgentSync && !TokenAgentSync.isApplying()) TokenAgentSync.schedulePushToAgent({});
             return;
         }
         if (!state.userImageOriginal) return;
@@ -559,6 +560,7 @@ const TokenEditor = {
                 if (!state.dropShadowEnabled) TokenCanvas._shadowCache = null;
                 TokenCanvas.invalidateEffectsCache();
                 TokenCanvas.render();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) TokenAgentSync.schedulePushToAgent({});
             };
         }
         const colorCorrectionCheck = $('colorCorrectionCheck');
@@ -569,6 +571,7 @@ const TokenEditor = {
                 AppConfig.setColorCorrectionEnabled(state.colorCorrectionEnabled);
                 TokenCanvas.invalidateAllCaches();
                 TokenCanvas.render();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) TokenAgentSync.schedulePushToAgent({});
             };
         }
         this._setupDropShadowSettings();
@@ -597,6 +600,7 @@ const TokenEditor = {
                 TokenCanvas._imageBrushCache = null;
                 TokenCanvas.invalidateProtectionOverlay();
                 TokenCanvas.requestRender();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) TokenAgentSync.schedulePushToAgent({});
                 toast(state.protectionEnabled ? 'Защита областей включена' : 'Защита областей выключена');
             };
         }
@@ -680,6 +684,7 @@ const TokenEditor = {
                 TokenCanvas.invalidateEffectsCache();
                 TokenCanvas.scheduleEffects(false);
                 TokenCanvas.requestRender();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) TokenAgentSync.schedulePushToAgent({});
             };
             el.addEventListener('wheel', ev => { ev.preventDefault(); const step = parseFloat(el.step)||1; el.value = clamp(parseFloat(el.value)+(ev.deltaY<0?step:-step),parseFloat(el.min),parseFloat(el.max)); el.dispatchEvent(new Event('input')); }, { passive: false });
         });
@@ -693,6 +698,7 @@ const TokenEditor = {
                 sliders.forEach(({ id, valId }) => { const s = $(id); const valEl = $(valId); if (valEl) valEl.value = s.value; setSliderFill(s); });
                 TokenCanvas.invalidateEffectsCache();
                 TokenCanvas.render();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) TokenAgentSync.schedulePushToAgent({});
                 toast('Тень сброшена');
             };
         }
@@ -721,6 +727,7 @@ const TokenEditor = {
                 TokenCanvas._deferCC = true;
                 TokenCanvas.scheduleEffects(false);
                 TokenCanvas.requestRender();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) TokenAgentSync.schedulePushToAgent({});
             };
             el.addEventListener('wheel', ev => { ev.preventDefault(); const step = parseFloat(el.step)||1; el.value = clamp(parseFloat(el.value)+(ev.deltaY<0?step:-step),parseFloat(el.min),parseFloat(el.max)); el.dispatchEvent(new Event('input')); }, { passive: false });
         });
@@ -733,6 +740,7 @@ const TokenEditor = {
                 sliders.forEach(({ id, valId }) => { const s = $(id); const valEl = $(valId); if (valEl) valEl.value = s.value; setSliderFill(s); });
                 TokenCanvas.invalidateAllCaches();
                 TokenCanvas.render();
+                if (window.TokenAgentSync && !TokenAgentSync.isApplying()) TokenAgentSync.schedulePushToAgent({});
                 toast('Цветокоррекция сброшена');
             };
         }

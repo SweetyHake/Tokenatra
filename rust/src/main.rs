@@ -122,6 +122,11 @@ fn ensure_tray_monitor(state: &Arc<AppState>) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("tokenatra {}", consts::VERSION);
+        return;
+    }
+
     // Explorer context menu verbs
     let mut i = 1;
     while i < args.len() {
