@@ -135,6 +135,7 @@ var TokenEmbed = (function() {
     // Оригинал (исходник до удаления фона) — PNG dataURL для файла во Foundry
     function getOriginalDataUrl() {
         try {
+            if (state.isAnimated) return null;
             var img = state.userImageOriginal;
             if (!img || !img.naturalWidth) return null;
             var c = document.createElement('canvas');
@@ -323,6 +324,25 @@ var TokenEmbed = (function() {
         var useFoundryRing = (state.ringSource === 'foundry' && !!state.activeFoundryRingId);
         var effectiveKind = useFoundryRing ? 'subject' : kind;
         var withRing = !useFoundryRing && effectiveKind === 'token';
+        var base = (state.tokenFileName.trim() || 'token') + '-' + effectiveKind;
+
+        if (state.isAnimated && state.media && typeof TokenCanvas.exportAnimatedBlob === 'function') {
+            TokenCanvas.exportAnimatedBlob(withRing).then(function(res) {
+                if (!res || !res.blob) return;
+                var exportScale = state.saveQuality
+                    ? Math.round((res.finalSize / state.saveQuality) * 1000) / 1000
+                    : 1;
+                uploadAndSend(res.blob, base + '.webm', 'webm', {
+                    kind: effectiveKind,
+                    scale: exportScale,
+                    scaleX: exportScale,
+                    scaleY: exportScale,
+                    foundryRingId: useFoundryRing ? state.activeFoundryRingId : null
+                });
+            });
+            return;
+        }
+
         var result = TokenCanvas.renderForSave(withRing);
         if (!result || !result.canvas) return;
         var fmt = (AppConfig.saveSettings && AppConfig.saveSettings.format) || 'webp';
@@ -330,7 +350,6 @@ var TokenEmbed = (function() {
         var mime = fmt === 'png' ? 'image/png' : (fmt === 'jpg' ? 'image/jpeg' : 'image/webp');
         var quality = fmt === 'png' ? undefined
             : Math.min(1, Math.max(0.01, (parseInt(AppConfig.saveSettings.compression) || 95) / 100));
-        var base = (state.tokenFileName.trim() || 'token') + '-' + effectiveKind;
         // JPEG без альфы: прозрачный фон стал бы чёрным — композитим на белый
         // (тот же фолбэк, что и TokenCanvas.save)
         var outCanvas = result.canvas;
@@ -434,6 +453,13 @@ var TokenEmbed = (function() {
                 // может отсутствовать, валиден именно источник портрета
                 if (!PortraitGenerator.getImage()) {
                     toast(I18n.t('Сначала загрузите изображение'), true);
+                    return;
+                }
+                if (state.isAnimated && state.media && typeof PortraitGenerator.exportAnimatedBlob === 'function') {
+                    var animName = (state.tokenFileName.trim() || 'portrait') + '-portrait.webm';
+                    PortraitGenerator.exportAnimatedBlob().then(function(blob) {
+                        if (blob) uploadAndSend(blob, animName, 'webm', { kind: 'portrait' });
+                    });
                     return;
                 }
                 var out = PortraitGenerator.renderForSave();

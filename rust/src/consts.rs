@@ -49,10 +49,17 @@ pub fn builtin_ring_name(file_name_lower: &str) -> Option<&'static str> {
     })
 }
 
-pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"];
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "apng"];
+pub const VIDEO_EXTENSIONS: &[&str] = &[
+    "webm", "mp4", "mov", "m4v", "ogv", "mkv", "avi", "mpeg", "mpg",
+];
+pub const OPENABLE_EXTENSIONS: &[&str] = &[
+    "webp", "png", "jpg", "jpeg", "gif", "avif", "bmp", "apng",
+    "webm", "mp4", "mov", "m4v", "ogv", "mkv", "avi", "mpeg", "mpg",
+];
 pub const MEDIA_EXTENSIONS: &[&str] = &[
     "mp3", "wav", "m4a", "flac", "aac", "wma", "opus", "ogg", "mp4", "mkv", "mov", "avi",
-    "webm", "mpeg", "mpg", "m4v",
+    "webm", "mpeg", "mpg", "m4v", "ogv",
 ];
 
 pub const MAX_IMAGE_DIMENSION: u32 = 8192;

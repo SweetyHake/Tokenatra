@@ -387,7 +387,17 @@ const I18n = {
         'Скопировано': 'Copied',
         'Применится после перезапуска Tokenatra': 'Applies after restarting Tokenatra',
         'Адрес Tokenatra в локальной сети: ': 'Tokenatra LAN address: ',
-        'В трее модель удаления фона выгружается из памяти (экономия до 2 ГБ) и подгружается при первом запросе (~10–30 с). Удаление фона остаётся доступным, пока приложение в трее. Окно продолжает держать ~200–400 МБ. История отмен сокращается до 10 шагов.': 'In the tray, the background-removal model is unloaded from memory (saves up to 2 GB) and reloads on the first request (~10–30 s). Background removal stays available while the app is in the tray. The window keeps ~200–400 MB. Undo history is trimmed to 10 steps.'
+        'В трее модель удаления фона выгружается из памяти (экономия до 2 ГБ) и подгружается при первом запросе (~10–30 с). Удаление фона остаётся доступным, пока приложение в трее. Окно продолжает держать ~200–400 МБ. История отмен сокращается до 10 шагов.': 'In the tray, the background-removal model is unloaded from memory (saves up to 2 GB) and reloads on the first request (~10–30 s). Background removal stays available while the app is in the tray. The window keeps ~200–400 MB. Undo history is trimmed to 10 steps.',
+        'Пауза': 'Pause',
+        'Воспроизвести': 'Play',
+        'Экспорт WebM…': 'Exporting WebM…',
+        'Экспорт отменён': 'Export cancelled',
+        'Экспорт уже выполняется': 'Export is already in progress',
+        'Удаление фона отменено': 'Background removal cancelled',
+        'Перетащите изображение или видео': 'Drop an image or video file',
+        'Не удалось открыть видео': 'Failed to open video',
+        'WEBM (видео)': 'WEBM (video)',
+        'Кадр': 'Frame'
     },
 
     _systemLanguage() {

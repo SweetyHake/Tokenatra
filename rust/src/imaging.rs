@@ -82,6 +82,21 @@ pub fn is_media_ext(filename: &str, mime: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
+pub fn is_video_or_anim_ext(filename: &str, mime: Option<&str>) -> bool {
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if crate::consts::VIDEO_EXTENSIONS.contains(&ext.as_str())
+        || matches!(ext.as_str(), "gif" | "apng" | "webp")
+    {
+        return true;
+    }
+    mime.map(|m| m.starts_with("video/") || m == "image/gif" || m == "image/apng")
+        .unwrap_or(false)
+}
+
 /// Downscales to MAX_IMAGE_DIMENSION (Lanczos).
 pub fn validate_image(img: DynamicImage) -> DynamicImage {
     let (w, h) = img.dimensions();

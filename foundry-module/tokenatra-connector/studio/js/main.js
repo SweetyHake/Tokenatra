@@ -21,6 +21,13 @@ function initTabs() {
             });
             const panel = $(mode + 'Panel');
             if (panel) panel.focus?.({ preventScroll: true });
+            if (state.media) {
+                if (mode === 'token') {
+                    if (!state.media.userPaused) state.media.play(false);
+                } else {
+                    state.media.pause(false);
+                }
+            }
         };
     });
 }
@@ -259,9 +266,12 @@ function initPasteHandler() {
         const files = [];
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
-            if (item.type.startsWith('image/')) {
+            if (item.type.startsWith('image/') || item.type.startsWith('video/')) {
                 const blob = item.getAsFile();
-                if (blob) files.push(new File([blob], `paste_${Date.now()}.png`, { type: item.type }));
+                const ext = item.type === 'image/gif' ? 'gif'
+                    : (item.type === 'video/webm' ? 'webm'
+                        : (item.type === 'video/mp4' ? 'mp4' : 'png'));
+                if (blob) files.push(new File([blob], `paste_${Date.now()}.${ext}`, { type: item.type }));
             }
         }
 
@@ -1107,6 +1117,19 @@ async function init() {
     Remover.init();
     Converter.init();
     TokenEditor.init();
+    if (typeof TokenMedia !== 'undefined') {
+        TokenMedia.initPlayBar();
+        const canvasArea = document.querySelector('.canvas-area');
+        if (canvasArea) {
+            canvasArea.addEventListener('contentvisibilityautostatechange', (ev) => {
+                if (!state.media) return;
+                if (ev.skipped) state.media.pause(false);
+                else if (!state.media.userPaused && $('tokenPanel')?.classList.contains('active')) {
+                    state.media.play(false);
+                }
+            });
+        }
+    }
     initModelSelector();
     HotkeySettings.init();
     initTraySettings();

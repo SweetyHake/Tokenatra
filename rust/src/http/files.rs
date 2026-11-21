@@ -42,9 +42,12 @@ pub async fn save_file(mut mp: Multipart) -> Response {
         // (the dialog opens with it), then the rest
         let mut types: Vec<(&str, Vec<&str>)> = vec![
             ("WebP Image", vec!["webp"]),
+            ("WebM Video", vec!["webm"]),
             ("PNG Image", vec!["png"]),
             ("JPEG Image", vec!["jpg", "jpeg"]),
             ("AVIF Image", vec!["avif"]),
+            ("GIF Image", vec!["gif"]),
+            ("OGG Audio", vec!["ogg"]),
         ];
         types.sort_by_key(|(_, exts)| {
             if exts.contains(&ext.as_str()) { 0 } else { 1 }
@@ -151,8 +154,15 @@ pub async fn save_to_folder(
 pub async fn pick_image_to_open() -> Response {
     let picked = tokio::task::spawn_blocking(|| {
         rfd::FileDialog::new()
-            .set_title("Выберите изображение")
-            .add_filter("Images", &["webp", "png", "jpg", "jpeg"])
+            .set_title("Выберите изображение или видео")
+            .add_filter(
+                "Images & Video",
+                crate::consts::OPENABLE_EXTENSIONS,
+            )
+            .add_filter("Images", crate::consts::IMAGE_EXTENSIONS)
+            .add_filter("Video & GIF", &[
+                "gif", "webm", "mp4", "mov", "m4v", "ogv", "mkv", "avi", "mpeg", "mpg",
+            ])
             .add_filter("All files", &["*"])
             .pick_file()
     })
@@ -163,13 +173,7 @@ pub async fn pick_image_to_open() -> Response {
     };
     let p = PathBuf::from(&path);
     let ext = super::ext_of(&p.to_string_lossy());
-    let mime = match ext.as_str() {
-        "png" => "image/png",
-        "webp" => "image/webp",
-        "jpg" | "jpeg" => "image/jpeg",
-        "avif" => "image/avif",
-        _ => "image/octet-stream",
-    };
+    let mime = super::mime_by_ext(&ext);
     let resolved = std::fs::canonicalize(&p).unwrap_or(p);
     ok_json(json!({ "path": clean_path(&resolved), "mime": mime }))
 }
@@ -190,7 +194,7 @@ pub async fn list_images(body: axum::body::Bytes) -> Response {
             rd.filter_map(|e| e.ok().map(|e| e.path()))
                 .filter(|p| {
                     p.is_file()
-                        && ["webp", "png", "jpg", "jpeg"]
+                        && crate::consts::OPENABLE_EXTENSIONS
                             .contains(&super::ext_of(&p.to_string_lossy()).as_str())
                 })
                 .collect()
@@ -237,12 +241,6 @@ pub async fn get_image_by_path(uri: axum::http::Uri) -> Response {
         return err_status(StatusCode::NOT_FOUND, "File not found");
     }
     let ext = super::ext_of(&path.to_string_lossy());
-    let mime = match ext.as_str() {
-        "png" => "image/png",
-        "webp" => "image/webp",
-        "jpg" | "jpeg" => "image/jpeg",
-        "avif" => "image/avif",
-        _ => "image/octet-stream",
-    };
+    let mime = super::mime_by_ext(&ext);
     super::send_file_from_disk(&path, mime, None)
 }

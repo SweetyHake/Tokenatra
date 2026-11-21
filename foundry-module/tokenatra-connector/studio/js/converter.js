@@ -5,7 +5,7 @@ const Converter = {
     isProcessing: false,
     mediaExtensions: new Set([
         'mp3', 'wav', 'm4a', 'flac', 'aac', 'wma', 'opus', 'ogg',
-        'mp4', 'mkv', 'mov', 'avi', 'webm', 'mpeg', 'mpg', 'm4v'
+        'mp4', 'mkv', 'mov', 'avi', 'webm', 'mpeg', 'mpg', 'm4v', 'ogv'
     ]),
 
     init() {
@@ -116,7 +116,7 @@ const Converter = {
         preview.className = 'result-preview';
 
         const previewElement = this.isMediaFile(file)
-            ? document.createElement(file.type.startsWith('video/') ? 'video' : 'audio')
+            ? document.createElement(file.type.startsWith('video/') || (typeof TokenMedia !== 'undefined' && TokenMedia.isVideoFile(file)) ? 'video' : 'audio')
             : document.createElement('img');
         previewElement.src = origUrl;
         if (previewElement.tagName === 'IMG') {
@@ -196,19 +196,57 @@ const Converter = {
 
     async processFile(id, file) {
         const gen = this._gen || 0;
-        const fd = new FormData();
-        fd.append('image', file);
-        fd.append('format', state.converterFormat || 'webp');
-        fd.append('quality', state.converterQuality || 90);
+        const targetFmt = state.converterFormat || 'webp';
+        const targetQuality = state.converterQuality || 90;
 
         try {
-            const res = await fetch('/convert', { method: 'POST', body: fd });
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({ error: 'Ошибка сервера' }));
-                throw new Error(errData.error || 'Ошибка');
+            let blob = null;
+            if (targetFmt === 'webm') {
+                // Пробуем серверный FFmpeg; если FFmpeg не установлен или hosted-режим,
+                // переходим на встроенный браузерный WebM-энкодер (WebCodecs / MediaRecorder)
+                let serverErr = null;
+                if (!(window.TokenTransport && TokenTransport.active())) {
+                    try {
+                        const fd = new FormData();
+                        fd.append('image', file);
+                        fd.append('format', 'webm');
+                        fd.append('quality', targetQuality);
+                        const res = await fetch('/convert', { method: 'POST', body: fd });
+                        if (res.ok) {
+                            blob = await res.blob();
+                        } else {
+                            const errData = await res.json().catch(() => ({}));
+                            serverErr = errData.error || 'Ошибка сервера';
+                        }
+                    } catch (e) {
+                        serverErr = e.message;
+                    }
+                }
+                if (!blob) {
+                    if (typeof TokenMedia !== 'undefined') {
+                        const labelEl = $(id)?.querySelector('.loading-overlay div:last-child');
+                        blob = await TokenMedia.convertFileToWebm(file, {
+                            quality: targetQuality,
+                            onEncodeProgress: (done, total) => {
+                                if (labelEl) labelEl.textContent = `${done} / ${total}`;
+                            }
+                        });
+                    } else {
+                        throw new Error(serverErr || 'Ошибка конвертации');
+                    }
+                }
+            } else {
+                const fd = new FormData();
+                fd.append('image', file);
+                fd.append('format', targetFmt);
+                fd.append('quality', targetQuality);
+                const res = await fetch('/convert', { method: 'POST', body: fd });
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({ error: 'Ошибка сервера' }));
+                    throw new Error(errData.error || 'Ошибка');
+                }
+                blob = await res.blob();
             }
-
-            const blob = await res.blob();
 
             // clearAll() мог пройти во время запроса (или после проверки, до записи в Map)
             const card = $(id);
@@ -219,11 +257,11 @@ const Converter = {
                 return;
             }
 
-            const ext = state.converterFormat === 'jpg' ? 'jpg' : state.converterFormat;
+            const ext = targetFmt === 'jpg' ? 'jpg' : targetFmt;
             const baseName = this.originalNames.get(id) || file.name;
             const newName = baseName.replace(/\.[^.]+$/, '') + '.' + ext;
 
-            this.results.set(id, { blob, name: newName, format: state.converterFormat });
+            this.results.set(id, { blob, name: newName, format: targetFmt });
 
             const preview = card.querySelector('.result-preview');
             const info = card.querySelector('.result-info');
@@ -231,12 +269,18 @@ const Converter = {
             urlManager.revoke(id);
             const imgUrl = urlManager.create(blob, id);
 
-            const resultElement = state.converterFormat === 'ogg'
+            const resultElement = targetFmt === 'ogg'
                 ? document.createElement('audio')
-                : document.createElement('img');
+                : (targetFmt === 'webm' ? document.createElement('video') : document.createElement('img'));
             resultElement.src = imgUrl;
             if (resultElement.tagName === 'IMG') {
                 resultElement.alt = '';
+            } else if (resultElement.tagName === 'VIDEO') {
+                resultElement.autoplay = true;
+                resultElement.loop = true;
+                resultElement.muted = true;
+                resultElement.playsInline = true;
+                resultElement.controls = true;
             } else {
                 resultElement.controls = true;
                 resultElement.preload = 'metadata';

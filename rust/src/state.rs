@@ -40,7 +40,7 @@ pub struct EmbedExport {
 
 pub const EMBED_EXPORT_TTL: Duration = Duration::from_secs(600);
 pub const EMBED_EXPORT_MAX_ITEMS: usize = 32;
-pub const EMBED_EXPORT_MAX_BYTES: u64 = 40 * 1024 * 1024;
+pub const EMBED_EXPORT_MAX_BYTES: u64 = 60 * 1024 * 1024;
 
 impl AppState {
     pub fn new() -> Arc<Self> {

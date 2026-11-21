@@ -30,12 +30,13 @@ pub async fn embed_export_save(
         return err_status(StatusCode::BAD_REQUEST, "Нет файла");
     };
     let mut ext = super::ext_of(&filename);
-    if !["webp", "png", "jpg", "jpeg"].contains(&ext.as_str()) {
+    if !["webp", "png", "jpg", "jpeg", "webm"].contains(&ext.as_str()) {
         ext = "webp".into();
     }
     let mime = match ext.as_str() {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
+        "webm" => "video/webm",
         _ => "image/webp",
     };
 
@@ -51,7 +52,7 @@ pub async fn embed_export_save(
     }
     if target.metadata().map(|m| m.len()).unwrap_or(0) > EMBED_EXPORT_MAX_BYTES {
         let _ = std::fs::remove_file(&target);
-        return err_status(StatusCode::PAYLOAD_TOO_LARGE, "Файл больше 40 МБ");
+        return err_status(StatusCode::PAYLOAD_TOO_LARGE, "Файл больше 60 МБ");
     }
 
     {

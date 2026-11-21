@@ -41,7 +41,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          $ver = (Select-String -Path src/consts.rs -Pattern 'VERSION:\s*&str\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $ver = (Select-String -Path Cargo.toml -Pattern '^\s*version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$ver" ../installer.iss
 
       - name: Upload artifact
@@ -79,7 +79,7 @@ jobs:
 
       - name: Package portable archive
         run: |
-          VER="$(grep -oP 'VERSION:\s*&str\s*=\s*"\K[^"]+' rust/src/consts.rs)"
+          VER="$(grep -oP '^\s*version\s*=\s*"\K[^"]+' rust/Cargo.toml | head -n 1)"
           mkdir -p dist
           cp rust/target/release/tokenatra dist/
           cp rust/target/release/TokenatraMCP dist/ 2>/dev/null || true
@@ -112,7 +112,7 @@ jobs:
 
       - name: Package portable archive and DMG
         run: |
-          VER="$(grep -oE 'VERSION: &str = "[^"]+"' rust/src/consts.rs | grep -oE '"[^"]+"' | tr -d '"')"
+          VER="$(grep -oE '^[[:space:]]*version[[:space:]]*=[[:space:]]*"[^"]+"' rust/Cargo.toml | head -n 1 | grep -oE '"[^"]+"' | tr -d '"')"
           mkdir -p dist
           cp rust/target/release/tokenatra dist/
           cp rust/target/release/TokenatraMCP dist/ 2>/dev/null || true

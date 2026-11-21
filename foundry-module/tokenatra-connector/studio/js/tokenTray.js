@@ -61,6 +61,9 @@ var TokenTray = (function() {
                 clearTimeout(state.effectsTimeout);
                 state.effectsTimeout = null;
             }
+            if (state.media && state.media.playing) {
+                state.media.pause(false);
+            }
             cancelCanvasWork();
         }
         // «Полный» экономный режим (трей) дополнительно режет историю отмен;
@@ -83,6 +86,10 @@ var TokenTray = (function() {
         if (TokenCanvas._deferCC) TokenCanvas.scheduleEffects(false);
         else if (typeof TokenCanvas !== 'undefined' && TokenCanvas.requestRender) {
             TokenCanvas.requestRender();
+        }
+        var tokenPanel = document.getElementById('tokenPanel');
+        if (state.media && !state.media.userPaused && (!tokenPanel || tokenPanel.classList.contains('active'))) {
+            state.media.play(false);
         }
     }
 

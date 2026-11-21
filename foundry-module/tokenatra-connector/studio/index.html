@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>window.__STUDIO_VERSION__ = "1.1.0";window.__STUDIO_BUILT__ = true;window.__EMBED__ = { embed: true, parentOrigin: '' };document.documentElement.classList.add('embed');</script>
+    <script>window.__STUDIO_VERSION__ = "1.2.0";window.__STUDIO_BUILT__ = true;window.__EMBED__ = { embed: true, parentOrigin: '' };document.documentElement.classList.add('embed');</script>
     <base href="/modules/tokenatra-connector/studio/">
     <title>Tokenatra</title>
     <link rel="icon" href="./assets/logo.png" type="image/x-icon">
-    <link rel="stylesheet" href="./css/style.css?v=1.1.0">
+    <link rel="stylesheet" href="./css/style.css?v=1.2.0">
 </head>
 <body>
 <div class="eraser-cursor" id="eraserCursor">
@@ -61,7 +61,7 @@
                             <button class="ghost-btn" id="fileOpenBtn" data-hotkey-hint data-tooltip="Открыть файл (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>Открыть</button>
                             <span class="file-row-name" id="dropzoneLabel">Файл не выбран</span>
                         </div>
-                        <input type="file" id="tokenFileInput" accept="image/*">
+                        <input type="file" id="tokenFileInput" accept="image/*,video/*,.gif,.webp,.webm,.mp4,.mov,.m4v,.ogv,.mkv,.avi">
                         <!-- Поле имени видно всегда; стрелки навигации включает
                              updateNavState, когда файл из папки и есть что листать -->
                         <div class="file-name-row">
@@ -190,6 +190,26 @@
                     <button class="zc-btn" id="zoomOutBtn" data-tooltip="Уменьшить"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
                     <button type="button" class="zc-label" id="zoomLabel" data-tooltip="Сбросить (Ctrl+0)">100%</button>
                     <button class="zc-btn" id="zoomInBtn" data-tooltip="Увеличить"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                </div>
+                <div class="media-play-bar" id="mediaPlayBar" hidden>
+                    <button type="button" class="media-play-btn" id="mediaPlayPauseBtn" data-tooltip="Пауза" aria-label="Пауза">
+                        <svg class="icon-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+                        <svg class="icon-play" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+                    </button>
+                    <input type="range" class="media-seek-slider" id="mediaSeekSlider" min="0" max="1000" value="0" aria-label="Кадр">
+                    <span class="media-time-label" id="mediaTimeLabel">0.0s / 0.0s</span>
+                </div>
+                <div class="media-progress-overlay" id="mediaProgressOverlay" hidden>
+                    <div class="media-progress-card">
+                        <div class="media-progress-title" id="mediaProgressTitle">Экспорт WebM…</div>
+                        <div class="media-progress-track">
+                            <div class="media-progress-fill" id="mediaProgressFill"></div>
+                        </div>
+                        <div class="media-progress-footer">
+                            <span class="media-progress-text" id="mediaProgressText">0 / 0</span>
+                            <button type="button" class="ghost-btn ghost-btn-compact-md" id="mediaProgressCancel">Отмена</button>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="resize-handle" id="rightPanelHandle"></div>
@@ -353,7 +373,7 @@
                         <span>Перетащите файлы сюда или нажмите для выбора</span>
                     </div>
                 </div>
-                <input type="file" id="fileInput" accept="image/*" multiple>
+                <input type="file" id="fileInput" accept="image/*,video/*,.gif,.webp,.webm,.mp4,.mov,.m4v,.ogv,.mkv,.avi" multiple>
                 <div class="remover-toolbar">
                     <div class="toolbar-left">
                         <div class="format-group">
@@ -430,6 +450,7 @@
                                 <option value="bmp">BMP</option>
                                 <option value="gif">GIF</option>
                                 <option value="tiff">TIFF</option>
+                                <option value="webm">WEBM (видео)</option>
                                 <option value="ogg">OGG (аудио)</option>
                             </select>
                         </div>
@@ -824,27 +845,28 @@
 <div class="toast" id="toast"></div>
 
 <script>
-    window.__APP_VERSION = '1.1.0';
+    window.__APP_VERSION = '1.2.0';
 </script>
-<script src="./js/tokenTransport.js?v=1.1.0"></script>
-    <script src="./js/config.js?v=1.1.0"></script>
-<script src="./js/state.js?v=1.1.0"></script>
-    <script src="./js/utils.js?v=1.1.0"></script>
-    <script src="./js/i18n.js?v=1.1.0"></script>
-<script src="./js/urlManager.js?v=1.1.0"></script>
-<script src="./js/tokenEffects.js?v=1.1.0"></script>
-<script src="./js/tokenHistory.js?v=1.1.0"></script>
-<script src="./js/tokenPresets.js?v=1.1.0"></script>
-<script src="./js/tokenCanvas.js?v=1.1.0"></script>
-<script src="./js/tokenEditor.js?v=1.1.0"></script>
-<script src="./js/portraitGenerator.js?v=1.1.0"></script>
-<script src="./js/hotkeySettings.js?v=1.1.0"></script>
-<script src="./js/remover.js?v=1.1.0"></script>
-<script src="./js/converter.js?v=1.1.0"></script>
-<script src="./js/tokenEmbed.js?v=1.1.0"></script>
-<script src="./js/agentSync.js?v=1.1.0"></script>
-<script src="./js/main.js?v=1.1.0"></script>
-<script src="./js/tokenTray.js?v=1.1.0"></script>
+<script src="./js/tokenTransport.js?v=1.2.0"></script>
+    <script src="./js/config.js?v=1.2.0"></script>
+<script src="./js/state.js?v=1.2.0"></script>
+    <script src="./js/utils.js?v=1.2.0"></script>
+    <script src="./js/i18n.js?v=1.2.0"></script>
+<script src="./js/urlManager.js?v=1.2.0"></script>
+<script src="./js/tokenEffects.js?v=1.2.0"></script>
+<script src="./js/tokenHistory.js?v=1.2.0"></script>
+<script src="./js/tokenPresets.js?v=1.2.0"></script>
+<script src="./js/tokenMedia.js?v=1.2.0"></script>
+<script src="./js/tokenCanvas.js?v=1.2.0"></script>
+<script src="./js/tokenEditor.js?v=1.2.0"></script>
+<script src="./js/portraitGenerator.js?v=1.2.0"></script>
+<script src="./js/hotkeySettings.js?v=1.2.0"></script>
+<script src="./js/remover.js?v=1.2.0"></script>
+<script src="./js/converter.js?v=1.2.0"></script>
+<script src="./js/tokenEmbed.js?v=1.2.0"></script>
+<script src="./js/agentSync.js?v=1.2.0"></script>
+<script src="./js/main.js?v=1.2.0"></script>
+<script src="./js/tokenTray.js?v=1.2.0"></script>
 <script>
     document.getElementById('saveQualitySelect').addEventListener('change', function() {
         updateSaveHint(this.value, document.getElementById('saveScaleSelect').value);

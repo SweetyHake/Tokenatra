@@ -115,7 +115,7 @@ pub async fn convert_file(mut mp: Multipart) -> Response {
             "format" => {
                 if let Ok(b) = field.bytes().await {
                     let v = String::from_utf8_lossy(&b).trim().to_string();
-                    if ["webp", "png", "jpg", "avif", "bmp", "gif", "tiff", "ogg"]
+                    if ["webp", "png", "jpg", "avif", "bmp", "gif", "tiff", "ogg", "webm"]
                         .contains(&v.as_str())
                     {
                         format_type = v;
@@ -137,11 +137,21 @@ pub async fn convert_file(mut mp: Multipart) -> Response {
     };
 
     let media = crate::imaging::is_media_ext(&filename, content_type.as_deref());
-    if media && format_type != "ogg" {
-        return err_status(StatusCode::BAD_REQUEST, "Аудио и видео можно конвертировать только в OGG");
+    let video_or_anim = crate::imaging::is_video_or_anim_ext(&filename, content_type.as_deref());
+    if media && format_type != "ogg" && format_type != "webm" {
+        return err_status(
+            StatusCode::BAD_REQUEST,
+            "Аудио и видео можно конвертировать только в OGG или WEBM",
+        );
     }
     if format_type == "ogg" && !media {
         return err_status(StatusCode::BAD_REQUEST, "Формат OGG доступен только для аудио и видео");
+    }
+    if format_type == "webm" && !video_or_anim {
+        return err_status(
+            StatusCode::BAD_REQUEST,
+            "Формат WEBM доступен только для видео и анимаций",
+        );
     }
 
     let fmt = format_type.clone();
@@ -156,6 +166,15 @@ pub async fn convert_file(mut mp: Multipart) -> Response {
             let out = crate::ffmpeg::convert_media_to_ogg(&data, &ext, quality)?;
             return Ok((out, "audio/ogg"));
         }
+        if fmt == "webm" {
+            let ext = std::path::Path::new(&fname)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| format!(".{e}"))
+                .unwrap_or_else(|| ".mp4".into());
+            let out = crate::ffmpeg::convert_media_to_webm(&data, &ext, quality)?;
+            return Ok((out, "video/webm"));
+        }
         let img = crate::imaging::open_image(&data).map_err(|e| e.to_string())?;
         crate::imaging::save_image(&img, &fmt, quality)
             .map_err(|_| "Ошибка конвертации файла".to_string())
@@ -168,6 +187,43 @@ pub async fn convert_file(mut mp: Multipart) -> Response {
         Err(e) => {
             eprintln!("convert join error: {e}");
             err_status(StatusCode::INTERNAL_SERVER_ERROR, "Ошибка конвертации файла")
+        }
+    }
+}
+
+/// POST /transcode_video: fallback transcoding via system FFmpeg for containers/codecs
+/// that the WebView <video> element cannot decode natively (e.g., MKV, AVI, ProRes MOV).
+pub async fn transcode_video(mut mp: Multipart) -> Response {
+    let mut file: Option<(String, Vec<u8>)> = None;
+    while let Ok(Some(field)) = mp.next_field().await {
+        let name = field.name().unwrap_or_default();
+        if name == "file" || name == "video" || name == "image" {
+            let filename = field.file_name().map(|s| s.to_string()).unwrap_or_default();
+            if let Ok(b) = field.bytes().await {
+                file = Some((filename, b.to_vec()));
+            }
+        }
+    }
+    let Some((filename, data)) = file else {
+        return err_status(StatusCode::BAD_REQUEST, "Файл не выбран");
+    };
+    let ext = std::path::Path::new(&filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{e}"))
+        .unwrap_or_else(|| ".mp4".into());
+
+    let result = tokio::task::spawn_blocking(move || {
+        crate::ffmpeg::convert_media_to_webm(&data, &ext, 90)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(bytes)) => file_response(bytes, "video/webm", None),
+        Ok(Err(msg)) => err_status(StatusCode::INTERNAL_SERVER_ERROR, &msg),
+        Err(e) => {
+            eprintln!("transcode_video join error: {e}");
+            err_status(StatusCode::INTERNAL_SERVER_ERROR, "Ошибка декодирования видео")
         }
     }
 }

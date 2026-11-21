@@ -1,7 +1,9 @@
 # Changelog
 
-## v26.5.4 (2026-11-17)
+## v26.5.4 (2026-11-21)
 
+- Added animated image and video support (`GIF`, animated `WebP`, `APNG`, `WebM`, `MP4`, `MOV`, `M4V`, `OGV`, `MKV`, `AVI`) across the token editor, portrait generator, file converter, batch background remover, and Foundry VTT connector, with automatic transparent `WebM` (`VP9`/`VP8` Alpha) export via WebCodecs + built-in EBML muxer (and optional FFmpeg fallback).
+- Added playback controls (play/pause, timeline scrubbing, progress overlay with cancel) and frame-by-frame AI background removal for animated tokens.
 - Added MCP downgrade guard in `register_mcp_clients` (probes existing binaries via JSON-RPC `initialize` and keeps active dev builds or newer versions unless `--install-mcp` is explicitly passed) and `--version` / `-V` flags for `tokenatra` and `TokenatraMCP`.
 - Upgraded default `tokenatra_preview` resolution to `768` (`1536x1536` at `2x`, matching native vision tile grids, WebP `quality=92`) with `2px` X-Ray rim markers, crisp `5x7` coordinate grid labels, sniper macro `crop: [x0, y0, x1, y1]` (with `10px` grid), and `eyes: true` `1:1` eye-gaze crops.
 - Added programmatic mask QA linter (`mask.qa` in `tokenatra_inspect` and `tokenatra_pipeline`) to detect `detached_islands`, `bottom_ring_gap`, and horizontal `step_564` cuts with exact `bbox` coordinates.

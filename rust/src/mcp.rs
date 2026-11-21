@@ -1642,13 +1642,13 @@ fn parse_version_tuple(s: &str) -> Option<(u32, u32, u32)> {
             }
             let token = &s[start..i];
             let parts: Vec<&str> = token.split('.').filter(|p| !p.is_empty()).collect();
-            if parts.len() >= 2 {
-                if let (Ok(maj), Ok(min)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                    let pat = parts.get(2).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
-                    nums = [maj, min, pat];
-                    found = 3;
-                    break;
-                }
+            if parts.len() >= 2
+                && let (Ok(maj), Ok(min)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+            {
+                let pat = parts.get(2).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+                nums = [maj, min, pat];
+                found = 3;
+                break;
             }
         } else {
             i += 1;

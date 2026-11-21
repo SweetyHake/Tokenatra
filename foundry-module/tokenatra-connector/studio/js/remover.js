@@ -133,14 +133,16 @@ const Remover = {
     },
     
     handleFiles(files) {
-        const imageFiles = files.filter(f => f.type.startsWith('image/'));
-        if (imageFiles.length === 0) return;
+        const supportedFiles = files.filter(f =>
+            typeof TokenMedia !== 'undefined' ? TokenMedia.isSupportedFile(f) : f.type.startsWith('image/')
+        );
+        if (supportedFiles.length === 0) return;
 
         const emptyState = $('emptyState');
         if (emptyState) emptyState.style.display = 'none';
         this.updateResultsCount();
 
-        imageFiles.forEach(file => {
+        supportedFiles.forEach(file => {
             const id = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
             this.createResultCard(id, file);
             state.processingQueue.push({ id, file });
@@ -161,9 +163,17 @@ const Remover = {
         const preview = document.createElement('div');
         preview.className = 'result-preview';
 
-        const img = document.createElement('img');
-        img.src = origUrl;
-        img.alt = '';
+        const isVid = typeof TokenMedia !== 'undefined' && TokenMedia.isVideoFile(file);
+        const mediaEl = document.createElement(isVid ? 'video' : 'img');
+        mediaEl.src = origUrl;
+        if (isVid) {
+            mediaEl.muted = true;
+            mediaEl.loop = true;
+            mediaEl.autoplay = true;
+            mediaEl.playsInline = true;
+        } else {
+            mediaEl.alt = '';
+        }
 
         const overlay = document.createElement('div');
         overlay.className = 'loading-overlay';
@@ -177,7 +187,7 @@ const Remover = {
 
         overlay.appendChild(spinner);
         overlay.appendChild(label);
-        preview.appendChild(img);
+        preview.appendChild(mediaEl);
         preview.appendChild(overlay);
 
         const safeName = file.name.replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -235,24 +245,62 @@ const Remover = {
     },
     
     async processFile(id, file) {
-        const fd = new FormData();
-        fd.append('image', file);
-        fd.append('format', state.selectedFormat);
-        fd.append('quality', state.selectedQuality);
-        fd.append('edge_blur', AppConfig.edgeBlur !== undefined ? AppConfig.edgeBlur : 1);
-
         const gen = this._gen || 0;
-
         const start = Date.now();
+        const edgeBlur = AppConfig.edgeBlur !== undefined ? AppConfig.edgeBlur : 1;
 
         try {
-            const res = await fetch('/process', { method: 'POST', body: fd });
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({ error: 'Ошибка сервера' }));
-                throw new Error(errData.error || 'Ошибка');
+            let blob = null;
+            let outFormat = state.selectedFormat;
+            let isAnimatedResult = false;
+
+            if (typeof TokenMedia !== 'undefined' && TokenMedia.isAnimatedCandidate(file)) {
+                const probe = await TokenMedia.tryLoadAnimated(file).catch(() => null);
+                if (probe) {
+                    isAnimatedResult = true;
+                    outFormat = 'webm';
+                    const labelEl = $(id)?.querySelector('.loading-overlay div:last-child');
+                    try {
+                        const cutout = await TokenMedia.removeBackgroundFrames(probe, {
+                            edgeBlur: edgeBlur,
+                            onProgress: (done, total) => {
+                                if (labelEl) labelEl.textContent = `${done} / ${total}`;
+                            }
+                        });
+                        probe.cutoutFrames = cutout;
+                        probe.showingCutout = true;
+                        if (labelEl) labelEl.textContent = 'WebM…';
+                        blob = await TokenMedia.exportSessionToWebm(probe, {
+                            compression: state.selectedQuality || 90,
+                            hasAlpha: true,
+                            onProgress: (done, total) => {
+                                if (labelEl) labelEl.textContent = `WebM ${done} / ${total}`;
+                            },
+                            renderFrame: () => ({ canvas: probe.frameCanvas })
+                        });
+                    } finally {
+                        probe.dispose();
+                    }
+                } else if (TokenMedia.isVideoFile(file)) {
+                    throw new Error('Не удалось декодировать видео');
+                }
             }
 
-            const blob = await res.blob();
+            if (!blob) {
+                const fd = new FormData();
+                fd.append('image', file);
+                fd.append('format', state.selectedFormat);
+                fd.append('quality', state.selectedQuality);
+                fd.append('edge_blur', edgeBlur);
+
+                const res = await fetch('/process', { method: 'POST', body: fd });
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({ error: 'Ошибка сервера' }));
+                    throw new Error(errData.error || 'Ошибка');
+                }
+                blob = await res.blob();
+            }
+
             const time = ((Date.now() - start) / 1000).toFixed(1);
 
             // clearAll() во время запроса удалил карточку — результат не сохраняем.
@@ -265,10 +313,10 @@ const Remover = {
                 return;
             }
 
-            const ext = state.selectedFormat === 'jpg' ? 'jpg' : state.selectedFormat;
+            const ext = outFormat === 'jpg' ? 'jpg' : outFormat;
             const baseName = file.name.replace(/\.[^.]+$/, '');
             const newName = baseName + '.' + ext;
-            state.results.set(id, { blob, name: newName, format: state.selectedFormat });
+            state.results.set(id, { blob, name: newName, format: outFormat });
             if (state.results.size > 100) {
                 var oldestKey = state.results.keys().next().value;
                 state.results.delete(oldestKey);
@@ -285,16 +333,29 @@ const Remover = {
             const info = card.querySelector('.result-info');
 
             urlManager.revoke(id);
-            const imgUrl = urlManager.create(blob, id);
+            const resUrl = urlManager.create(blob, id);
 
-            const img = document.createElement('img');
-            img.src = imgUrl;
-            img.alt = '';
             preview.innerHTML = '';
-            preview.appendChild(img);
-            preview.onclick = () => this.showCompare(id);
-            preview.style.cursor = 'pointer';
-            preview.dataset.tooltip = 'Нажмите для сравнения';
+            if (isAnimatedResult) {
+                const vid = document.createElement('video');
+                vid.src = resUrl;
+                vid.autoplay = true;
+                vid.loop = true;
+                vid.muted = true;
+                vid.playsInline = true;
+                preview.appendChild(vid);
+                preview.onclick = null;
+                preview.style.cursor = 'default';
+                preview.removeAttribute('data-tooltip');
+            } else {
+                const img = document.createElement('img');
+                img.src = resUrl;
+                img.alt = '';
+                preview.appendChild(img);
+                preview.onclick = () => this.showCompare(id);
+                preview.style.cursor = 'pointer';
+                preview.dataset.tooltip = 'Нажмите для сравнения';
+            }
 
             // Имя файла идёт в атрибут data-tooltip в двойных кавычках —
             // экранируем и кавычки, иначе имя вида x" onmouseover="… внедрит обработчик
@@ -331,7 +392,7 @@ const Remover = {
             dlBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>`;
             dlBtn.onclick = () => this.downloadOne(id);
 
-            btnWrap.appendChild(copyBtn);
+            if (!isAnimatedResult) btnWrap.appendChild(copyBtn);
             btnWrap.appendChild(editBtn);
             btnWrap.appendChild(dlBtn);
             // Embed-режим: прямая отправка готового результата в Foundry

@@ -1247,9 +1247,9 @@ var TokenCanvas = {
         this.ctx.drawImage(this._zonesCanvas, 0, 0);
     },
 
-    renderForSave: function(withRing) {
+    renderForSave: function(withRing, forcedScale) {
         var scaleMode = state.saveScaleMode;
-        var usedScale = scaleMode === 'auto' ? this.detectUsedScale(withRing) : (parseInt(scaleMode) || 1);
+        var usedScale = forcedScale || (scaleMode === 'auto' ? this.detectUsedScale(withRing) : (parseInt(scaleMode) || 1));
 
         var qualityBase = state.saveQuality;
         var scale3Size = qualityBase * 3;
@@ -2092,6 +2092,108 @@ var TokenCanvas = {
     cleanupUserImage: function() {
         urlManager.revoke('userImage');
         state.userImageUrl = null;
+        if (state.media) {
+            state.media.dispose();
+            state.media = null;
+        }
+        state.isAnimated = false;
+        state.rawSourceFile = null;
+        if (typeof TokenMedia !== 'undefined') TokenMedia.updatePlayBar(null);
+    },
+
+    _onMediaFrame: function(media) {
+        if (!media || media !== state.media || media._disposed) return;
+        this._compositedImageDirty = true;
+        this._ccDirty = true;
+        this._shadowDirty = true;
+        this._zonesDirty = true;
+        if (this._isErasing) this._strokeFullDirty = true;
+        this.requestRender();
+        if (typeof TokenMedia !== 'undefined') TokenMedia.updatePlayBar(media);
+        var pSettings = $('portraitSettings');
+        if (pSettings && pSettings.classList.contains('open') && typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) {
+            PortraitGenerator.requestRender();
+        }
+    },
+
+    _finalizeLoadedImage: function(finalImg, mediaSession) {
+        state.userImage = finalImg;
+        state.userImageOriginal = finalImg;
+        state.userImageWithoutBg = null;
+        state.backgroundRemoved = false;
+        state.showingOriginal = false;
+        state.isAnimated = !!mediaSession;
+        state.media = mediaSession || null;
+
+        // Минимум масштаба — от размера источника: крупное изображение
+        // (4K и больше) должно уменьшаться сильнее фиксированных 10%
+        state.minScale = minScalePercent(Math.max(finalImg.width, finalImg.height)) / 100;
+        TokenEditor.updateRemoveBgButton();
+
+        // Каждый импорт вписывает изображение в зону экспорта CONFIG.OPEN_SCALE
+        this.fitToFrame(CONFIG.OPEN_SCALE);
+
+        this.updateScaleUI();
+        this.updateRotationUI();
+        this.resetView();
+
+        this.createMask();
+        this.createImageMask();
+        state.currentPreset = -1;
+        TokenPresets.updateButtons();
+        if (typeof TokenEditor !== 'undefined') {
+            var undoBar = $('undoBar');
+            if (undoBar) undoBar.style.display = 'flex';
+            TokenEditor._updateUndoButtons();
+        }
+        TokenHistory.init();
+        this.render();
+
+        if (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) {
+            PortraitGenerator.onImageLoaded();
+        }
+
+        var saveWithoutRing = $('saveWithoutRing');
+        var saveWithRing = $('saveWithRing');
+        if (saveWithoutRing) saveWithoutRing.disabled = false;
+        if (saveWithRing) saveWithRing.disabled = false;
+        if (window.syncZoomControlsState) syncZoomControlsState();
+
+        TokenEditor.updateNavState();
+
+        if (typeof TokenMedia !== 'undefined') {
+            TokenMedia.updatePlayBar(mediaSession || null);
+        }
+        if (mediaSession) {
+            var self = this;
+            mediaSession.startLoop(function(m) { self._onMediaFrame(m); });
+        }
+
+        // Предпросмотр коррекции масштаба в «Экспорте» зависит от картинки
+        if (typeof window.updateSaveHint === 'function') {
+            window.updateSaveHint(
+                $('saveQualitySelect') ? $('saveQualitySelect').value : 512,
+                $('saveScaleSelect') ? $('saveScaleSelect').value : 'auto');
+        }
+    },
+
+    _loadStaticImage: function(file, loadGen) {
+        var self = this;
+        urlManager.revoke('userImage-decode');
+        var decodeUrl = urlManager.create(file, 'userImage-decode');
+        var img = new Image();
+        img.onload = function() {
+            if (loadGen !== self._loadGen) return;
+            urlManager.revoke('userImage-decode');
+            var finalImg = self._capImage(img);
+            self._finalizeLoadedImage(finalImg, null);
+        };
+        img.onerror = function() {
+            if (loadGen !== self._loadGen) return;
+            urlManager.revoke('userImage-decode');
+            toast('Не удалось прочитать изображение', true);
+        };
+        img.src = decodeUrl;
     },
 
     loadImage: function(file, filePath) {
@@ -2102,6 +2204,13 @@ var TokenCanvas = {
 
         urlManager.revoke('userImage');
         state.userImageUrl = null;
+        if (state.media) {
+            state.media.dispose();
+            state.media = null;
+        }
+        state.isAnimated = false;
+        state.rawSourceFile = file || null;
+        if (typeof TokenMedia !== 'undefined') TokenMedia.updatePlayBar(null);
 
         // Прерываем идущий штрих ластика: точки и rAF-цикл не должны
         // «докапать» на маску нового изображения
@@ -2136,78 +2245,33 @@ var TokenCanvas = {
         var fileNameInput = $('tokenFileName');
         if (fileNameInput) fileNameInput.value = state.tokenFileName;
 
-        var self = this;
         // Токен поколения: декод предыдущего файла может быть ещё в полёте,
-        // когда началась новая загрузка. Отзыв его URL рвёт декод, но onload
-        // уже декодированной картинки может сработать позже и затереть state
-        // старым изображением — устаревшие колбэки отбрасываем по gen
+        // когда началась новая загрузка. Устаревшие колбэки отбрасываем по gen
         var loadGen = ++this._loadGen;
-        urlManager.revoke('userImage-decode');
-        var decodeUrl = urlManager.create(file, 'userImage-decode');
-        var img = new Image();
-        img.onload = function() {
-            if (loadGen !== self._loadGen) return;
-            urlManager.revoke('userImage-decode');
-            var finalImg = self._capImage(img);
 
-            state.userImage = finalImg;
-            state.userImageOriginal = finalImg;
-            state.userImageWithoutBg = null;
-            state.backgroundRemoved = false;
-            state.showingOriginal = false;
-            // Минимум масштаба — от размера источника: крупное изображение
-            // (4K и больше) должно уменьшаться сильнее фиксированных 10%
-            state.minScale = minScalePercent(Math.max(finalImg.width, finalImg.height)) / 100;
-            TokenEditor.updateRemoveBgButton();
+        if (typeof TokenMedia !== 'undefined' && TokenMedia.isAnimatedCandidate(file)) {
+            TokenMedia.tryLoadAnimated(file).then(function(media) {
+                if (loadGen !== self._loadGen) {
+                    if (media) media.dispose();
+                    return;
+                }
+                if (media) {
+                    self._finalizeLoadedImage(media.frameCanvas, media);
+                } else {
+                    self._loadStaticImage(file, loadGen);
+                }
+            }).catch(function(err) {
+                if (loadGen !== self._loadGen) return;
+                if (TokenMedia.isVideoFile(file)) {
+                    toast((err && err.message) || 'Не удалось открыть видео', true);
+                } else {
+                    self._loadStaticImage(file, loadGen);
+                }
+            });
+            return;
+        }
 
-            // Каждый импорт вписывает изображение в зону экспорта
-            // CONFIG.OPEN_SCALE (2 — центральные 2/3 кадра, пунктир ×2 на
-            // канвасе): источник растягивается или сжимается под неё;
-            // позиция — по центру, поворот — 0. «Сброс трансформации»
-            // в редакторе по-прежнему вписывает в весь кадр (×3)
-            self.fitToFrame(CONFIG.OPEN_SCALE);
-
-            self.updateScaleUI();
-            self.updateRotationUI();
-            self.resetView();
-
-            self.createMask();
-            self.createImageMask();
-            state.currentPreset = -1;
-            TokenPresets.updateButtons();
-            if (typeof TokenEditor !== 'undefined') {
-                var undoBar = $('undoBar');
-                if (undoBar) undoBar.style.display = 'flex';
-                TokenEditor._updateUndoButtons();
-            }
-            TokenHistory.init();
-            self.render();
-
-            if (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) {
-                PortraitGenerator.onImageLoaded();
-            }
-
-            var saveWithoutRing = $('saveWithoutRing');
-            var saveWithRing = $('saveWithRing');
-            if (saveWithoutRing) saveWithoutRing.disabled = false;
-            if (saveWithRing) saveWithRing.disabled = false;
-            if (window.syncZoomControlsState) syncZoomControlsState();
-
-            TokenEditor.updateNavState();
-
-            // Предпросмотр коррекции масштаба в «Экспорте» зависит от картинки
-            if (typeof window.updateSaveHint === 'function') {
-                window.updateSaveHint(
-                    $('saveQualitySelect') ? $('saveQualitySelect').value : 512,
-                    $('saveScaleSelect') ? $('saveScaleSelect').value : 'auto');
-            }
-        };
-        img.onerror = function() {
-            if (loadGen !== self._loadGen) return;
-            urlManager.revoke('userImage-decode');
-            toast('Не удалось прочитать изображение', true);
-        };
-        img.src = decodeUrl;
+        this._loadStaticImage(file, loadGen);
     },
 
     // Снимок композита ДО обрезки маской — источник слоя скрытых частей
@@ -2478,9 +2542,126 @@ var TokenCanvas = {
         toast('Ластик сброшен');
     },
 
+    detectAnimatedUsedScale: async function(withRing) {
+        if (state.saveScaleMode && state.saveScaleMode !== 'auto') {
+            return parseInt(state.saveScaleMode) || 1;
+        }
+        var media = state.media;
+        if (!media) return this.detectUsedScale(withRing);
+
+        var wasPlaying = media.playing;
+        var savedIdx = media.currentFrameIndex;
+        var savedTime = media.currentTimeMs;
+        media.stopLoop();
+        media.playing = false;
+
+        var maxScale = 1;
+        try {
+            var sched = TokenMedia.getExportSchedule(media);
+            var sampleCount = Math.min(6, sched.count);
+            for (var s = 0; s < sampleCount; s++) {
+                var idx = sampleCount <= 1 ? 0 : Math.round((s / (sampleCount - 1)) * (sched.count - 1));
+                if (sched.mode === 'frames') {
+                    media.currentFrameIndex = idx;
+                    media.drawCurrentToCanvas();
+                } else if (media.video) {
+                    await TokenMedia.seekVideoTo(media.video, (idx / Math.max(1, sched.count)) * sched.durSec);
+                    media.drawCurrentToCanvas();
+                }
+                this._compositedImageDirty = true;
+                this._ccDirty = true;
+                var sc = this.detectUsedScale(withRing);
+                if (sc > maxScale) maxScale = sc;
+                if (maxScale >= 3) break;
+            }
+        } finally {
+            media.currentFrameIndex = savedIdx;
+            media.currentTimeMs = savedTime;
+            if (media.isUsingFrames()) media.drawCurrentToCanvas();
+            else if (media.video) {
+                await TokenMedia.seekVideoTo(media.video, savedTime / 1000);
+                media.drawCurrentToCanvas();
+            }
+            this._compositedImageDirty = true;
+            this._ccDirty = true;
+            if (wasPlaying && !media.userPaused && !media._disposed) media.play(false);
+        }
+        return maxScale;
+    },
+
+    exportAnimatedBlob: async function(withRing) {
+        if (!state.isAnimated || !state.media) return null;
+        if (this._exportingVideo) {
+            toast('Экспорт уже выполняется');
+            return null;
+        }
+        this._exportingVideo = true;
+        var abortCtrl = new AbortController();
+        var self = this;
+        var media = state.media;
+        try {
+            var sched = TokenMedia.getExportSchedule(media);
+            TokenMedia.showProgressOverlay('Экспорт WebM…', 0, sched.count, abortCtrl);
+            var usedScale = await this.detectAnimatedUsedScale(withRing);
+            var comp = parseInt(AppConfig.saveSettings && AppConfig.saveSettings.compression) || 95;
+
+            var blob = await TokenMedia.exportSessionToWebm(media, {
+                compression: comp,
+                hasAlpha: true,
+                signal: abortCtrl.signal,
+                onBeforeFrame: function() {
+                    self._compositedImageDirty = true;
+                    self._ccDirty = true;
+                },
+                renderFrame: function() {
+                    return self.renderForSave(withRing, usedScale);
+                },
+                onProgress: function(done, total) {
+                    TokenMedia.showProgressOverlay('Экспорт WebM…', done, total, abortCtrl);
+                }
+            });
+            return {
+                blob: blob,
+                usedScale: usedScale,
+                finalSize: state.saveQuality * usedScale
+            };
+        } catch (err) {
+            if (err && err.name === 'AbortError') {
+                toast('Экспорт отменён');
+                return null;
+            }
+            toast('Ошибка экспорта WebM: ' + ((err && err.message) || err), true);
+            return null;
+        } finally {
+            this._exportingVideo = false;
+            TokenMedia.hideProgressOverlay();
+            this._compositedImageDirty = true;
+            this._ccDirty = true;
+            this._shadowDirty = true;
+            this.render();
+            TokenMedia.updatePlayBar(state.media);
+        }
+    },
+
+    saveAnimated: async function(withRing) {
+        var res = await this.exportAnimatedBlob(withRing);
+        if (!res || !res.blob) return;
+        var fileName = (state.tokenFileName.trim() || 'token') + '.webm';
+        if (state.quickSaveEnabled && state.quickSaveFolder) {
+            var ok = await saveToFolder(res.blob, fileName, state.quickSaveFolder);
+            if (ok) toast('Сохранено: ' + fileName);
+        } else {
+            await saveFileWithPicker(res.blob, fileName);
+        }
+    },
+
     save: function(withRing) {
         if (!state.userImage) {
             toast('Сначала загрузите изображение', true);
+            return;
+        }
+        if (state.isAnimated && state.media) {
+            this.saveAnimated(withRing);
             return;
         }
 

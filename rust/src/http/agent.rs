@@ -2317,7 +2317,7 @@ fn compute_mask_qa_from_s3(s3_img: &RgbaImage, has_ring: bool) -> (Value, Vec<St
                 }),
             ));
         }
-        islands.sort_by(|a, b| b.0.cmp(&a.0));
+        islands.sort_by_key(|a| std::cmp::Reverse(a.0));
         for (area, isl) in &islands {
             let b = &isl["bbox"];
             qa_warnings.push(format!(
@@ -4302,7 +4302,7 @@ pub async fn op_gui_sync(
                         ))
                     })
                     .collect();
-                list.sort_by(|a, b| b.0.cmp(&a.0));
+                list.sort_by_key(|a| std::cmp::Reverse(a.0));
                 list.into_iter().map(|(_, item)| item).collect()
             });
             ok_json(json!({
@@ -5244,7 +5244,7 @@ pub async fn op_qa_sheet(
                     items_meta.push(json!({ "index": g_idx, "name": label, "session_id": sid_opt }));
                 }
             }
-            "showcase" | _ => {
+            _ => {
                 let cols = 4u32;
                 let cell_w = 460u32;
                 let cell_h = 488u32;

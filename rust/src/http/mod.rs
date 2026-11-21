@@ -63,8 +63,12 @@ pub fn send_file_from_disk(path: &std::path::Path, mime: &str, cache: Option<&st
 pub fn mime_by_ext(ext: &str) -> &'static str {
     match ext.to_lowercase().as_str() {
         "png" => "image/png",
+        "apng" => "image/apng",
         "webp" => "image/webp",
         "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tiff" | "tif" => "image/tiff",
         "avif" => "image/avif",
         "ico" => "image/x-icon",
         "css" => "text/css",
@@ -73,6 +77,13 @@ pub fn mime_by_ext(ext: &str) -> &'static str {
         "json" => "application/json",
         "svg" => "image/svg+xml",
         "ogg" => "audio/ogg",
+        "webm" => "video/webm",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "avi" => "video/x-msvideo",
+        "ogv" => "video/ogg",
+        "mpeg" | "mpg" => "video/mpeg",
         _ => "application/octet-stream",
     }
 }
@@ -497,6 +508,7 @@ pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
         .route("/example", get(assets::example))
         .route("/process", post(process::process))
         .route("/convert", post(process::convert_file))
+        .route("/transcode_video", post(process::transcode_video))
         .route("/rings_list", get(rings::rings_list))
         .route("/delete_ring", post(rings::delete_ring))
         .route("/add_ring", post(rings::add_ring))
@@ -522,6 +534,6 @@ pub fn router(state: std::sync::Arc<crate::state::AppState>) -> axum::Router {
         .layer(axum::middleware::from_fn(guard_mw))
         .layer(axum::middleware::from_fn(options_mw))
         .layer(axum::middleware::from_fn(headers_mw))
-        .layer(axum::extract::DefaultBodyLimit::max(50 * 1024 * 1024));
+        .layer(axum::extract::DefaultBodyLimit::max(150 * 1024 * 1024));
     r.with_state(state)
 }

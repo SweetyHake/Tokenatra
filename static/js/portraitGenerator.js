@@ -246,12 +246,37 @@ const PortraitGenerator = {
     },
 
     getImage() {
+        if (state.isAnimated && state.media && !state.media._disposed) {
+            const media = state.media;
+            if (this.variant === 'cutout' && media.cutoutFrames && media.cutoutFrames.length) {
+                const idx = Math.max(0, Math.min(media.cutoutFrames.length - 1, media.currentFrameIndex));
+                return media.cutoutFrames[idx]?.bitmap || media.frameCanvas;
+            }
+            if (media.originalFrames && media.originalFrames.length) {
+                const idx = Math.max(0, Math.min(media.originalFrames.length - 1, media.currentFrameIndex));
+                return media.originalFrames[idx]?.bitmap || media.frameCanvas;
+            }
+            if (media.video && media.video.readyState >= 2) {
+                return media.video;
+            }
+            return media.frameCanvas;
+        }
         // Вариант «С фоном» — исходник; вырез ещё не сделан —
         // оба варианта показывают то, что есть
         if (this.variant === 'original') {
             return state.userImageOriginal || state.userImageWithoutBg || null;
         }
         return state.userImageWithoutBg || state.userImageOriginal || null;
+    },
+
+    _imageDims(img) {
+        if (!img) return { w: 0, h: 0 };
+        const w = img.videoWidth || img.naturalWidth || img.width || 0;
+        const h = img.videoHeight || img.naturalHeight || img.height || 0;
+        if (state.isAnimated && state.media && !state.media._disposed) {
+            return { w: state.media.width || w, h: state.media.height || h };
+        }
+        return { w, h };
     },
 
     render() {
@@ -270,11 +295,12 @@ const PortraitGenerator = {
             return;
         }
 
+        const dims = this._imageDims(img);
         this.ctx.save();
         this.ctx.translate(size / 2 + this.imageX, size / 2 + this.imageY);
         this.ctx.rotate(this.imageRotation * Math.PI / 180);
-        const w = img.width * this.imageScale;
-        const h = img.height * this.imageScale;
+        const w = dims.w * this.imageScale;
+        const h = dims.h * this.imageScale;
         this.ctx.drawImage(img, -w / 2, -h / 2, w, h);
         this.ctx.restore();
     },
@@ -283,7 +309,8 @@ const PortraitGenerator = {
     _autoSize() {
         const img = this.getImage();
         if (!img) return 1024;
-        const maxDim = Math.max(img.width, img.height);
+        const dims = this._imageDims(img);
+        const maxDim = Math.max(dims.w, dims.h);
         let best = this.SIZES[0];
         for (const s of this.SIZES) {
             if (Math.abs(s - maxDim) < Math.abs(best - maxDim)) best = s;
@@ -303,6 +330,7 @@ const PortraitGenerator = {
         const img = this.getImage();
         if (!img) return out;
 
+        const dims = this._imageDims(img);
         const ratio = quality / this.SIZE;
 
         ctx.save();
@@ -310,10 +338,10 @@ const PortraitGenerator = {
         ctx.rotate(this.imageRotation * Math.PI / 180);
         ctx.drawImage(
             img,
-            -img.width * this.imageScale * ratio / 2,
-            -img.height * this.imageScale * ratio / 2,
-            img.width * this.imageScale * ratio,
-            img.height * this.imageScale * ratio
+            -dims.w * this.imageScale * ratio / 2,
+            -dims.h * this.imageScale * ratio / 2,
+            dims.w * this.imageScale * ratio,
+            dims.h * this.imageScale * ratio
         );
         ctx.restore();
 
@@ -323,7 +351,8 @@ const PortraitGenerator = {
     resetTransform() {
         const img = this.getImage();
         if (img) {
-            const maxDim = Math.max(img.width, img.height);
+            const dims = this._imageDims(img);
+            const maxDim = Math.max(dims.w, dims.h);
             // Динамический минимум масштаба от размера источника: крупное
             // изображение (4K и больше) должно уменьшаться сильнее 10%
             this.minScalePct = minScalePercent(maxDim);
@@ -368,7 +397,61 @@ const PortraitGenerator = {
         toast('Папка выбрана: ' + path);
     },
 
+    async exportAnimatedBlob() {
+        if (!state.isAnimated || !state.media) return null;
+        if (TokenCanvas._exportingVideo) {
+            toast('Экспорт уже выполняется');
+            return null;
+        }
+        TokenCanvas._exportingVideo = true;
+        const abortCtrl = new AbortController();
+        const media = state.media;
+        const prevCutout = media.showingCutout;
+        const wantCutout = this.variant === 'cutout' && !!(media.cutoutFrames && media.cutoutFrames.length);
+        try {
+            media.showingCutout = wantCutout;
+            const sched = TokenMedia.getExportSchedule(media);
+            TokenMedia.showProgressOverlay('Экспорт WebM…', 0, sched.count, abortCtrl);
+            const comp = parseInt(AppConfig.saveSettings && AppConfig.saveSettings.compression) || 95;
+            return await TokenMedia.exportSessionToWebm(media, {
+                compression: comp,
+                hasAlpha: true,
+                signal: abortCtrl.signal,
+                renderFrame: () => ({ canvas: this.renderForSave() }),
+                onProgress: (done, total) => TokenMedia.showProgressOverlay('Экспорт WebM…', done, total, abortCtrl)
+            });
+        } catch (err) {
+            if (err && err.name === 'AbortError') {
+                toast('Экспорт отменён');
+                return null;
+            }
+            toast('Ошибка экспорта WebM: ' + ((err && err.message) || err), true);
+            return null;
+        } finally {
+            media.showingCutout = prevCutout;
+            media.drawCurrentToCanvas();
+            TokenCanvas._exportingVideo = false;
+            TokenMedia.hideProgressOverlay();
+            TokenCanvas._compositedImageDirty = true;
+            TokenCanvas._ccDirty = true;
+            TokenCanvas.render();
+            this.render();
+            TokenMedia.updatePlayBar(state.media);
+        }
+    },
+
     async save() {
+        if (state.isAnimated && state.media) {
+            const blob = await this.exportAnimatedBlob();
+            if (!blob) return;
+            const fileName = ((state.tokenFileName || 'token').trim() || 'token') + '.webm';
+            if (this.quickSaveEnabled && this.saveFolder) {
+                await saveToFolder(blob, fileName, this.saveFolder);
+            } else {
+                await saveFileWithPicker(blob, fileName);
+            }
+            return;
+        }
         const out = this.renderForSave();
         const fileName = ((state.tokenFileName || 'token').trim() || 'token') + '.webp';
         const blob = await new Promise(resolve => out.toBlob(resolve, 'image/webp', 0.95));

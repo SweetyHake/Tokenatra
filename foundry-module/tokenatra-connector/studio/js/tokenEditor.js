@@ -78,7 +78,9 @@ const TokenEditor = {
             tokenDropzone.ondrop = e => {
                 e.preventDefault();
                 tokenDropzone.style.borderColor = '';
-                const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+                const files = Array.from(e.dataTransfer.files).filter(f =>
+                    typeof TokenMedia !== 'undefined' ? TokenMedia.isSupportedFile(f) : f.type.startsWith('image/')
+                );
                 if (files.length > 0) TokenCanvas.loadImage(files[0]);
             };
         }
@@ -112,9 +114,11 @@ const TokenEditor = {
                 e.preventDefault();
                 dragDepth = 0;
                 canvasWrapper.classList.remove('drop-hover');
-                const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+                const files = Array.from(e.dataTransfer.files).filter(f =>
+                    typeof TokenMedia !== 'undefined' ? TokenMedia.isSupportedFile(f) : f.type.startsWith('image/')
+                );
                 if (files.length > 0) TokenCanvas.loadImage(files[0]);
-                else if (e.dataTransfer.files.length) toast(I18n.t('Перетащите файл изображения'), true);
+                else if (e.dataTransfer.files.length) toast(I18n.t('Перетащите изображение или видео'), true);
             });
         }
         // Защита: дроп мимо зон не должен открывать файл в самом вебвью
@@ -166,7 +170,8 @@ const TokenEditor = {
         const dz = $('tokenDropzone');
         if (!label || !dz) return;
         if (state.userImage) {
-            label.textContent = (state.tokenFileName || 'token') + '.webp';
+            const ext = state.isAnimated ? 'webm' : ((AppConfig.saveSettings && AppConfig.saveSettings.format) || 'webp');
+            label.textContent = (state.tokenFileName || 'token') + '.' + ext;
             dz.classList.add('has-image');
         } else {
             label.textContent = 'Файл не выбран';
@@ -298,6 +303,85 @@ const TokenEditor = {
         if (!btn) return;
         if (!state.userImageOriginal && !state.userImageWithoutBg) {
             toast('Сначала загрузите изображение', true); return;
+        }
+        if (state.isAnimated && state.media) {
+            const media = state.media;
+            if (state.backgroundRemoved && media.cutoutFrames && media.cutoutFrames.length) {
+                state.showingOriginal = !state.showingOriginal;
+                media.setShowingCutout(!state.showingOriginal);
+                if (state.showingOriginal) {
+                    btn.classList.remove('active');
+                    toast('Показан оригинал');
+                } else {
+                    btn.classList.add('active');
+                    toast('Показан без фона');
+                }
+                TokenCanvas._compositedImageDirty = true;
+                TokenCanvas._ccDirty = true;
+                TokenCanvas._shadowDirty = true;
+                TokenCanvas.render();
+                if (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) PortraitGenerator.render();
+                return;
+            }
+            if (this._removingAnimatedBg) return;
+            this._removingAnimatedBg = true;
+            btn.disabled = true;
+            const abortCtrl = new AbortController();
+            const sched = TokenMedia.getExportSchedule(media);
+            TokenMedia.showProgressOverlay('Удаление фона…', 0, sched.count, abortCtrl);
+            try {
+                const cutout = await TokenMedia.removeBackgroundFrames(media, {
+                    edgeBlur: AppConfig.edgeBlur !== undefined ? AppConfig.edgeBlur : 1,
+                    signal: abortCtrl.signal,
+                    onProgress: (done, total) => TokenMedia.showProgressOverlay('Удаление фона…', done, total, abortCtrl)
+                });
+                if (media !== state.media || media._disposed) {
+                    cutout.forEach(fr => { if (fr.bitmap && fr.bitmap.close) fr.bitmap.close(); });
+                    return;
+                }
+                media.cutoutFrames = cutout;
+                media.setShowingCutout(true);
+                state.userImageWithoutBg = media.frameCanvas;
+                state.userImage = media.frameCanvas;
+                state.backgroundRemoved = true;
+                state.showingOriginal = false;
+
+                if (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) {
+                    PortraitGenerator.setCutoutAvailable(true);
+                }
+                if (state.imageMaskCanvas) {
+                    TokenCanvas._invalidatePendingStrokes();
+                    const ctx = state.imageMaskCanvas.getContext('2d');
+                    ctx.clearRect(0, 0, state.imageMaskCanvas.width, state.imageMaskCanvas.height);
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(0, 0, state.imageMaskCanvas.width, state.imageMaskCanvas.height);
+                    TokenCanvas._pushMaskToWorker(false);
+                }
+                TokenCanvas._compositedImageDirty = true;
+                TokenCanvas._ccDirty = true;
+                TokenCanvas._shadowDirty = true;
+                TokenCanvas._zonesDirty = true;
+                TokenCanvas._imageBrushCache = null;
+
+                btn.classList.add('active');
+                this.updateRemoveBgButton();
+                TokenHistory.save();
+                TokenCanvas.render();
+                if (typeof PortraitGenerator !== 'undefined' && PortraitGenerator.canvas) PortraitGenerator.render();
+                toast('Фон удалён');
+            } catch (err) {
+                if (err && err.name === 'AbortError') {
+                    toast('Удаление фона отменено');
+                } else {
+                    toast('Ошибка: ' + ((err && err.message) || err), true);
+                }
+            } finally {
+                this._removingAnimatedBg = false;
+                btn.disabled = false;
+                TokenMedia.hideProgressOverlay();
+                TokenMedia.updatePlayBar(state.media);
+            }
+            return;
         }
         if (state.backgroundRemoved && state.userImageWithoutBg) {
             state.showingOriginal = !state.showingOriginal;
@@ -789,8 +873,9 @@ const TokenEditor = {
                 var tipTitle = isFoundryRingMode
                     ? I18n.t('Кольцо Foundry')
                     : I18n.t(withRing ? 'С кольцом' : 'Без кольца');
+                var animTag = state.isAnimated ? ' · WebM' : '';
                 el.querySelector('.save-preview-tip-label').textContent =
-                    tipTitle + ' (' + I18n.t('Масштаб:') + ' ' + (result.usedScale || 1) + ')';
+                    tipTitle + ' (' + I18n.t('Масштаб:') + ' ' + (result.usedScale || 1) + animTag + ')';
                 el.className = 'save-preview-tip show';
                 var rect = anchor.getBoundingClientRect();
                 var left = rect.left + rect.width / 2 - el.offsetWidth * zf / 2;
@@ -877,6 +962,13 @@ const TokenEditor = {
         const code = e.code;
         const hk = AppConfig.hotkeys;
         if (isInput) return;
+        if (code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && state.isAnimated && state.media) {
+            e.preventDefault();
+            if (state.media.playing) state.media.pause(true);
+            else state.media.play(true);
+            if (typeof TokenMedia !== 'undefined') TokenMedia.updatePlayBar(state.media);
+            return;
+        }
         if (hotkeyMatches(e, hk.undo)) { e.preventDefault(); TokenHistory.undo(); return; }
         if (hotkeyMatches(e, hk.redo)) { e.preventDefault(); TokenHistory.redo(); return; }
         const undoParsed = parseHotkey(hk.undo);

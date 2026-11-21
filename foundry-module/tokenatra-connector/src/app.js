@@ -293,12 +293,17 @@ export class TokenatraApp extends HandlebarsApplicationMixin(ApplicationV2) {
     this.#buildRestoreMsg(actor)
       .catch(() => null)
       .then(restoreMsg => {
-        return restoreMsg || actorArtDataUrl(actor).then(dataUrl => ({
-          type: 'tokenatra:load',
-          dataUrl,
-          filename: `${sanitizeFileName(actor.name || 'actor')}.png`,
-          sourcePath: actor.prototypeToken?.texture?.src || actor.img || null
-        }));
+        return restoreMsg || actorArtDataUrl(actor).then(dataUrl => {
+          const srcPath = actor.prototypeToken?.texture?.src || actor.img || '';
+          const extMatch = String(srcPath).split('?')[0].match(/\.([a-z0-9]+)$/i);
+          const ext = extMatch ? extMatch[1].toLowerCase() : 'png';
+          return {
+            type: 'tokenatra:load',
+            dataUrl,
+            filename: `${sanitizeFileName(actor.name || 'actor')}.${ext}`,
+            sourcePath: srcPath || null
+          };
+        });
       })
       .then(msg => {
         if (this.#frameReady) this.#postToFrame(msg);
@@ -460,7 +465,7 @@ export class TokenatraApp extends HandlebarsApplicationMixin(ApplicationV2) {
   #openFoundryPicker() {
     const target = String(game.settings.get(MODULE_ID, 'uploadTarget') || 'tokenatra/');
     const picker = new FilePicker({
-      type: 'image',
+      type: 'imagevideo',
       current: target,
       callback: async (path) => {
         try {

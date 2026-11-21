@@ -21,10 +21,9 @@ if not exist %ISCC% (
     exit /b 1
 )
 
-echo [2/3] Р’РµСЂСЃРёСЏ РёР· rust\src\consts.rs
-for /f "tokens=2 delims==" %%v in ('findstr /C:"pub const VERSION" "%ROOT%rust\src\consts.rs"') do set APPVER=%%~v
+echo [2/3] Version from rust\Cargo.toml
+for /f "tokens=2 delims==" %%v in ('findstr /R /C:"^version *=" "%ROOT%rust\Cargo.toml"') do set APPVER=%%~v
 set APPVER=%APPVER:"=%
-set APPVER=%APPVER:;=%
 set APPVER=%APPVER: =%
 echo   VERSION=%APPVER%
 

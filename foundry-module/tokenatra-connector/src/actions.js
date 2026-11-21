@@ -61,7 +61,7 @@ export async function fetchActorImageBlob(actor) {
   const src = actor?.img || actor?.prototypeToken?.texture?.src;
   if (!src) throw new Error(game.i18n.localize('TKC.ErrorNoArtwork'));
   const clean = String(src).split('?')[0].toLowerCase();
-  if (/\.(mp4|webm|mov|svg)$/.test(clean) || clean.includes('/icons/svg/')) {
+  if (/\.svg$/.test(clean) || clean.includes('/icons/svg/')) {
     throw new Error(game.i18n.localize('TKC.ErrorNotRaster'));
   }
   let res;
@@ -219,10 +219,14 @@ export async function applyExport(path, fileName, { contextActor = null, autoApp
     }
   };
 
+  const isVideoOut = /\.(webm|mp4|mov|ogv)$/i.test(String(path).split('?')[0]);
+  const previewHtml = isVideoOut
+    ? `<video src="${path}" autoplay loop muted playsinline style="max-width:100%;max-height:220px"></video>`
+    : `<img src="${path}" alt="">`;
   try {
     await Dialog.wait({
       title: game.i18n.localize('TKC.ExportDialogTitle'),
-      content: `<div class="tkc-export-dialog"><img src="${path}" alt=""><p>${sanitizeFileName(fileName)}</p></div>`,
+      content: `<div class="tkc-export-dialog">${previewHtml}<p>${sanitizeFileName(fileName)}</p></div>`,
       buttons,
       default: buttons.update ? 'update' : (buttons.create ? 'create' : 'copy')
     });
